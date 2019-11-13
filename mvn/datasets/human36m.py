@@ -18,8 +18,8 @@ class Human36MMultiViewDataset(Dataset):
         Human3.6M for multiview tasks.
     """
     def __init__(self,
-                 h36m_root='/Vol1/dbstore/datasets/Human3.6M/processed/',
-                 labels_path='/Vol1/dbstore/datasets/Human3.6M/extra/human36m-multiview-labels-SSDbboxes.npy',
+                 h36m_root='/media/hpc2_storage/ibulygin/h36m-fetch/processed/',
+                 labels_path='/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy',
                  pred_results_path=None,
                  image_shape=(256, 256),
                  train=False,
@@ -32,7 +32,8 @@ class Human36MMultiViewDataset(Dataset):
                  kind="mpii",
                  undistort_images=False,
                  ignore_cameras=[],
-                 crop=True
+                 crop=True,
+                 **kwargs
                  ):
         """
             h36m_root:
@@ -111,60 +112,76 @@ class Human36MMultiViewDataset(Dataset):
     def __len__(self):
         return len(self.labels['table'])
 
-    def __getitem__(self, idx):
-        sample = defaultdict(list) # return value
-        shot = self.labels['table'][idx]
-
+    def _unpack(self, shot, camera_idx, camera_name, return_image_path = False):
+        
         subject = self.labels['subject_names'][shot['subject_idx']]
         action = self.labels['action_names'][shot['action_idx']]
         frame_idx = shot['frame_idx']
+
+        # load bounding box
+        bbox = shot['bbox_by_camera_tlbr'][camera_idx][[1,0,3,2]] # TLBR to LTRB
+        bbox_height = bbox[2] - bbox[0]
+        if bbox_height == 0:
+            # convention: if the bbox is empty, then this view is missing
+            return None
+
+        # scale the bounding box
+        bbox = scale_bbox(bbox, self.scale_bbox)
+
+        # load image
+        image_path = os.path.join(
+            self.h36m_root, subject, action, 'imageSequence' + '-undistorted' * self.undistort_images,
+            camera_name, 'img_%06d.jpg' % (frame_idx+1))
+        assert os.path.isfile(image_path), '%s doesn\'t exist' % image_path
+        image = cv2.imread(image_path)
+        # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        # load camera
+        shot_camera = self.labels['cameras'][shot['subject_idx'], camera_idx]
+        retval_camera = Camera(shot_camera['R'], shot_camera['t'], shot_camera['K'], shot_camera['dist'], camera_name)
+
+        if self.crop:
+            # crop image
+            image = crop_image(image, bbox)
+            retval_camera.update_after_crop(bbox)
+
+        image_shape_before_resize = None    
+        if self.image_shape is not None:
+            # resize
+            image_shape_before_resize = image.shape[:2]
+            image = resize_image(image, self.image_shape)
+            retval_camera.update_after_resize(image_shape_before_resize, self.image_shape)
+
+        if self.norm_image:
+            image = normalize_image(image)
+
+        bbox = bbox + (1.0,) # TODO add real confidences
+
+        return image, bbox, retval_camera, image_shape_before_resize, image_path if return_image_path else None    
+
+    def __getitem__(self, idx):
+        sample = defaultdict(list) # return value
+        shot = self.labels['table'][idx]
 
         for camera_idx, camera_name in enumerate(self.labels['camera_names']):
             if camera_idx in self.ignore_cameras:
                 continue
 
-            # load bounding box
-            bbox = shot['bbox_by_camera_tlbr'][camera_idx][[1,0,3,2]] # TLBR to LTRB
-            bbox_height = bbox[2] - bbox[0]
-            if bbox_height == 0:
-                # convention: if the bbox is empty, then this view is missing
+            unpacked = self._unpack(shot, camera_idx, camera_name)
+            if unpacked is None:
                 continue
-
-            # scale the bounding box
-            bbox = scale_bbox(bbox, self.scale_bbox)
-
-            # load image
-            image_path = os.path.join(
-                self.h36m_root, subject, action, 'imageSequence' + '-undistorted' * self.undistort_images,
-                camera_name, 'img_%06d.jpg' % (frame_idx+1))
-            assert os.path.isfile(image_path), '%s doesn\'t exist' % image_path
-            image = cv2.imread(image_path)
-
-            # load camera
-            shot_camera = self.labels['cameras'][shot['subject_idx'], camera_idx]
-            retval_camera = Camera(shot_camera['R'], shot_camera['t'], shot_camera['K'], shot_camera['dist'], camera_name)
-
-            if self.crop:
-                # crop image
-                image = crop_image(image, bbox)
-                retval_camera.update_after_crop(bbox)
-
-            if self.image_shape is not None:
-                # resize
-                image_shape_before_resize = image.shape[:2]
-                image = resize_image(image, self.image_shape)
-                retval_camera.update_after_resize(image_shape_before_resize, self.image_shape)
-
-                sample['image_shapes_before_resize'].append(image_shape_before_resize)
-
-            if self.norm_image:
-                image = normalize_image(image)
+            else:        
+                image, bbox, retval_camera, image_shape_before_resize, image_path = unpacked    
 
             sample['images'].append(image)
+            sample['images_paths'].append(image_path)
             sample['detections'].append(bbox + (1.0,)) # TODO add real confidences
             sample['cameras'].append(retval_camera)
             sample['proj_matrices'].append(retval_camera.projection)
+            if image_shape_before_resize is not None:
+                sample['image_shapes_before_resize'].append(image_shape_before_resize)
 
+            
         # 3D keypoints
         # add dummy confidences
         sample['keypoints_3d'] = np.pad(
@@ -269,3 +286,205 @@ class Human36MMultiViewDataset(Dataset):
         }
 
         return result['per_pose_error_relative']['Average']['Average'], result
+
+
+
+
+class Human36MSingleViewDataset(Human36MMultiViewDataset):
+    """
+        Human3.6M setup for singleview tasks (kawrgs['dt'] = 1) and other ones that exploits temporal information (kawrgs['dt'] > 1)
+    """
+    def __init__(self,
+                 h36m_root='/media/hpc2_storage/ibulygin/h36m-fetch/processed/',
+                 labels_path='/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy',
+                 image_shape=(256, 256),
+                 train=False,
+                 test=False,
+                 retain_every_n_frames_in_test=1,
+                 with_damaged_actions=False,
+                 cuboid_side=2000.0,
+                 scale_bbox=1.5,
+                 norm_image=True,
+                 kind="mpii",
+                 undistort_images=False,
+                 ignore_cameras=[],
+                 crop=True,
+                 use_equidistant_dataset=True,
+                 **kwargs
+                 ):
+
+        # Human36MSingleViewDataset, self
+        super().__init__(h36m_root=h36m_root,
+                         labels_path=labels_path,
+                         image_shape=image_shape,
+                         train=train,
+                         test=test,
+                         retain_every_n_frames_in_test=1,
+                         with_damaged_actions=with_damaged_actions,
+                         cuboid_side=cuboid_side,
+                         scale_bbox=scale_bbox,
+                         norm_image=norm_image,
+                         kind=kind,
+                         undistort_images=undistort_images,
+                         ignore_cameras=ignore_cameras,
+                         crop=crop,
+                         use_equidistant_dataset = use_equidistant_dataset)
+
+
+        # how much consecutive frames in the sequence
+        self.dt = kwargs['dt']
+        self.keypoints_per_frame=kwargs['keypoints_per_frame']
+        self.pivot_type = kwargs['pivot_type']
+
+        assert self.dt==0 or self.dt//2 != 0, 'Only ODD `dt` is supported!'
+        # time dilation betweem frames
+        self.dilation = kwargs['dilation']
+
+        # optional, used train 278 line
+        self.singleview = True
+        self.evaluate_cameras = kwargs['evaluate_cameras']
+
+        if test:
+            self.iterate_cameras_names = [self.labels['camera_names'][camera_idx] for camera_idx in self.evaluate_cameras] 
+        else:    
+            self.iterate_cameras_names = [self.labels['camera_names'][camera_idx] for camera_idx in range(self.n_cameras) if camera_idx not in self.ignore_cameras]
+
+        assert all(self.labels['camera_names'][camera_idx] in self.iterate_cameras_names for camera_idx in self.evaluate_cameras), 'Before evaluation on the cameras, iteration over the cameras should be done'
+
+        n_frames = len(self.labels['table'])
+
+        # Let's call an i-th element in the middle of the CONSECUTIVE sequence [i-dt//2, i, i+dt//2], with length `dt`, as pivot.
+        # Initially, consider all frames as pivots
+        pivot_mask = np.ones((n_frames,),dtype=np.bool)
+        # the whole time period covered with dilation
+        self._time_period = self.dt + (self.dt-1)*(self.dilation)
+
+        if self.dt != 0:
+
+            frame_idx =  self.labels['table']['frame_idx']
+            
+            # Mark positions where the new scene or action is starting
+            change_mask = np.concatenate((frame_idx[:-1] > frame_idx[1:], [False]))
+
+            if pivot_type == 'intermediate':
+                # Shift that positions shuch that all non-pivot positions marked `True`
+                for _ in range((self._time_period//2)-1):
+                    change_mask[:-1] = change_mask[:-1] | change_mask[1:]
+                for _ in range(self._time_period//2):
+                    change_mask[1:] = change_mask[1:] | change_mask[:-1]
+                change_mask[:self._time_period//2] = True
+                change_mask[-(self._time_period//2):] = True
+
+            elif pivot_type == 'first':
+                # Shift that positions shuch that all non-pivot positions marked `True`
+                for _ in range(_time_period-1):
+                    change_mask[1:] = change_mask[1:] | change_mask[:-1]
+                change_mask[:_time_period-1] = True
+
+            else:
+                raise RuntimeError('Unknown `pivot_type` in config.dataset.<train/val>')   
+
+
+            pivot_mask = ~change_mask
+
+        self.pivot_mask = pivot_mask
+        self.pivot_indxs = np.arange(n_frames)[pivot_mask][::retain_every_n_frames_in_test]
+        self.n_sequences = len(self.pivot_indxs)
+
+    def __getitem__(self, idx):
+
+        camera_idx = idx // self.n_sequences
+        shot_idx = idx % self.n_sequences
+        pivot_idx = self.pivot_indxs[shot_idx]
+        camera_name = self.iterate_cameras_names[camera_idx]
+
+        sample = defaultdict(list) # return value
+
+        # take shots that are consecutive in time, with specified pivot
+        if pivot_type == 'intermediate':
+            iterator=range(-((self._time_period)//2), ((self._time_period)//2)+1, self.dilation+1)
+        elif pivot_type == 'first':
+            iterator=range(-(self._time_period-1),1)
+        else:
+            raise RuntimeError('Unknown `pivot_type` in config.dataset.<train/val>')       
+
+        for i in iterator:
+            
+            shot = self.labels['table'][pivot_idx+i]
+            unpacked = self._unpack(shot, camera_idx, camera_name)
+            if unpacked is None: # we need full sequence
+                return None
+            else:        
+                image, bbox, retval_camera, image_shape_before_resize, image_path = unpacked
+
+            if unpacked is not None:    
+                #collect data from different cameras
+                sample['images'].append(image)
+                sample['images_paths'].append(image_path)
+                sample['detections'].append(bbox) 
+                sample['cameras'].append(retval_camera)
+                sample['proj_matrices'].append(retval_camera.projection)
+
+                if self.keypoints_per_frame:
+                    keypoints = np.pad(shot['keypoints'][:self.num_keypoints],((0,0), (0,1)),
+                                             'constant', constant_values=1.0)
+                    sample['keypoints_3d'].append(keypoints)
+                    
+                if image_shape_before_resize is not None:
+                    sample['image_shapes_before_resize'].append(image_shape_before_resize)
+
+        if not self.keypoints_per_frame:         
+            pivot_shot = self.labels['table'][pivot_idx]
+            sample['keypoints_3d'] = np.pad(pivot_shot['keypoints'][:self.num_keypoints],((0,0), (0,1)),
+                                             'constant', constant_values=1.0)
+            # build cuboid
+            # base_point = sample['keypoints_3d'][6, :3]
+            # sides = np.array([self.cuboid_side, self.cuboid_side, self.cuboid_side])
+            # position = base_point - sides / 2
+            # sample['cuboids'] = volumetric.Cuboid3D(position, sides)
+            # save sample's index
+            
+        sample['indexes'] = idx
+        sample.default_factory = None
+        return sample
+
+
+    def __len__(self):
+        return self.n_sequences*len(self.iterate_cameras_names)
+
+    def evaluate(self, 
+                keypoints_3d_predicted,
+                result_indexes,
+                mask = None,
+                split_by_subject=False,
+                transfer_cmu_to_human36m=False, 
+                transfer_human36m_to_human36m=False):
+
+        original_labels = self.labels['table'].copy()
+
+        cameras_results  = {}
+        # get indexes corrsesponding to cameras we've iterated over 
+        # e.g. we've iterated over cameras [1,2], but in the `__getitem__` they've [0,1] `camera_idx` 
+        evaluate_cameras_indexes = [self.iterate_cameras_names.index(self.labels['camera_names'][camera_idx]) for camera_idx in self.evaluate_cameras]
+        for camera_index in evaluate_cameras_indexes:
+
+            # choose indexes corresponding to the camera
+            camera_mask = result_indexes // self.n_sequences == camera_index
+            indexes_for_camera = result_indexes[camera_mask]
+            shot_indexes_for_camera = indexes_for_camera % self.n_sequences
+
+            # to ensure proper evaluation in super().evaluate() below
+            self.labels['table'] = original_labels[self.pivot_indxs][shot_indexes_for_camera]
+
+            result = super(Human36MSingleViewDataset, self).evaluate(keypoints_3d_predicted[camera_mask],
+                                                                    mask = mask,
+                                                                    split_by_subject=split_by_subject,
+                                                                    transfer_cmu_to_human36m=transfer_cmu_to_human36m,
+                                                                    transfer_human36m_to_human36m=transfer_human36m_to_human36m)
+
+            cameras_results[camera_index] = result
+
+        # to ensure furtfer __getitem__ iterations
+        self.labels['table'] = original_labels
+
+        return cameras_results
