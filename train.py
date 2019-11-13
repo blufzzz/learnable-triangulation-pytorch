@@ -23,12 +23,15 @@ from torch.nn.parallel import DistributedDataParallel
 from tensorboardX import SummaryWriter
 
 from mvn.models.triangulation import RANSACTriangulationNet, AlgebraicTriangulationNet, VolumetricTriangulationNet
+from mvn.models.triangulation import RANSACTriangulationNet, AlgebraicTriangulationNet, VolumetricTriangulationNet
+from volumetric_temporal import VolumetricTemporalNet
 from mvn.models.loss import KeypointsMSELoss, KeypointsMSESmoothLoss, KeypointsMAELoss, KeypointsL2Loss, VolumetricCELoss
 
 from mvn.utils import img, multiview, op, vis, misc, cfg
 from mvn.datasets import human36m
 from mvn.datasets import utils as dataset_utils
 
+from IPython.core.debugger import set_trace
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -36,11 +39,12 @@ def parse_args():
     parser.add_argument("--config", type=str, required=True, help="Path, where config file is stored")
     parser.add_argument('--eval', action='store_true', help="If set, then only evaluation will be done")
     parser.add_argument('--eval_dataset', type=str, default='val', help="Dataset split on which evaluate. Can be 'train' and 'val'")
-
     parser.add_argument("--local_rank", type=int, help="Local rank of the process on the node")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
-
     parser.add_argument("--logdir", type=str, default="/Vol1/dbstore/datasets/k.iskakov/logs/multi-view-net-repr", help="Path, where logs will be stored")
+    parser.add_argument('--experiment_comment', default='', type=str)
+    parser.add_argument('--continue_training', default=False, type=bool)
+    parser.add_argument('--experiment_dir', type=str)
 
     args = parser.parse_args()
     return args
@@ -50,7 +54,15 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
     train_dataloader = None
     if is_train:
         # train
-        train_dataset = human36m.Human36MMultiViewDataset(
+
+        singleview_dataset = config.dataset.train.singleview if hasattr(config.dataset.train, 'singleview') else False
+        dataset_type = Human36MSingleViewDataset if singleview_dataset else Human36MMultiViewDataset
+        consecutive_frames = config.dataset.consecutive_frames if (hasattr(config.dataset, 'consecutive_frames') and singleview_dataset ) else False
+        dt = config.dataset.dt if consecutive_frames else 1
+        dilation = config.dataset.dilation if (consecutive_frames and hasattr(config.dataset, 'dilation')) else 0
+        keypoints_for_each_frame=config.dataset.train.keypoints_for_each_frame if hasattr(config.dataset.train, 'keypoints_for_each_frame') else False
+
+        train_dataset = human36m.dataset_type(
             h36m_root=config.dataset.train.h36m_root,
             pred_results_path=config.dataset.train.pred_results_path if hasattr(config.dataset.train, "pred_results_path") else None,
             train=True,
@@ -63,6 +75,11 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
             undistort_images=config.dataset.train.undistort_images,
             ignore_cameras=config.dataset.train.ignore_cameras if hasattr(config.dataset.train, "ignore_cameras") else [],
             crop=config.dataset.train.crop if hasattr(config.dataset.train, "crop") else True,
+            dt = dt,
+            dilation = dilation,
+            evaluate_cameras = config.dataset.train.evaluate_cameras if hasattr(config.dataset.train, "evaluate_cameras") else [0,1,2,3],
+            use_equidistant_dataset = use_equidistant_dataset,
+            keypoints_for_each_frame=keypoints_for_each_frame
         )
 
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if distributed_train else None
@@ -80,7 +97,14 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
         )
 
     # val
-    val_dataset = human36m.Human36MMultiViewDataset(
+    singleview_dataset = config.dataset.val.singleview if hasattr(config.dataset.val, 'singleview') else False
+    dataset_type = Human36MSingleViewDataset if singleview_dataset else Human36MMultiViewDataset
+    consecutive_frames = config.dataset.consecutive_frames if (hasattr(config.dataset, 'consecutive_frames') and singleview_dataset ) else False
+    dt = config.dataset.dt if consecutive_frames else 1
+    dilation = config.dataset.dilation if (consecutive_frames and hasattr(config.dataset, 'dilation')) else 0
+    keypoints_for_each_frame=config.dataset.val.keypoints_for_each_frame if hasattr(config.dataset.val, 'keypoints_for_each_frame') else False
+
+    val_dataset = human36m.dataset_type(
         h36m_root=config.dataset.val.h36m_root,
         pred_results_path=config.dataset.val.pred_results_path if hasattr(config.dataset.val, "pred_results_path") else None,
         train=False,
@@ -94,7 +118,12 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
         undistort_images=config.dataset.val.undistort_images,
         ignore_cameras=config.dataset.val.ignore_cameras if hasattr(config.dataset.val, "ignore_cameras") else [],
         crop=config.dataset.val.crop if hasattr(config.dataset.val, "crop") else True,
-    )
+        dt = dt,
+        dilation = dilation,
+        evaluate_cameras = config.dataset.train.evaluate_cameras if hasattr(config.dataset.train, "evaluate_cameras") else [0,1,2,3],
+        use_equidistant_dataset = use_equidistant_dataset,
+        keypoints_for_each_frame=keypoints_for_each_frame
+)
 
     val_dataloader = DataLoader(
         val_dataset,
@@ -127,7 +156,7 @@ def setup_experiment(config, model_name, is_train=True):
     else:
         experiment_title = model_name
 
-    experiment_title = prefix + experiment_title
+    experiment_title = config.experiment_comment if config.experiment_comment else prefix + experiment_title
 
     experiment_name = '{}@{}'.format(experiment_title, datetime.now().strftime("%d.%m.%Y-%H:%M:%S"))
     print("Experiment name: {}".format(experiment_name))
@@ -149,9 +178,28 @@ def setup_experiment(config, model_name, is_train=True):
     return experiment_dir, writer
 
 
-def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_total=0, is_train=True, caption='', master=False, experiment_dir=None, writer=None):
+def one_epoch(model,
+              criterion, 
+              opt, 
+              config, 
+              dataloader, 
+              device, 
+              epoch, 
+              n_iters_total=0, 
+              is_train=True, 
+              caption='', 
+              master=False, 
+              experiment_dir=None, 
+              writer=None, 
+              discriminator=None, 
+              opt_discr=None):
+
     name = "train" if is_train else "val"
     model_type = config.model.name
+
+    singleview_dataset = dataloader.dataset.singleview if hasattr(dataloader.dataset, 'singleview') else False
+    visualize_volumes = config.visualize_volumes if hasattr(config, 'visualize_volumes') else False
+    dump_weights = config.dump_weights if hasattr(config, 'dump_weights') else False
 
     if is_train:
         model.train()
@@ -198,23 +246,48 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
 
                 scale_keypoints_3d = config.opt.scale_keypoints_3d if hasattr(config.opt, "scale_keypoints_3d") else 1.0
 
-                # 1-view case
-                if n_views == 1:
-                    if config.kind == "human36m":
-                        base_joint = 6
-                    elif config.kind == "coco":
-                        base_joint = 11
-
-                    keypoints_3d_gt_transformed = keypoints_3d_gt.clone()
-                    keypoints_3d_gt_transformed[:, torch.arange(n_joints) != base_joint] -= keypoints_3d_gt_transformed[:, base_joint:base_joint + 1]
-                    keypoints_3d_gt = keypoints_3d_gt_transformed
-
-                    keypoints_3d_pred_transformed = keypoints_3d_pred.clone()
-                    keypoints_3d_pred_transformed[:, torch.arange(n_joints) != base_joint] -= keypoints_3d_pred_transformed[:, base_joint:base_joint + 1]
-                    keypoints_3d_pred = keypoints_3d_pred_transformed
+                # root-relative coordinates for    
+                # singleview dataset of multiview dataset with singleview setup
+                if singleview_dataset  or n_views == 1:
+                    if model.kind == "coco":
+                        base_point = (keypoints_3d_gt[:,11, :3] + keypoints_3d_gt[:,12, :3]) / 2.
+                    elif model.kind == "mpii":
+                        base_point = keypoints_3d_gt[:,6, :3]
+                    coord_volumes_batch = coord_volumes_batch - base_point.unsqueeze(1).unsqueeze(1).unsqueeze(1)
+                    keypoints_3d_pred, keypoints_3d_gt = op.root_centering(keypoints_3d_pred, keypoints_3d_gt, config.kind)
+    
 
                 # calculate loss
                 total_loss = 0.0
+
+                use_temporal_discriminator_loss  = config.opt.use_temporal_discriminator_loss if hasattr(config.opt, "use_temporal_discriminator_loss") else False  
+                if use_temporal_discriminator_loss and is_train:
+                    
+                    pred_keypoints_features = keypoints_to_features(keypoints_3d_batch_pred_list[1]).transpose(1,0)
+                    gt_keypoints_features = keypoints_to_features(keypoints_3d_batch_gt).transpose(1,0)
+                    all_keypoints = torch.stack([pred_keypoints_features, gt_keypoints_features],0)
+                    target = torch.cat([torch.zeros(1), torch.ones(1)]).long().cuda()
+                    predicted = discriminator(all_keypoints)
+                    keypoints_ce_criterion = nn.CrossEntropyLoss()
+
+                    discriminator_loss = keypoints_ce_criterion(predicted,target)
+                    generator_loss = -torch.log(predicted[:batch_size]).sum()
+
+                    metric_dict['discriminator_loss'].append(discriminator_loss.item())
+                    metric_dict['generator_loss'].append(generator_loss.item())
+
+                    weight = config.opt.temporal_discriminator_loss_weight if hasattr(config.opt, "temporal_discriminator_loss_weight") else 1.0
+                    total_loss += weight * generator_loss
+
+                    discr_freq = config.opt.train_discriminator_freq if hasattr(config.opt, "train_discriminator_freq") else 1
+                    if iter_i%discr_freq==0:
+
+                        opt_discr.zero_grad()
+                        discriminator_loss.backward()
+                        opt_discr.step()
+                        continue
+
+
                 loss = criterion(keypoints_3d_pred * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d, keypoints_3d_binary_validity_gt)
                 total_loss += loss
                 metric_dict[f'{config.opt.criterion}'].append(loss.item())
@@ -269,6 +342,10 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                     results['indexes'].append(batch['indexes'])
 
                 # plot visualization
+                if singleview_dataset or n_views == 1:
+                    keypoints_3d_batch_pred_list, keypoints_3d_batch_gt = op.root_centering(keypoints_3d_batch_pred_list, keypoints_3d_batch_gt, config.kind, inverse = True)    
+
+
                 if master:
                     if n_iters_total % config.vis_freq == 0:# or total_l2.item() > 500.0:
                         vis_kind = config.kind
@@ -306,7 +383,7 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
                                 writer.add_image(f"{name}/volumes/{batch_i}", volumes_vis.transpose(2, 0, 1), global_step=n_iters_total)
 
                     # dump weights to tensoboard
-                    if n_iters_total % config.vis_freq == 0:
+                    if n_iters_total % config.vis_freq == 0 and dump_weights:
                         for p_name, p in model.named_parameters():
                             try:
                                 writer.add_histogram(p_name, p.clone().cpu().data.numpy(), n_iters_total)
@@ -342,7 +419,23 @@ def one_epoch(model, criterion, opt, config, dataloader, device, epoch, n_iters_
             results['indexes'] = np.concatenate(results['indexes'])
 
             try:
-                scalar_metric, full_metric = dataloader.dataset.evaluate(results['keypoints_3d'])
+                if singleview_dataset:
+                    # we need to consider all cameras
+                    cameras_results = dataloader.dataset.evaluate(last_stage_results, result_indexes)
+                    # `dataset_metric` averaged by cameras 
+                    scalar_metric = []
+
+                    for camera_index in cameras_results.keys():
+                        camera_scalar = cameras_results[camera_index][0]
+                        scalar_metric.append(camera_scalar)
+                        if provide_dataset_metric_for_all_cameras:
+                            metric_dict['dataset_metric_{}_camera'.format(camera_index)].append(camera_scalar)
+
+                    scalar_metric = np.mean(scalar_metric)
+                    full_metric = cameras_results
+
+                else:
+                    scalar_metric, full_metric = dataloader.dataset.evaluate(results['keypoints_3d'])
             except Exception as e:
                 print("Failed to evaluate. Reason: ", e)
                 scalar_metric, full_metric = 0.0, {}
@@ -385,7 +478,7 @@ def init_distributed(args):
 def main(args):
     print("Number of available GPUs: {}".format(torch.cuda.device_count()))
 
-    is_distributed = init_distributed(args)
+    is_distributed = init_distributed(args) and config.distributed_train
     master = True
     if is_distributed and os.environ["RANK"]:
         master = int(os.environ["RANK"]) == 0
@@ -398,11 +491,13 @@ def main(args):
     # config
     config = cfg.load_config(args.config)
     config.opt.n_iters_per_epoch = config.opt.n_objects_per_epoch // config.opt.batch_size
+    config.experiment_comment = args.experiment_comment
 
     model = {
         "ransac": RANSACTriangulationNet,
         "alg": AlgebraicTriangulationNet,
-        "vol": VolumetricTriangulationNet
+        "vol": VolumetricTriangulationNet,
+        "vol_temporal": VolumetricTemporalNet
     }[config.model.name](config, device=device).to(device)
 
     if config.model.init_weights:
@@ -429,7 +524,7 @@ def main(args):
     # optimizer
     opt = None
     if not args.eval:
-        if config.model.name == "vol":
+        if config.model.name == "vol" or "vol_temporal":
             opt = torch.optim.Adam(
                 [{'params': model.backbone.parameters()},
                  {'params': model.process_features.parameters(), 'lr': config.opt.process_features_lr if hasattr(config.opt, "process_features_lr") else config.opt.lr},
@@ -440,6 +535,10 @@ def main(args):
         else:
             opt = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=config.opt.lr)
 
+    # use_temporal_discriminator_loss        
+    if config.opt.use_temporal_discriminator_loss:
+        discriminator = TemporalDiscriminator().to(device)
+        opt_discr = optim.Adam(discriminator.parameters(), lr=config.opt.discr_lr)
 
     # datasets
     print("Loading data...")

@@ -8,6 +8,16 @@ from mvn.utils.img import to_numpy, to_torch
 from mvn.utils import multiview
 
 
+def keypoints_to_features(keypoints):
+    
+    bs = keypoints.shape[0]
+    features=[]
+    for i in range(bs):
+        features.append(torch.cat([keypoints[0].view(-1), F.pdist(keypoints[i])]))
+
+    return torch.stack(features,0)
+
+
 def integrate_tensor_2d(heatmaps, softmax=True):
     """Applies softmax to heatmaps and integrates them to get their's "center of masses"
 
@@ -96,7 +106,7 @@ def integrate_tensor_3d_with_coordinates(volumes, coord_volumes, softmax=True):
     return coordinates, volumes
 
 
-def unproject_heatmaps(heatmaps, proj_matricies, coord_volumes, volume_aggregation_method='sum', vol_confidences=None):
+def unproject_heatmaps(heatmaps, proj_matricies, coord_volumes, volume_aggregation_method='sum', vol_confidences=None , timestep_multiplier = 1.0):
     device = heatmaps.device
     batch_size, n_views, n_joints, heatmap_shape = heatmaps.shape[0], heatmaps.shape[1], heatmaps.shape[2], tuple(heatmaps.shape[3:])
     volume_shape = coord_volumes.shape[1:4]
@@ -157,6 +167,11 @@ def unproject_heatmaps(heatmaps, proj_matricies, coord_volumes, volume_aggregati
             volume_batch_to_aggregate_softmin = volume_batch_to_aggregate_softmin.view(n_views, n_joints, *volume_shape)
 
             volume_batch[batch_i] = (volume_batch_to_aggregate * volume_batch_to_aggregate_softmin).sum(0)
+
+        elif volume_aggregation_method == 'no_aggregation':
+            # multiplier = timestep_multiplier if (view_i != n_views//2 and timestep_multiplier is not None) else 1.0
+            volume_batch.append(volume_batch_to_aggregate)
+
         else:
             raise ValueError("Unknown volume_aggregation_method: {}".format(volume_aggregation_method))
 

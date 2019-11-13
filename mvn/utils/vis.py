@@ -81,21 +81,32 @@ def fig_to_array(fig):
     return fig_image
 
 
-def visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_matricies_batch,
-                    keypoints_3d_batch_gt, keypoints_3d_batch_pred,
+def visualize_batch(images_batch,
+                    proj_matricies_batch,
+                    keypoints_3d_batch_gt,
+                    keypoints_3d_batch_pred,
                     kind="cmu",
                     cuboids_batch=None,
                     confidences_batch=None,
-                    batch_index=0, size=5,
+                    batch_index=0, 
+                    size=5,
                     max_n_cols=10,
-                    pred_kind=None
+                    pred_kind=None,
+                    heatmaps_batch = None,
+                    keypoints_2d_batch = None,
+                    keypoints_per_frame = False
                     ):
     if pred_kind is None:
         pred_kind = kind
 
-    n_views, n_joints = heatmaps_batch.shape[1], heatmaps_batch.shape[2]
+    batch_size, n_views = images_batch.shape[:2]
+    keypoints_shape = keypoints_3d_batch_gt.shape[-2:]
 
-    n_rows = 3
+    if keypoints_per_frame:
+        keypoints_3d_batch_gt = keypoints_3d_batch_gt.view(batch_size, n_views, *keypoints_shape)
+        keypoints_3d_batch_pred = keypoints_3d_batch_pred.view(batch_size, n_views, *keypoints_shape)
+
+    n_rows = 2
     n_rows = n_rows + 1 if keypoints_2d_batch is not None else n_rows
     n_rows = n_rows + 1 if cuboids_batch is not None else n_rows
     n_rows = n_rows + 1 if confidences_batch is not None else n_rows
@@ -115,10 +126,6 @@ def visualize_batch(images_batch, heatmaps_batch, keypoints_2d_batch, proj_matri
     images = image_batch_to_numpy(images_batch[batch_index])
     images = denormalize_image(images).astype(np.uint8)
     images = images[..., ::-1]  # bgr -> rgb
-
-    for view_i in range(n_cols):
-        axes[row_i][view_i].imshow(images[view_i])
-    row_i += 1
 
     # 2D keypoints (pred)
     if keypoints_2d_batch is not None:
