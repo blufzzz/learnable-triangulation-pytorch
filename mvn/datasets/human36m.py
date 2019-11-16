@@ -289,7 +289,6 @@ class Human36MMultiViewDataset(Dataset):
 
 
 
-
 class Human36MSingleViewDataset(Human36MMultiViewDataset):
     """
         Human3.6M setup for singleview tasks (kawrgs['dt'] = 1) and other ones that exploits temporal information (kawrgs['dt'] > 1)
@@ -366,7 +365,7 @@ class Human36MSingleViewDataset(Human36MMultiViewDataset):
             # Mark positions where the new scene or action is starting
             change_mask = np.concatenate((frame_idx[:-1] > frame_idx[1:], [False]))
 
-            if pivot_type == 'intermediate':
+            if self.pivot_type == 'intermediate':
                 # Shift that positions shuch that all non-pivot positions marked `True`
                 for _ in range((self._time_period//2)-1):
                     change_mask[:-1] = change_mask[:-1] | change_mask[1:]
@@ -375,7 +374,7 @@ class Human36MSingleViewDataset(Human36MMultiViewDataset):
                 change_mask[:self._time_period//2] = True
                 change_mask[-(self._time_period//2):] = True
 
-            elif pivot_type == 'first':
+            elif self.pivot_type == 'first':
                 # Shift that positions shuch that all non-pivot positions marked `True`
                 for _ in range(_time_period-1):
                     change_mask[1:] = change_mask[1:] | change_mask[:-1]
@@ -401,9 +400,9 @@ class Human36MSingleViewDataset(Human36MMultiViewDataset):
         sample = defaultdict(list) # return value
 
         # take shots that are consecutive in time, with specified pivot
-        if pivot_type == 'intermediate':
+        if self.pivot_type == 'intermediate':
             iterator=range(-((self._time_period)//2), ((self._time_period)//2)+1, self.dilation+1)
-        elif pivot_type == 'first':
+        elif self.pivot_type == 'first':
             iterator=range(-(self._time_period-1),1)
         else:
             raise RuntimeError('Unknown `pivot_type` in config.dataset.<train/val>')       

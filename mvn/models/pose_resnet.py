@@ -190,7 +190,8 @@ class PoseResNet(nn.Module):
                  num_deconv_kernels=(4, 4, 4),
                  final_conv_kernel=1,
                  alg_confidences=False,
-                 vol_confidences=False
+                 vol_confidences=False,
+                 return_heatmaps = False
                  ):
         super().__init__()
 
@@ -225,13 +226,14 @@ class PoseResNet(nn.Module):
             self.num_deconv_kernels,
         )
 
-        self.final_layer = nn.Conv2d(
-            in_channels=self.num_deconv_filters[-1],
-            out_channels=self.num_joints,
-            kernel_size=self.final_conv_kernel,
-            stride=1,
-            padding=1 if self.final_conv_kernel == 3 else 0
-        )
+        if return_heatmaps:
+            self.final_layer = nn.Conv2d(
+                in_channels=self.num_deconv_filters[-1],
+                out_channels=self.num_joints,
+                kernel_size=self.final_conv_kernel,
+                stride=1,
+                padding=1 if self.final_conv_kernel == 3 else 0
+            )
 
     def _make_layer(self, block, planes, blocks, stride=1):
         downsample = None
@@ -312,8 +314,10 @@ class PoseResNet(nn.Module):
         x = self.deconv_layers(x)
         features = x
 
-        x = self.final_layer(x)
-        heatmaps = x
+        heatmaps = None
+        if hasattr(self, "final_layer"):
+            x = self.final_layer(x)
+            heatmaps = x
 
         return heatmaps, features, alg_confidences, vol_confidences
 
@@ -332,7 +336,8 @@ def get_pose_net(config, device='cuda:0'):
         num_deconv_kernels=(4, 4, 4),
         final_conv_kernel=1,
         alg_confidences=config.alg_confidences,
-        vol_confidences=config.vol_confidences
+        vol_confidences=config.vol_confidences,
+        return_heatmaps=config.return_heatmaps
     )
 
     if config.init_weights:
@@ -349,23 +354,25 @@ def get_pose_net(config, device='cuda:0'):
         for k, v in pretrained_state_dict.items():
             if k.replace(prefix, "") in model_state_dict and v.shape == model_state_dict[k.replace(prefix, "")].shape:
                 new_pretrained_state_dict[k.replace(prefix, "")] = v
-            elif k.replace(prefix, "") == "final_layer.weight":  # TODO
-                print("Reiniting final layer filters:", k)
+            
+            if config.return_heatmaps:
+                elif k.replace(prefix, "") == "final_layer.weight":
+                    print("Reiniting final layer filters:", k)
 
-                o = torch.zeros_like(model_state_dict[k.replace(prefix, "")][:, :, :, :])
-                nn.init.xavier_uniform_(o)
-                n_filters = min(o.shape[0], v.shape[0])
-                o[:n_filters, :, :, :] = v[:n_filters, :, :, :]
+                    o = torch.zeros_like(model_state_dict[k.replace(prefix, "")][:, :, :, :])
+                    nn.init.xavier_uniform_(o)
+                    n_filters = min(o.shape[0], v.shape[0])
+                    o[:n_filters, :, :, :] = v[:n_filters, :, :, :]
 
-                new_pretrained_state_dict[k.replace(prefix, "")] = o
-            elif k.replace(prefix, "") == "final_layer.bias":
-                print("Reiniting final layer biases:", k)
-                o = torch.zeros_like(model_state_dict[k.replace(prefix, "")][:])
-                nn.init.zeros_(o)
-                n_filters = min(o.shape[0], v.shape[0])
-                o[:n_filters] = v[:n_filters]
+                    new_pretrained_state_dict[k.replace(prefix, "")] = o
+                elif k.replace(prefix, "") == "final_layer.bias":
+                    print("Reiniting final layer biases:", k)
+                    o = torch.zeros_like(model_state_dict[k.replace(prefix, "")][:])
+                    nn.init.zeros_(o)
+                    n_filters = min(o.shape[0], v.shape[0])
+                    o[:n_filters] = v[:n_filters]
 
-                new_pretrained_state_dict[k.replace(prefix, "")] = o
+                    new_pretrained_state_dict[k.replace(prefix, "")] = o
 
         not_inited_params = set(map(lambda x: x.replace(prefix, ""), pretrained_state_dict.keys())) - set(new_pretrained_state_dict.keys())
         if len(not_inited_params) > 0:

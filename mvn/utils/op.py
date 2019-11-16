@@ -8,6 +8,29 @@ from mvn.utils.img import to_numpy, to_torch
 from mvn.utils import multiview
 
 
+def root_centering(keypoints, kind, inverse = False):
+
+    '''
+    Makes other keypoints to become root relative, undoes it if inverse = True
+    '''    
+    if kind == "human36m":
+        base_joint = 6
+    elif kind == "coco":
+        base_joint = 11
+
+    n_joints = keypoints.shape[-2]
+
+    if inverse:
+        keypoints_transformed = keypoints.clone()
+        if inverse:
+            keypoints_transformed[..., torch.arange(n_joints) != base_joint,:] += keypoints_transformed[..., base_joint:base_joint + 1,:]
+        else:
+            keypoints_transformed[..., torch.arange(n_joints) != base_joint,:] -= keypoints_transformed[..., base_joint:base_joint + 1,:]
+        keypoints = keypoints_transformed
+
+    return keypoints
+
+
 def keypoints_to_features(keypoints):
     
     bs = keypoints.shape[0]
@@ -106,7 +129,7 @@ def integrate_tensor_3d_with_coordinates(volumes, coord_volumes, softmax=True):
     return coordinates, volumes
 
 
-def unproject_heatmaps(heatmaps, proj_matricies, coord_volumes, volume_aggregation_method='sum', vol_confidences=None , timestep_multiplier = 1.0):
+def unproject_heatmaps(heatmaps, proj_matricies, coord_volumes, volume_aggregation_method='sum', vol_confidences=None):
     device = heatmaps.device
     batch_size, n_views, n_joints, heatmap_shape = heatmaps.shape[0], heatmaps.shape[1], heatmaps.shape[2], tuple(heatmaps.shape[3:])
     volume_shape = coord_volumes.shape[1:4]
@@ -169,7 +192,6 @@ def unproject_heatmaps(heatmaps, proj_matricies, coord_volumes, volume_aggregati
             volume_batch[batch_i] = (volume_batch_to_aggregate * volume_batch_to_aggregate_softmin).sum(0)
 
         elif volume_aggregation_method == 'no_aggregation':
-            # multiplier = timestep_multiplier if (view_i != n_views//2 and timestep_multiplier is not None) else 1.0
             volume_batch.append(volume_batch_to_aggregate)
 
         else:

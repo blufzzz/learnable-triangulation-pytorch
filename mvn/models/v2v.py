@@ -4,6 +4,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+        
+
 class Basic3DBlock(nn.Module):
     def __init__(self, in_planes, out_planes, kernel_size):
         super(Basic3DBlock, self).__init__()
@@ -178,3 +180,46 @@ class V2VModel(nn.Module):
                 nn.init.xavier_normal_(m.weight)
                 # nn.init.normal_(m.weight, 0, 0.001)
                 nn.init.constant_(m.bias, 0)
+
+
+# TODO
+class V2VModelAdaIN(nn.Module)
+    def __init__(self, input_channels, output_channels):
+            super().__init__()
+
+            self.front_layers = nn.Sequential(
+                Basic3DBlock(input_channels, 16, 7),
+                Res3DBlock(16, 32),
+                Res3DBlock(32, 32),
+                Res3DBlock(32, 32)
+            )
+
+            self.encoder_decoder = EncoderDecorder()
+
+            self.back_layers = nn.Sequential(
+                Res3DBlock(32, 32),
+                Basic3DBlock(32, 32, 1),
+                Basic3DBlock(32, 32, 1),
+            )
+
+            self.output_layer = nn.Conv3d(32, output_channels, kernel_size=1, stride=1, padding=0)
+
+            self._initialize_weights()
+
+        def forward(self, x):
+            x = self.front_layers(x)
+            x = self.encoder_decoder(x)
+            x = self.back_layers(x)
+            x = self.output_layer(x)
+            return x
+
+        def _initialize_weights(self):
+            for m in self.modules():
+                if isinstance(m, nn.Conv3d):
+                    nn.init.xavier_normal_(m.weight)
+                    # nn.init.normal_(m.weight, 0, 0.001)
+                    nn.init.constant_(m.bias, 0)
+                elif isinstance(m, nn.ConvTranspose3d):
+                    nn.init.xavier_normal_(m.weight)
+                    # nn.init.normal_(m.weight, 0, 0.001)
+                    nn.init.constant_(m.bias, 0)

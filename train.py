@@ -24,7 +24,7 @@ from tensorboardX import SummaryWriter
 
 from mvn.models.triangulation import RANSACTriangulationNet, AlgebraicTriangulationNet, VolumetricTriangulationNet
 from mvn.models.triangulation import RANSACTriangulationNet, AlgebraicTriangulationNet, VolumetricTriangulationNet
-from volumetric_temporal import VolumetricTemporalNet
+from volumetric_temporal import VolumetricTemporalNet, VolumetricAdaINConditionedTemporalNet
 from mvn.models.loss import KeypointsMSELoss, KeypointsMSESmoothLoss, KeypointsMAELoss, KeypointsL2Loss, VolumetricCELoss
 
 from mvn.utils import img, multiview, op, vis, misc, cfg
@@ -199,7 +199,11 @@ def one_epoch(model,
 
     singleview_dataset = dataloader.dataset.singleview if hasattr(dataloader.dataset, 'singleview') else False
     visualize_volumes = config.visualize_volumes if hasattr(config, 'visualize_volumes') else False
+    visualize_heatmaps = config.visualize_heatmaps if hasattr(config, 'visualize_heatmaps') else False
+    use_heatmaps = config.backbone.return_heatmaps if hasattr(config.backbone, 'return_heatmaps') else False
+    use_temporal_discriminator_loss  = config.opt.use_temporal_discriminator_loss if hasattr(config.opt, "use_temporal_discriminator_loss") else False  
     dump_weights = config.dump_weights if hasattr(config, 'dump_weights') else False
+
 
     if is_train:
         model.train()
@@ -237,7 +241,7 @@ def one_epoch(model,
                 if model_type == "alg" or model_type == "ransac":
                     keypoints_3d_pred, keypoints_2d_pred, heatmaps_pred, confidences_pred = model(images_batch, proj_matricies_batch, batch)
                 elif model_type == "vol":
-                    keypoints_3d_pred, heatmaps_pred, volumes_pred, confidences_pred, cuboids_pred, coord_volumes_pred, base_points_pred = model(images_batch, proj_matricies_batch, batch)
+                    keypoints_3d_pred, heatmaps_pred, volumes_pred, confidences_pred, cuboids_pred, coord_volumes_pred, base_points_pred = model(images_batch, batch)
 
                 batch_size, n_views, image_shape = images_batch.shape[0], images_batch.shape[1], tuple(images_batch.shape[3:])
                 n_joints = keypoints_3d_pred[0].shape[1]
@@ -254,15 +258,13 @@ def one_epoch(model,
                     elif model.kind == "mpii":
                         base_point = keypoints_3d_gt[:,6, :3]
                     coord_volumes_batch = coord_volumes_batch - base_point.unsqueeze(1).unsqueeze(1).unsqueeze(1)
-                    keypoints_3d_pred, keypoints_3d_gt = op.root_centering(keypoints_3d_pred, keypoints_3d_gt, config.kind)
-    
+                    keypoints_3d_gt = op.root_centering(keypoints_3d_gt, config.kind)
+                    keypoints_3d_pred = op.root_centering(keypoints_3d_pred, config.kind)
 
                 # calculate loss
                 total_loss = 0.0
 
-                use_temporal_discriminator_loss  = config.opt.use_temporal_discriminator_loss if hasattr(config.opt, "use_temporal_discriminator_loss") else False  
                 if use_temporal_discriminator_loss and is_train:
-                    
                     pred_keypoints_features = keypoints_to_features(keypoints_3d_batch_pred_list[1]).transpose(1,0)
                     gt_keypoints_features = keypoints_to_features(keypoints_3d_batch_gt).transpose(1,0)
                     all_keypoints = torch.stack([pred_keypoints_features, gt_keypoints_features],0)
@@ -343,11 +345,12 @@ def one_epoch(model,
 
                 # plot visualization
                 if singleview_dataset or n_views == 1:
-                    keypoints_3d_batch_pred_list, keypoints_3d_batch_gt = op.root_centering(keypoints_3d_batch_pred_list, keypoints_3d_batch_gt, config.kind, inverse = True)    
+                    keypoints_3d_gt = op.root_centering(keypoints_3d_gt, config.kind, inverse=True)
+                    keypoints_3d_pred = op.root_centering(keypoints_3d_pred, config.kind, inverse=True)    
 
 
                 if master:
-                    if n_iters_total % config.vis_freq == 0:# or total_l2.item() > 500.0:
+                    if n_iters_total % config.vis_freq == 0:
                         vis_kind = config.kind
                         if (config.transfer_cmu_to_human36m if hasattr(config, "transfer_cmu_to_human36m") else False):
                             vis_kind = "coco"
@@ -364,15 +367,16 @@ def one_epoch(model,
                             )
                             writer.add_image(f"{name}/keypoints_vis/{batch_i}", keypoints_vis.transpose(2, 0, 1), global_step=n_iters_total)
 
-                            heatmaps_vis = vis.visualize_heatmaps(
-                                images_batch, heatmaps_pred,
-                                kind=vis_kind,
-                                batch_index=batch_i, size=5,
-                                max_n_rows=10, max_n_cols=10
-                            )
-                            writer.add_image(f"{name}/heatmaps/{batch_i}", heatmaps_vis.transpose(2, 0, 1), global_step=n_iters_total)
+                            if visualize_heatmaps and use_heatmaps:    
+                                heatmaps_vis = vis.visualize_heatmaps(
+                                    images_batch, heatmaps_pred,
+                                    kind=vis_kind,
+                                    batch_index=batch_i, size=5,
+                                    max_n_rows=10, max_n_cols=10
+                                )
+                                writer.add_image(f"{name}/heatmaps/{batch_i}", heatmaps_vis.transpose(2, 0, 1), global_step=n_iters_total)
 
-                            if model_type == "vol":
+                            if model_type == "vol" and visualize_volumes:
                                 volumes_vis = vis.visualize_volumes(
                                     images_batch, volumes_pred, proj_matricies_batch,
                                     kind=vis_kind,
@@ -421,7 +425,7 @@ def one_epoch(model,
             try:
                 if singleview_dataset:
                     # we need to consider all cameras
-                    cameras_results = dataloader.dataset.evaluate(last_stage_results, result_indexes)
+                    cameras_results = dataloader.dataset.evaluate(results['keypoints_3d'], results['indexes'])
                     # `dataset_metric` averaged by cameras 
                     scalar_metric = []
 
@@ -497,7 +501,8 @@ def main(args):
         "ransac": RANSACTriangulationNet,
         "alg": AlgebraicTriangulationNet,
         "vol": VolumetricTriangulationNet,
-        "vol_temporal": VolumetricTemporalNet
+        "vol_temporal": VolumetricTemporalNet,
+        "vol_temporal_adain":VolumetricAdaINConditionedTemporalNet
     }[config.model.name](config, device=device).to(device)
 
     if config.model.init_weights:
@@ -567,7 +572,11 @@ def main(args):
                 checkpoint_dir = os.path.join(experiment_dir, "checkpoints", "{:04}".format(epoch))
                 os.makedirs(checkpoint_dir, exist_ok=True)
 
-                torch.save(model.state_dict(), os.path.join(checkpoint_dir, "weights.pth"))
+                dict_to_save = {'model_state': model.state_dict(),'opt_state' : opt.state_dict()}
+                if config.opt.use_temporal_discriminator_loss:
+                    dict_to_save['discr_state'] = discriminator.state_dict()
+                    dict_to_save['discr_opt_state'] = opt_discr.state_dict()
+                torch.save(dict_to_save, os.path.join(checkpoint_dir, "weights.pth"))
 
             print(f"{n_iters_total_train} iters done.")
     else:

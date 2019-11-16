@@ -242,7 +242,7 @@ class VolumetricTriangulationNet(nn.Module):
         self.volume_net = V2VModel(32, self.num_joints)
 
 
-    def forward(self, images, proj_matricies, batch):
+    def forward(self, images, batch):
         device = images.device
         batch_size, n_views = images.shape[:2]
 
