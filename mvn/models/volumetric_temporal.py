@@ -14,7 +14,7 @@ from mvn.utils import img
 from mvn.utils import misc
 from mvn.utils import volumetric
 from mvn.models.v2v import V2VModel, V2VRegModel, V2VModel_2, V2VModel_btnck, V2VModel_configured, V2VModel2Stages, V2VModel_3
-from mvn.models.temporal import TemporalModel
+from mvn.models.temporal import TemporalModel, Seq2VecModel
 
 from IPython.core.debugger import set_trace
 
@@ -287,12 +287,16 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
         # modules
         self.backbone = pose_resnet.get_pose_net(config.backbone)
         self.return_heatmaps = config.backbone.return_heatmaps if hasattr(config.backbone, 'return_heatmaps') else False  
+        self.features_dim = config.features_dim if hasattr(config, 'features_dim') else 32
+        self.style_vector_dim = config.style_vector_dim if hasattr(config, 'style_vector_dim') else 512
 
         self.process_features = nn.Sequential(
             nn.Conv2d(256, 32, 1)
         )
 
-        self.volume_net = V2VModel(32, self.num_joints)
+        self.volume_net = V2VModelAdaIN(32, self.num_joints)
+        self.process_features_sequence = Seq2VecModel(self.features_dim, self.style_vector_dim)
+        self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2) for i in range(27)])
         
     def get_coord_volumes(self, 
                             cuboid_side, 
@@ -365,19 +369,12 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
         # forward backbone
         heatmaps, features, _, vol_confidences = self.backbone(images_batch)
 
-        # reshape back
-        images_batch = images_batch.view(batch_size, dt, *images_batch.shape[1:])
-        heatmaps = heatmaps.view(batch_size, dt, *heatmaps.shape[1:]) if self.return_heatmaps else heatmaps
-        features = features.view(batch_size, dt, *features.shape[1:])
-
+        # reshape back and take only last view (pivot)
+        images_batch = images_batch.view(batch_size, dt, *images_batch.shape[1:])[:,-1,...]
+        heatmaps = heatmaps.view(batch_size, dt, *heatmaps.shape[1:])[:,-1,...] if self.return_heatmaps else heatmaps
+        
         # calcualte shapes
-        image_shape, features_shape = tuple(images_batch.shape[3:]), tuple(features.shape[3:])
-
-        if self.volume_aggregation_method.startswith('conf'):
-            vol_confidences = vol_confidences.view(batch_size, dt, *vol_confidences.shape[1:])
-            # norm vol confidences
-            if self.volume_aggregation_method == 'conf_norm':
-                vol_confidences = vol_confidences / vol_confidences.sum(dim=1, keepdim=True)
+        image_shape, features_shape = images_batch.shape[3:]
 
         # change camera intrinsics
         new_cameras = deepcopy(batch['cameras'])
@@ -392,10 +389,10 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
         proj_matricies_batch = proj_matricies_batch.float().to(device)
         
         # process features before lifting to volume
-        features = features.view(-1, *features.shape[2:])
         features = self.process_features(features)
-        features = features.unsqueeze(1) # [bs*dt, 1, features_shape]
-                    
+        features = features.view(batch_size, dt, *features.shape[1:])
+        style_vector = self.process_features_sequence(features)
+                            
         if self.use_precalculated_pelvis:
             tri_keypoints_3d = torch.from_numpy(np.array(batch['pred_keypoints_3d'])).type(torch.float).to(device)
 
@@ -446,12 +443,9 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
                                         vol_confidences=vol_confidences
                                         )
 
-        # cat along view dimension
-        if self.volume_aggregation_method == 'no_aggregation':        
-            volumes = torch.cat(volumes, 0)  
-
         # inference
-        volumes = self.volume_net(volumes)
+        adain_params = [for affine_map(style_vector) in self.affine_mappings]
+        volumes = self.volume_net(volumes, adain_params)
         # integral 3d
         vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes_final * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
 
