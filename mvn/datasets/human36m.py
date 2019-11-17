@@ -12,14 +12,16 @@ from mvn.utils.multiview import Camera
 from mvn.utils.img import get_square_bbox, resize_image, crop_image, normalize_image, scale_bbox
 from mvn.utils import volumetric
 
+from IPython.core.debugger import set_trace
+
 
 class Human36MMultiViewDataset(Dataset):
     """
         Human3.6M for multiview tasks.
     """
     def __init__(self,
-                 h36m_root='/media/hpc2_storage/ibulygin/h36m-fetch/processed/',
-                 labels_path='/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy',
+                 h36m_root="/media/hpc2_storage/ibulygin/h36m-fetch/processed",
+                 labels_path="/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy",
                  pred_results_path=None,
                  image_shape=(256, 256),
                  train=False,
@@ -130,8 +132,13 @@ class Human36MMultiViewDataset(Dataset):
 
         # load image
         image_path = os.path.join(
-            self.h36m_root, subject, action, 'imageSequence' + '-undistorted' * self.undistort_images,
-            camera_name, 'img_%06d.jpg' % (frame_idx+1))
+            self.h36m_root,
+            subject,
+            action, 
+            'imageSequence' + '-undistorted' * self.undistort_images,
+            camera_name, 
+            'img_%06d.jpg' % (frame_idx+1))
+        
         assert os.path.isfile(image_path), '%s doesn\'t exist' % image_path
         image = cv2.imread(image_path)
         # image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)

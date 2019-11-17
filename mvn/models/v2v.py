@@ -2,7 +2,7 @@
 
 import torch.nn as nn
 import torch.nn.functional as F
-        
+ 
 
 class Basic3DBlock(nn.Module):
     def __init__(self, in_planes, out_planes, kernel_size):
@@ -49,7 +49,6 @@ class Pool3DBlock(nn.Module):
 
     def forward(self, x):
         return F.max_pool3d(x, kernel_size=self.pool_size, stride=self.pool_size)
-
 
 class Upsample3DBlock(nn.Module):
     def __init__(self, in_planes, out_planes, kernel_size, stride):
@@ -203,11 +202,11 @@ class V2VModelAdaIN(nn.Module):
 
             self._initialize_weights()
 
-    def forward(self, x):
-        x = self.front_layers(x)
-        x = self.encoder_decoder(x)
-        x = self.back_layers(x)
-        x = self.output_layer(x)
+    def forward(self, x, adain_params):
+        x = self.front_layers(x, adain_params)
+        x = self.encoder_decoder(x, adain_params)
+        x = self.back_layers(x, adain_params)
+        x = self.output_layer(x, adain_params)
         return x
 
     def _initialize_weights(self):

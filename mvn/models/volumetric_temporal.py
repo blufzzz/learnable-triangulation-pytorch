@@ -263,8 +263,6 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
         self.cuboid_multiplier = config.cuboid_multiplier if hasattr(config, "cuboid_multiplier") else 1.0
         self.rotation = config.rotation if hasattr(config, "rotation") else False
 
-        self.process_frames_independently = config.process_frames_independently if hasattr(config, 'process_frames_independently') else False
-
         self.kind = config.kind
 
         self.use_precalculated_pelvis = config.use_precalculated_pelvis if hasattr(config, "use_precalculated_pelvis") else False
@@ -272,7 +270,7 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
         self.use_volumetric_pelvis = config.use_volumetric_pelvis if hasattr(config, "use_volumetric_pelvis") else False
         self.use_separate_v2v_for_basepoint = config.use_separate_v2v_for_basepoint if hasattr(config, "use_separate_v2v_for_basepoint") else False
 
-        assert self.use_precalculated_pelvis or self.use_volumetric_pelvis or self.use_gt_pelvis, 'One of the flags "use_<...>_pelvis" should be True'
+        assert self.use_precalculated_pelvis or self.use_gt_pelvis, 'One of the flags "use_<...>_pelvis" should be True'
 
         # heatmap
         self.heatmap_softmax = config.heatmap_softmax
@@ -371,10 +369,9 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
 
         # reshape back and take only last view (pivot)
         images_batch = images_batch.view(batch_size, dt, *images_batch.shape[1:])[:,-1,...]
-        heatmaps = heatmaps.view(batch_size, dt, *heatmaps.shape[1:])[:,-1,...] if self.return_heatmaps else heatmaps
         
         # calcualte shapes
-        image_shape, features_shape = images_batch.shape[3:]
+        image_shape, features_shape = images_batch.shape[3:], features.shape[1:]
 
         # change camera intrinsics
         new_cameras = deepcopy(batch['cameras'])
@@ -387,11 +384,13 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
                                             for camera_batch in new_cameras], dim=0).transpose(1, 0)  # shape (batch_size, dt, 3, 4)
 
         proj_matricies_batch = proj_matricies_batch.float().to(device)
-        
+        proj_matricies_batch = proj_matricies_batch[:,-1,...].unsqueeze(1)
+
         # process features before lifting to volume
-        features = self.process_features(features)
-        features = features.view(batch_size, dt, *features.shape[1:])
-        style_vector = self.process_features_sequence(features)
+        features = features.view(batch_size, dt, *features_shape)
+        pivot_features = features[:,-1,...].unsqueeze(1)
+        features = features[:,:-1,...]
+        style_vector = self.process_features_sequence(features) # [batch_size, 512]
                             
         if self.use_precalculated_pelvis:
             tri_keypoints_3d = torch.from_numpy(np.array(batch['pred_keypoints_3d'])).type(torch.float).to(device)
@@ -399,44 +398,17 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
         elif self.use_gt_pelvis:
             tri_keypoints_3d = torch.from_numpy(np.array(batch['keypoints_3d'])).type(torch.float).to(device)
 
-        elif self.use_volumetric_pelvis:
-
-            coord_volumes, _, _ = self.get_coord_volumes(self.cuboid_side*self.cuboid_multiplier,
-                                                      self.volume_size, 
-                                                      device, 
-                                                      batch_size = batch_size,
-                                                      dt = dt
-                                                      )
-
-            volumes = op.unproject_heatmaps(features,
-                                              proj_matricies_batch, 
-                                              coord_volumes, 
-                                              volume_aggregation_method=self.volume_aggregation_method, 
-                                              vol_confidences=vol_confidences)
-        
-            # set True to save intermediate result                                                
-            volumes_final = self.volume_net_basepoint(volumes) if self.use_separate_v2v_for_basepoint else self.volume_net(volumes)
-            
-            tri_keypoints_3d, volumes_final = op.integrate_tensor_3d_with_coordinates(volumes_final * self.volume_multiplier, 
-                                                                        coord_volumes, 
-                                                                        softmax=self.volume_softmax)
-        
         else:
             raise RuntimeError('In absence of precalculated pelvis or gt pelvis, self.use_volumetric_pelvis should be True') 
        
         # amend coord_volumes position                                                         
         coord_volumes, cuboids, base_points = self.get_coord_volumes(self.cuboid_side,
-                                                        self.volume_size, 
-                                                        device,
-                                                        keypoints=tri_keypoints_3d
-                                                        )
-
-        if self.process_frames_independently:
-            coord_volumes = coord_volumes.view(-1, *coord_volumes.shape[-4:])
-            proj_matricies_batch = proj_matricies_batch.view(-1, 1, *proj_matricies_batch.shape[-2:])
-                   
+                                                                        self.volume_size, 
+                                                                        device,
+                                                                        keypoints=tri_keypoints_3d
+                                                                        )
         # lift each featuremap to distinct volume and aggregate 
-        volumes = op.unproject_heatmaps(features,  
+        volumes = op.unproject_heatmaps(pivot_features,  
                                         proj_matricies_batch, 
                                         coord_volumes, 
                                         volume_aggregation_method=self.volume_aggregation_method,
