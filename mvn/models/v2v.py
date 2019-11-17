@@ -3,6 +3,35 @@
 import torch.nn as nn
 import torch.nn.functional as F
  
+class AdaIN(nn.Module):
+    def __init__(self):
+        super(AdaIN, self).__init__()
+    def forward(self, features, params):
+        # [batch_size, C, D1, D2, D3]
+        size = features.size()
+        batch_size, C = features.shape[:2]
+        features_mean = features.view(batch_size, C, -1).mean(-1).view(batch_size, C,1,1,1)
+        features_std = features.view(batch_size, C, -1).std(-1).view(batch_size, C,1,1,1)
+        norm_features = (features - features_mean) / features_std
+        return norm_features * params[0] + params[1]
+
+
+class Basic3DBlockAdaIN(nn.Module):
+    def __init__(self, in_planes, out_planes, kernel_size):
+        super(Basic3DBlockAdaIN, self).__init__()
+        self.conv =  nn.Conv3d(in_planes, out_planes, 
+                                kernel_size=kernel_size, 
+                                stride=1, 
+                                padding=((kernel_size-1)//2))
+        self,adain = nn.AdaIN()
+        self.activation = nn.ReLU(True)
+
+    def forward(self, x, params):
+        x = self.conv(x)
+        x = self.adain(x,params)
+        x = self.activation(x)
+        return x
+
 
 class Basic3DBlock(nn.Module):
     def __init__(self, in_planes, out_planes, kernel_size):
@@ -40,6 +69,35 @@ class Res3DBlock(nn.Module):
         res = self.res_branch(x)
         skip = self.skip_con(x)
         return F.relu(res + skip, True)
+
+
+class Res3DBlockAdaIN(nn.Module):
+    def __init__(self, in_planes, out_planes):
+        super(Res3DBlockAdaIN, self).__init__()
+        self.res_conv1 = nn.Conv3d(in_planes, out_planes, kernel_size=3, stride=1, padding=1)
+        self.res_adain1 = AdaIN()
+        self.res_conv2 = nn.Conv3d(out_planes, out_planes, kernel_size=3, stride=1, padding=1)
+        self.res_adain2 = AdaIN()
+        self.activation = nn.ReLU(True)
+
+        self.use_skip_con = ( in_planes != out_planes)
+        if self.use_skip_con:
+            self.skip_con_conv = nn.Conv3d(in_planes, out_planes, kernel_size=1, stride=1, padding=0)
+            self.skip_con_adain = AdaIN()
+
+    def forward(self, x, params):
+        
+        x = self.res_conv1(x)
+        x = self.res_adain1(x)
+        x = self.activation(x)
+        x = self.res_conv2(x)
+        x = self.res_adain2(x)
+
+        if self.use_skip_con:
+            skip = skip_con_conv(x)
+            skip = self.skip_con_adain(skip)
+
+        return F.relu(res + skip, True)        
 
 
 class Pool3DBlock(nn.Module):
