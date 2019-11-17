@@ -296,6 +296,7 @@ class Human36MSingleViewDataset(Human36MMultiViewDataset):
     def __init__(self,
                  h36m_root='/media/hpc2_storage/ibulygin/h36m-fetch/processed/',
                  labels_path='/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy',
+                 pred_results_path=None,
                  image_shape=(256, 256),
                  train=False,
                  test=False,
@@ -315,6 +316,7 @@ class Human36MSingleViewDataset(Human36MMultiViewDataset):
         # Human36MSingleViewDataset, self
         super().__init__(h36m_root=h36m_root,
                          labels_path=labels_path,
+                         pred_results_path=None,
                          image_shape=image_shape,
                          train=train,
                          test=test,

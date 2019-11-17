@@ -24,11 +24,11 @@ from tensorboardX import SummaryWriter
 
 from mvn.models.triangulation import RANSACTriangulationNet, AlgebraicTriangulationNet, VolumetricTriangulationNet
 from mvn.models.triangulation import RANSACTriangulationNet, AlgebraicTriangulationNet, VolumetricTriangulationNet
-from volumetric_temporal import VolumetricTemporalNet, VolumetricAdaINConditionedTemporalNet
+from mvn.models.volumetric_temporal import VolumetricTemporalNet, VolumetricAdaINConditionedTemporalNet
 from mvn.models.loss import KeypointsMSELoss, KeypointsMSESmoothLoss, KeypointsMAELoss, KeypointsL2Loss, VolumetricCELoss
 
 from mvn.utils import img, multiview, op, vis, misc, cfg
-from mvn.datasets import human36m
+from mvn.datasets.human36m import Human36MSingleViewDataset, Human36MMultiViewDataset
 from mvn.datasets import utils as dataset_utils
 
 from IPython.core.debugger import set_trace
@@ -52,6 +52,7 @@ def parse_args():
 
 def setup_human36m_dataloaders(config, is_train, distributed_train):
     train_dataloader = None
+    train_sampler = None
     if is_train:
         # train
 
@@ -62,7 +63,7 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
         dilation = config.dataset.dilation if (consecutive_frames and hasattr(config.dataset, 'dilation')) else 0
         keypoints_for_each_frame=config.dataset.train.keypoints_for_each_frame if hasattr(config.dataset.train, 'keypoints_for_each_frame') else False
 
-        train_dataset = human36m.dataset_type(
+        train_dataset = dataset_type(
             h36m_root=config.dataset.train.h36m_root,
             pred_results_path=config.dataset.train.pred_results_path if hasattr(config.dataset.train, "pred_results_path") else None,
             train=True,
@@ -78,9 +79,8 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
             dt = dt,
             dilation = dilation,
             evaluate_cameras = config.dataset.train.evaluate_cameras if hasattr(config.dataset.train, "evaluate_cameras") else [0,1,2,3],
-            use_equidistant_dataset = use_equidistant_dataset,
             keypoints_for_each_frame=keypoints_for_each_frame
-        )
+            )
 
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if distributed_train else None
 
@@ -94,7 +94,7 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
                                                      max_n_views=config.dataset.train.max_n_views),
             num_workers=config.dataset.train.num_workers,
             worker_init_fn=dataset_utils.worker_init_fn
-        )
+            )
 
     # val
     singleview_dataset = config.dataset.val.singleview if hasattr(config.dataset.val, 'singleview') else False
@@ -104,7 +104,7 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
     dilation = config.dataset.dilation if (consecutive_frames and hasattr(config.dataset, 'dilation')) else 0
     keypoints_for_each_frame=config.dataset.val.keypoints_for_each_frame if hasattr(config.dataset.val, 'keypoints_for_each_frame') else False
 
-    val_dataset = human36m.dataset_type(
+    val_dataset = dataset_type(
         h36m_root=config.dataset.val.h36m_root,
         pred_results_path=config.dataset.val.pred_results_path if hasattr(config.dataset.val, "pred_results_path") else None,
         train=False,
@@ -121,9 +121,8 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
         dt = dt,
         dilation = dilation,
         evaluate_cameras = config.dataset.train.evaluate_cameras if hasattr(config.dataset.train, "evaluate_cameras") else [0,1,2,3],
-        use_equidistant_dataset = use_equidistant_dataset,
         keypoints_for_each_frame=keypoints_for_each_frame
-)
+        )
 
     val_dataloader = DataLoader(
         val_dataset,
@@ -134,7 +133,7 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
                                                  max_n_views=config.dataset.val.max_n_views),
         num_workers=config.dataset.val.num_workers,
         worker_init_fn=dataset_utils.worker_init_fn
-    )
+        )
 
     return train_dataloader, val_dataloader, train_sampler
 

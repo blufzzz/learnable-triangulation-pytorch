@@ -356,7 +356,7 @@ def get_pose_net(config, device='cuda:0'):
                 new_pretrained_state_dict[k.replace(prefix, "")] = v
             
             if config.return_heatmaps:
-                elif k.replace(prefix, "") == "final_layer.weight":
+                if k.replace(prefix, "") == "final_layer.weight":
                     print("Reiniting final layer filters:", k)
 
                     o = torch.zeros_like(model_state_dict[k.replace(prefix, "")][:, :, :, :])
@@ -365,7 +365,7 @@ def get_pose_net(config, device='cuda:0'):
                     o[:n_filters, :, :, :] = v[:n_filters, :, :, :]
 
                     new_pretrained_state_dict[k.replace(prefix, "")] = o
-                elif k.replace(prefix, "") == "final_layer.bias":
+                if k.replace(prefix, "") == "final_layer.bias":
                     print("Reiniting final layer biases:", k)
                     o = torch.zeros_like(model_state_dict[k.replace(prefix, "")][:])
                     nn.init.zeros_(o)

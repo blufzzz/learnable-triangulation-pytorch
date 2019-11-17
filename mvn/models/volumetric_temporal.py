@@ -6,15 +6,15 @@ import random
 import torch
 from torch import nn
 
-from pose.models import hg, pose_resnet
+from mvn.models import pose_resnet
 
 from mvn.utils import op
 from mvn.utils import multiview
 from mvn.utils import img
 from mvn.utils import misc
 from mvn.utils import volumetric
-from mvn.models.v2v import V2VModel, V2VRegModel, V2VModel_2, V2VModel_btnck, V2VModel_configured, V2VModel2Stages, V2VModel_3
-from mvn.models.temporal import TemporalModel, Seq2VecModel
+from mvn.models.v2v import V2VModel
+from mvn.models.temporal import Seq2VecModel
 
 from IPython.core.debugger import set_trace
 
@@ -58,7 +58,7 @@ class VolumetricTemporalNet(nn.Module):
         # transfer
         self.transfer_cmu_to_human36m = config.transfer_cmu_to_human36m if hasattr(config, "transfer_cmu_to_human36m") else False
 
-         if self.volume_aggregation_method.startswith('conf'):
+        if self.volume_aggregation_method.startswith('conf'):
             config.model.backbone.vol_confidences = True
 
         # modules
@@ -281,7 +281,7 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
         # transfer
         self.transfer_cmu_to_human36m = config.transfer_cmu_to_human36m if hasattr(config, "transfer_cmu_to_human36m") else False
 
-         if self.volume_aggregation_method.startswith('conf'):
+        if self.volume_aggregation_method.startswith('conf'):
             config.model.backbone.vol_confidences = True
 
         # modules
@@ -444,7 +444,7 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
                                         )
 
         # inference
-        adain_params = [for affine_map(style_vector) in self.affine_mappings]
+        adain_params = [affine_map(style_vector) for affine_map in self.affine_mappings]
         volumes = self.volume_net(volumes, adain_params)
         # integral 3d
         vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes_final * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)

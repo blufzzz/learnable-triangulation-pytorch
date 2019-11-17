@@ -180,8 +180,7 @@ class V2VModel(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
 
-# TODO
-class V2VModelAdaIN(nn.Module)
+class V2VModelAdaIN(nn.Module):
     def __init__(self, input_channels, output_channels):
             super().__init__()
 
@@ -204,20 +203,20 @@ class V2VModelAdaIN(nn.Module)
 
             self._initialize_weights()
 
-        def forward(self, x):
-            x = self.front_layers(x)
-            x = self.encoder_decoder(x)
-            x = self.back_layers(x)
-            x = self.output_layer(x)
-            return x
+    def forward(self, x):
+        x = self.front_layers(x)
+        x = self.encoder_decoder(x)
+        x = self.back_layers(x)
+        x = self.output_layer(x)
+        return x
 
-        def _initialize_weights(self):
-            for m in self.modules():
-                if isinstance(m, nn.Conv3d):
-                    nn.init.xavier_normal_(m.weight)
-                    # nn.init.normal_(m.weight, 0, 0.001)
-                    nn.init.constant_(m.bias, 0)
-                elif isinstance(m, nn.ConvTranspose3d):
-                    nn.init.xavier_normal_(m.weight)
-                    # nn.init.normal_(m.weight, 0, 0.001)
-                    nn.init.constant_(m.bias, 0)
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv3d):
+                nn.init.xavier_normal_(m.weight)
+                # nn.init.normal_(m.weight, 0, 0.001)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.ConvTranspose3d):
+                nn.init.xavier_normal_(m.weight)
+                # nn.init.normal_(m.weight, 0, 0.001)
+                nn.init.constant_(m.bias, 0)
