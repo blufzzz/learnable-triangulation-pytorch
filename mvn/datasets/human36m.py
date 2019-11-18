@@ -72,8 +72,8 @@ class Human36MMultiViewDataset(Dataset):
 
         self.labels = np.load(labels_path, allow_pickle=True).item()
 
-        n_cameras = len(self.labels['camera_names'])
-        assert all(camera_idx in range(n_cameras) for camera_idx in self.ignore_cameras)
+        self.n_cameras = len(self.labels['camera_names'])
+        assert all(camera_idx in range(self.n_cameras) for camera_idx in self.ignore_cameras)
 
         train_subjects = ['S1', 'S5', 'S6', 'S7', 'S8']
         test_subjects = ['S9', 'S11']
@@ -341,12 +341,13 @@ class Human36MSingleViewDataset(Human36MMultiViewDataset):
 
         # how much consecutive frames in the sequence
         self.dt = kwargs['dt']
+        # time dilation betweem frames
+        self.dilation = kwargs['dilation']
         self.keypoints_per_frame=kwargs['keypoints_per_frame']
         self.pivot_type = kwargs['pivot_type']
 
-        assert self.dt==0 or self.dt//2 != 0, 'Only ODD `dt` is supported!'
-        # time dilation betweem frames
-        self.dilation = kwargs['dilation']
+        if self.pivot_type == 'intermediate':
+            assert self.dt==0 or self.dt//2 != 0, 'Only ODD `dt` is supported for intermediate pivot!'
 
         # optional, used train 278 line
         self.singleview = True
@@ -385,9 +386,9 @@ class Human36MSingleViewDataset(Human36MMultiViewDataset):
 
             elif self.pivot_type == 'first':
                 # Shift that positions shuch that all non-pivot positions marked `True`
-                for _ in range(_time_period-1):
+                for _ in range(self._time_period-1):
                     change_mask[1:] = change_mask[1:] | change_mask[:-1]
-                change_mask[:_time_period-1] = True
+                change_mask[:self._time_period-1] = True
 
             else:
                 raise RuntimeError('Unknown `pivot_type` in config.dataset.<train/val>')   

@@ -134,7 +134,7 @@ def unproject_heatmaps(heatmaps, proj_matricies, coord_volumes, volume_aggregati
     batch_size, n_views, n_joints, heatmap_shape = heatmaps.shape[0], heatmaps.shape[1], heatmaps.shape[2], tuple(heatmaps.shape[3:])
     volume_shape = coord_volumes.shape[1:4]
 
-    volume_batch = torch.zeros(batch_size, n_joints, *volume_shape, device=device)
+    volume_batch = [] if volume_aggregation_method=='no_aggregation' else torch.zeros(batch_size, n_joints, *volume_shape, device=device)
 
     # TODO: speed up this this loop
     for batch_i in range(batch_size):

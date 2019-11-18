@@ -58,10 +58,10 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
 
         singleview_dataset = config.dataset.train.singleview if hasattr(config.dataset.train, 'singleview') else False
         dataset_type = Human36MSingleViewDataset if singleview_dataset else Human36MMultiViewDataset
-        consecutive_frames = config.dataset.consecutive_frames if (hasattr(config.dataset, 'consecutive_frames') and singleview_dataset ) else False
-        dt = config.dataset.dt if consecutive_frames else 1
-        dilation = config.dataset.dilation if (consecutive_frames and hasattr(config.dataset, 'dilation')) else 0
-        keypoints_for_each_frame=config.dataset.train.keypoints_for_each_frame if hasattr(config.dataset.train, 'keypoints_for_each_frame') else False
+        dt = config.dataset.train.dt if hasattr(config.dataset.train, "dt") else 1
+        dilation = config.dataset.train.dilation if hasattr(config.dataset.train, 'dilation') else 0
+        keypoints_per_frame=config.dataset.train.keypoints_per_frame if hasattr(config.dataset.train, 'keypoints_per_frame') else False
+        pivot_type = config.dataset.train.pivot_type if hasattr(config.dataset.train, "pivot_type") else 'first'
 
         train_dataset = dataset_type(
             h36m_root=config.dataset.train.h36m_root,
@@ -79,7 +79,8 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
             dt = dt,
             dilation = dilation,
             evaluate_cameras = config.dataset.train.evaluate_cameras if hasattr(config.dataset.train, "evaluate_cameras") else [0,1,2,3],
-            keypoints_for_each_frame=keypoints_for_each_frame
+            keypoints_per_frame=keypoints_per_frame,
+            pivot_type = pivot_type
             )
 
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if distributed_train else None
@@ -99,10 +100,11 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
     # val
     singleview_dataset = config.dataset.val.singleview if hasattr(config.dataset.val, 'singleview') else False
     dataset_type = Human36MSingleViewDataset if singleview_dataset else Human36MMultiViewDataset
-    consecutive_frames = config.dataset.consecutive_frames if (hasattr(config.dataset, 'consecutive_frames') and singleview_dataset ) else False
-    dt = config.dataset.dt if consecutive_frames else 1
-    dilation = config.dataset.dilation if (consecutive_frames and hasattr(config.dataset, 'dilation')) else 0
-    keypoints_for_each_frame=config.dataset.val.keypoints_for_each_frame if hasattr(config.dataset.val, 'keypoints_for_each_frame') else False
+    dt = config.dataset.val.dt if hasattr(config.dataset.val, "dt") else 1
+    dilation = config.dataset.val.dilation if  hasattr(config.dataset.val, 'dilation') else 0
+    keypoints_per_frame=config.dataset.val.keypoints_per_frame if hasattr(config.dataset.val, 'keypoints_per_frame') else False
+    pivot_type = config.dataset.val.pivot_type if hasattr(config.dataset.val, "pivot_type") else 'first'
+
 
     val_dataset = dataset_type(
         h36m_root=config.dataset.val.h36m_root,
@@ -121,7 +123,8 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
         dt = dt,
         dilation = dilation,
         evaluate_cameras = config.dataset.train.evaluate_cameras if hasattr(config.dataset.train, "evaluate_cameras") else [0,1,2,3],
-        keypoints_for_each_frame=keypoints_for_each_frame
+        keypoints_per_frame=keypoints_per_frame,
+        pivot_type = pivot_type
         )
 
     val_dataloader = DataLoader(

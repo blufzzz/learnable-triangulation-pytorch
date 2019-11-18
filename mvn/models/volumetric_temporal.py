@@ -7,13 +7,13 @@ import torch
 from torch import nn
 
 from mvn.models import pose_resnet
-
+from time import time
 from mvn.utils import op
 from mvn.utils import multiview
 from mvn.utils import img
 from mvn.utils import misc
 from mvn.utils import volumetric
-from mvn.models.v2v import V2VModel
+from mvn.models.v2v import V2VModel, V2VModelAdaIN
 from mvn.models.temporal import Seq2VecModel
 
 from IPython.core.debugger import set_trace
@@ -28,42 +28,42 @@ class VolumetricTemporalNet(nn.Module):
     def __init__(self, config):
         super().__init__()
 
-        self.num_joints = config.backbone.num_joints
-        self.volume_aggregation_method = config.volume_aggregation_method # if hasattr(config, 'volume_aggregation_method') else None
+        self.num_joints = config.model.backbone.num_joints
+        self.volume_aggregation_method = config.model.volume_aggregation_method # if hasattr(config.model, 'volume_aggregation_method') else None
 
         # volume
-        self.volume_softmax = config.volume_softmax
-        self.volume_multiplier = config.volume_multiplier
-        self.volume_size = config.volume_size
+        self.volume_softmax = config.model.volume_softmax
+        self.volume_multiplier = config.model.volume_multiplier
+        self.volume_size = config.model.volume_size
 
-        self.cuboid_side = config.cuboid_side
-        self.cuboid_multiplier = config.cuboid_multiplier if hasattr(config, "cuboid_multiplier") else 1.0
-        self.rotation = config.rotation if hasattr(config, "rotation") else False
+        self.cuboid_side = config.model.cuboid_side
+        self.cuboid_multiplier = config.model.cuboid_multiplier if hasattr(config.model, "cuboid_multiplier") else 1.0
+        self.rotation = config.model.rotation if hasattr(config.model, "rotation") else False
 
-        self.process_frames_independently = config.process_frames_independently if hasattr(config, 'process_frames_independently') else False
+        self.process_frames_independently = config.model.process_frames_independently if hasattr(config.model, 'process_frames_independently') else False
 
-        self.kind = config.kind
+        self.kind = config.model.kind
 
-        self.use_precalculated_pelvis = config.use_precalculated_pelvis if hasattr(config, "use_precalculated_pelvis") else False
-        self.use_gt_pelvis = config.use_gt_pelvis if hasattr(config, "use_gt_pelvis") else False
-        self.use_volumetric_pelvis = config.use_volumetric_pelvis if hasattr(config, "use_volumetric_pelvis") else False
-        self.use_separate_v2v_for_basepoint = config.use_separate_v2v_for_basepoint if hasattr(config, "use_separate_v2v_for_basepoint") else False
+        self.use_precalculated_pelvis = config.model.use_precalculated_pelvis if hasattr(config.model, "use_precalculated_pelvis") else False
+        self.use_gt_pelvis = config.model.use_gt_pelvis if hasattr(config.model, "use_gt_pelvis") else False
+        self.use_volumetric_pelvis = config.model.use_volumetric_pelvis if hasattr(config.model, "use_volumetric_pelvis") else False
+        self.use_separate_v2v_for_basepoint = config.model.use_separate_v2v_for_basepoint if hasattr(config.model, "use_separate_v2v_for_basepoint") else False
 
         assert self.use_precalculated_pelvis or self.use_volumetric_pelvis or self.use_gt_pelvis, 'One of the flags "use_<...>_pelvis" should be True'
 
         # heatmap
-        self.heatmap_softmax = config.heatmap_softmax
-        self.heatmap_multiplier = config.heatmap_multiplier
+        self.heatmap_softmax = config.model.heatmap_softmax
+        self.heatmap_multiplier = config.model.heatmap_multiplier
 
         # transfer
-        self.transfer_cmu_to_human36m = config.transfer_cmu_to_human36m if hasattr(config, "transfer_cmu_to_human36m") else False
+        self.transfer_cmu_to_human36m = config.model.transfer_cmu_to_human36m if hasattr(config.model, "transfer_cmu_to_human36m") else False
 
         if self.volume_aggregation_method.startswith('conf'):
             config.model.backbone.vol_confidences = True
 
         # modules
-        self.backbone = pose_resnet.get_pose_net(config.backbone)
-        self.return_heatmaps = config.backbone.return_heatmaps if hasattr(config.backbone, 'return_heatmaps') else False  
+        self.backbone = pose_resnet.get_pose_net(config.model.backbone)
+        self.return_heatmaps = config.model.backbone.return_heatmaps if hasattr(config.model.backbone, 'return_heatmaps') else False  
 
         self.process_features = nn.Sequential(
             nn.Conv2d(256, 32, 1)
@@ -252,50 +252,59 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
     def __init__(self, config):
         super().__init__()
 
-        self.num_joints = config.backbone.num_joints
+        t1 = time()
+
+        self.num_joints = config.model.backbone.num_joints
 
         # volume
-        self.volume_softmax = config.volume_softmax
-        self.volume_multiplier = config.volume_multiplier
-        self.volume_size = config.volume_size
+        self.volume_softmax = config.model.volume_softmax
+        self.volume_multiplier = config.model.volume_multiplier
+        self.volume_size = config.model.volume_size
+        self.volume_aggregation_method = config.model.volume_aggregation_method
 
-        self.cuboid_side = config.cuboid_side
-        self.cuboid_multiplier = config.cuboid_multiplier if hasattr(config, "cuboid_multiplier") else 1.0
-        self.rotation = config.rotation if hasattr(config, "rotation") else False
+        self.cuboid_side = config.model.cuboid_side
+        self.cuboid_multiplier = config.model.cuboid_multiplier if hasattr(config.model, "cuboid_multiplier") else 1.0
+        self.rotation = config.model.rotation if hasattr(config.model, "rotation") else False
 
-        self.kind = config.kind
+        self.kind = config.model.kind
 
-        self.use_precalculated_pelvis = config.use_precalculated_pelvis if hasattr(config, "use_precalculated_pelvis") else False
-        self.use_gt_pelvis = config.use_gt_pelvis if hasattr(config, "use_gt_pelvis") else False
-        self.use_volumetric_pelvis = config.use_volumetric_pelvis if hasattr(config, "use_volumetric_pelvis") else False
-        self.use_separate_v2v_for_basepoint = config.use_separate_v2v_for_basepoint if hasattr(config, "use_separate_v2v_for_basepoint") else False
+        self.use_precalculated_pelvis = config.model.use_precalculated_pelvis if hasattr(config.model, "use_precalculated_pelvis") else False
+        self.use_gt_pelvis = config.model.use_gt_pelvis if hasattr(config.model, "use_gt_pelvis") else False
+        self.use_volumetric_pelvis = config.model.use_volumetric_pelvis if hasattr(config.model, "use_volumetric_pelvis") else False
+        self.use_separate_v2v_for_basepoint = config.model.use_separate_v2v_for_basepoint if hasattr(config.model, "use_separate_v2v_for_basepoint") else False
 
         assert self.use_precalculated_pelvis or self.use_gt_pelvis, 'One of the flags "use_<...>_pelvis" should be True'
 
         # heatmap
-        self.heatmap_softmax = config.heatmap_softmax
-        self.heatmap_multiplier = config.heatmap_multiplier
+        self.heatmap_softmax = config.model.heatmap_softmax
+        self.heatmap_multiplier = config.model.heatmap_multiplier
 
         # transfer
-        self.transfer_cmu_to_human36m = config.transfer_cmu_to_human36m if hasattr(config, "transfer_cmu_to_human36m") else False
-
-        if self.volume_aggregation_method.startswith('conf'):
-            config.model.backbone.vol_confidences = True
+        self.transfer_cmu_to_human36m = config.model.transfer_cmu_to_human36m if hasattr(config.model, "transfer_cmu_to_human36m") else False
 
         # modules
-        self.backbone = pose_resnet.get_pose_net(config.backbone)
-        self.return_heatmaps = config.backbone.return_heatmaps if hasattr(config.backbone, 'return_heatmaps') else False  
-        self.features_dim = config.features_dim if hasattr(config, 'features_dim') else 32
-        self.style_vector_dim = config.style_vector_dim if hasattr(config, 'style_vector_dim') else 512
-
-        self.process_features = nn.Sequential(
-            nn.Conv2d(256, 32, 1)
-        )
-
-        self.volume_net = V2VModelAdaIN(32, self.num_joints)
-        self.process_features_sequence = Seq2VecModel(self.features_dim, self.style_vector_dim)
-        self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2) for i in range(57)])
+        self.backbone = pose_resnet.get_pose_net(config.model.backbone)
+        self.return_heatmaps = config.model.backbone.return_heatmaps if hasattr(config.model.backbone, 'return_heatmaps') else False  
+        self.features_dim = config.model.features_dim if hasattr(config.model, 'features_dim') else 32
+        self.style_vector_dim = config.model.style_vector_dim if hasattr(config.model, 'style_vector_dim') else 512
         
+        t = time() - t1; t1 = time()
+        print ('backbone inited {}'.format(round(t,4)))
+        
+        self.volume_net = V2VModelAdaIN(32, self.num_joints)
+        t = time() - t1; t1 = time()
+        print ('v2v inited {}'.format(round(t,4)))
+
+        self.process_features_sequence = Seq2VecModel(self.features_dim, self.style_vector_dim)
+        t = time() - t1; t1 = time()
+        print ('Seq2VecModel inited {}'.format(round(t,4)))
+
+        
+        self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2) for i in range(57)])
+        t = time() - t1; t1 = time()
+        print ('affine_mappings inited {}'.format(round(t,4)))
+        
+
     def get_coord_volumes(self, 
                             cuboid_side, 
                             volume_size, 
@@ -414,6 +423,9 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
                                         volume_aggregation_method=self.volume_aggregation_method,
                                         vol_confidences=vol_confidences
                                         )
+        
+        assert volume.shape[1] == 1
+        volumes = torch.cat(volumes, 0)
 
         # inference
         adain_params = [affine_map(style_vector) for affine_map in self.affine_mappings]

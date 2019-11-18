@@ -23,7 +23,7 @@ class Basic3DBlockAdaIN(nn.Module):
                                 kernel_size=kernel_size, 
                                 stride=1, 
                                 padding=((kernel_size-1)//2))
-        self,adain = nn.AdaIN()
+        self.adain = AdaIN()
         self.activation = nn.ReLU(True)
 
     def forward(self, x, params):
@@ -125,7 +125,7 @@ class Upsample3DBlock(nn.Module):
 
 class Upsample3DBlockAdaIN(nn.Module):
     def __init__(self, in_planes, out_planes, kernel_size, stride):
-        super(Upsample3DBlock, self).__init__()
+        super(Upsample3DBlockAdaIN, self).__init__()
         assert(kernel_size == 2)
         assert(stride == 2)
         self.transpose = nn.ConvTranspose3d(in_planes, 
