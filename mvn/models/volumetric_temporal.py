@@ -294,7 +294,7 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
 
         self.volume_net = V2VModelAdaIN(32, self.num_joints)
         self.process_features_sequence = Seq2VecModel(self.features_dim, self.style_vector_dim)
-        self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2) for i in range(27)])
+        self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2) for i in range(57)])
         
     def get_coord_volumes(self, 
                             cuboid_side, 
