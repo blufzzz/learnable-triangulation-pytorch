@@ -91,17 +91,19 @@ class Res3DBlockAdaIN(nn.Module):
 
     def forward(self, x, params):
         
+        if self.use_skip_con:
+            skip = self.skip_con_conv(x)
+            skip = self.skip_con_adain(skip,params[2])
+        else:
+            skip = x
+
         x = self.res_conv1(x)
         x = self.res_adain1(x,params[0])
         x = self.activation(x)
         x = self.res_conv2(x)
         x = self.res_adain2(x,params[1])
 
-        if self.use_skip_con:
-            skip = self.skip_con_conv(x)
-            skip = self.skip_con_adain(skip,params[2])
-
-        return F.relu(res + skip, True)        
+        return F.relu(x + skip, True)        
 
 
 class Pool3DBlock(nn.Module):

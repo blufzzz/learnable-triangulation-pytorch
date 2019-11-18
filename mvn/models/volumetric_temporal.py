@@ -440,7 +440,7 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
         adain_params = [affine_map(style_vector) for affine_map in self.affine_mappings]
         volumes = self.volume_net(volumes, adain_params)
         # integral 3d
-        vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes_final * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
+        vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
 
         return (vol_keypoints_3d,
                 features,

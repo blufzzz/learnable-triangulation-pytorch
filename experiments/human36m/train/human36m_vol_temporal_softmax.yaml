@@ -64,7 +64,7 @@ dataset:
   train:
     singleview: true
     pivot_type: 'first'
-    dt: 8
+    dt: 4
     h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"
     labels_path: "/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy"
     pred_results_path: 
