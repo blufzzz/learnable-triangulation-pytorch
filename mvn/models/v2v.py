@@ -1,4 +1,5 @@
 # Reference: https://github.com/dragonbook/V2V-PoseNet-pytorch
+from IPython.core.debugger import set_trace
 
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,13 +8,16 @@ class AdaIN(nn.Module):
     def __init__(self):
         super(AdaIN, self).__init__()
     def forward(self, features, params):
-        # [batch_size, C, D1, D2, D3]
+        # features: [batch_size, C, D1, D2, D3]
+        # params: [batch_size, 2]
         size = features.size()
         batch_size, C = features.shape[:2]
         features_mean = features.view(batch_size, C, -1).mean(-1).view(batch_size, C,1,1,1)
         features_std = features.view(batch_size, C, -1).std(-1).view(batch_size, C,1,1,1)
         norm_features = (features - features_mean) / features_std
-        return norm_features * params[0] + params[1]
+        adain_std = params[:,:C].view(batch_size, C,1,1,1)
+        adain_mean = params[:,C:].view(batch_size, C,1,1,1)
+        return norm_features * adain_std + adain_mean
 
 
 class Basic3DBlockAdaIN(nn.Module):
@@ -28,7 +32,7 @@ class Basic3DBlockAdaIN(nn.Module):
 
     def forward(self, x, params):
         x = self.conv(x)
-        x = self.adain(x,params)
+        x = self.adain(x, params)
         x = self.activation(x)
         return x
 
@@ -94,7 +98,7 @@ class Res3DBlockAdaIN(nn.Module):
         x = self.res_adain2(x,params[1])
 
         if self.use_skip_con:
-            skip = skip_con_conv(x)
+            skip = self.skip_con_conv(x)
             skip = self.skip_con_adain(skip,params[2])
 
         return F.relu(res + skip, True)        
@@ -139,7 +143,7 @@ class Upsample3DBlockAdaIN(nn.Module):
 
     def forward(self, x, params):
         x = self.transpose(x)
-        x = self.adain(x)
+        x = self.adain(x,params)
         x = self.activation(x)
         return x       
 
@@ -272,19 +276,19 @@ class EncoderDecorderAdaIN(nn.Module):
         x = self.mid_res(x, params[22:24])
 
         x = self.decoder_res5(x, params[24:26])
-        x = self.decoder_upsample5(x, params[26:28])
+        x = self.decoder_upsample5(x, params[26])
         x = x + skip_x5
-        x = self.decoder_res4(x, params[28:30])
-        x = self.decoder_upsample4(x, params[30:32])
+        x = self.decoder_res4(x, params[27:29])
+        x = self.decoder_upsample4(x, params[29])
         x = x + skip_x4
-        x = self.decoder_res3(x, params[32:34])
-        x = self.decoder_upsample3(x, params[34:36])
+        x = self.decoder_res3(x, params[30:32])
+        x = self.decoder_upsample3(x, params[32])
         x = x + skip_x3
-        x = self.decoder_res2(x, params[36:38])
-        x = self.decoder_upsample2(x, params[38:40])
+        x = self.decoder_res2(x, params[33:35])
+        x = self.decoder_upsample2(x, params[35])
         x = x + skip_x2
-        x = self.decoder_res1(x, params[40:42])
-        x = self.decoder_upsample1(x, params[42:44])
+        x = self.decoder_res1(x, params[36:38])
+        x = self.decoder_upsample1(x, params[38])
         x = x + skip_x1
 
         return x
@@ -299,7 +303,7 @@ class V2VModel(nn.Module):
             Res3DBlock(32, 32),
             Res3DBlock(32, 32)
         )
-
+        
         self.encoder_decoder = EncoderDecorder()
 
         self.back_layers = nn.Sequential(
@@ -335,16 +339,21 @@ class V2VModelAdaIN(nn.Module):
     def __init__(self, input_channels, output_channels):
             super().__init__()
 
-            self.front_layer1 = Basic3DBlockAdaIN(input_channels, 16, 7),
+            self.front_layer1 = Basic3DBlockAdaIN(input_channels, 16, 7)
             self.front_layer2 = Res3DBlockAdaIN(16, 32)
             self.front_layer3 = Res3DBlockAdaIN(32, 32)
             self.front_layer4 = Res3DBlockAdaIN(32, 32)
+            # [16, 32,32,32, 32,32, 32,32]
 
             self.encoder_decoder = EncoderDecorderAdaIN()
+            # [32,32, 64,64,64, 64,64, 128,128,128, 128,128, 128,128,
+            # 128,128, 128,128, 128,128, 128,128, 128,128, 128,128, 128,
+            # 128,128, 128, 128,128, 128, 128,128, 64, 64,64, 32]
 
             self.back_layer1 =Res3DBlockAdaIN(32, 32)
             self.back_layer2 =Basic3DBlockAdaIN(32, 32, 1)
             self.back_layer3 =Basic3DBlockAdaIN(32, 32, 1)
+            # [32,32, 32, 32]
 
             self.output_layer = nn.Conv3d(32, output_channels, kernel_size=1, stride=1, padding=0)
 
@@ -355,10 +364,10 @@ class V2VModelAdaIN(nn.Module):
         x = self.front_layer2(x, adain_params[1:4])
         x = self.front_layer3(x, adain_params[4:6])
         x = self.front_layer4(x, adain_params[6:8])
-        x = self.encoder_decoder(x, adain_params[8:52]) # 44
-        x = self.back_layer1(x, adain_params[52:54])
-        x = self.back_layer2(x, adain_params[55])
-        x = self.back_layer3(x, adain_params[56])
+        x = self.encoder_decoder(x, adain_params[8:47]) 
+        x = self.back_layer1(x, adain_params[47:49])
+        x = self.back_layer2(x, adain_params[49])
+        x = self.back_layer3(x, adain_params[50])
         x = self.output_layer(x)
         return x
 

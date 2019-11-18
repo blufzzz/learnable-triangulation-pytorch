@@ -285,7 +285,7 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
         # modules
         self.backbone = pose_resnet.get_pose_net(config.model.backbone)
         self.return_heatmaps = config.model.backbone.return_heatmaps if hasattr(config.model.backbone, 'return_heatmaps') else False  
-        self.features_dim = config.model.features_dim if hasattr(config.model, 'features_dim') else 32
+        self.features_dim = config.model.features_dim if hasattr(config.model, 'features_dim') else 256
         self.style_vector_dim = config.model.style_vector_dim if hasattr(config.model, 'style_vector_dim') else 512
         
         t = time() - t1; t1 = time()
@@ -298,11 +298,18 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
         self.process_features_sequence = Seq2VecModel(self.features_dim, self.style_vector_dim)
         t = time() - t1; t1 = time()
         print ('Seq2VecModel inited {}'.format(round(t,4)))
-
         
-        self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2) for i in range(57)])
+        self.v2v_channels_list = [16, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 64, 64, 64, 64, 128, 128, 128, 128, 128,\
+                                  128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128,\
+                                  128, 128, 128, 128, 128, 64, 64, 64, 32, 32, 32, 32, 32]
+                                  
+        self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*C) for C in self.v2v_channels_list]) #range(51)
         t = time() - t1; t1 = time()
         print ('affine_mappings inited {}'.format(round(t,4)))
+
+        self.process_features = nn.Sequential(
+            nn.Conv2d(256, 32, 1)
+        )
         
 
     def get_coord_volumes(self, 
@@ -369,18 +376,20 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
 
         device = images_batch.device
         batch_size, dt = images_batch.shape[:2]
+        image_shape = images_batch.shape[3:]
 
         # reshape for backbone forward
-        images_batch = images_batch.view(-1, *images_batch.shape[2:])
+        images_batch = images_batch.view(-1, 3, *image_shape)
 
         # forward backbone
         heatmaps, features, _, vol_confidences = self.backbone(images_batch)
 
         # reshape back and take only last view (pivot)
-        images_batch = images_batch.view(batch_size, dt, *images_batch.shape[1:])[:,-1,...]
+        images_batch = images_batch.view(batch_size, dt, *images_batch.shape[1:])[:,-1,...].unsqueeze(1)
         
         # calcualte shapes
-        image_shape, features_shape = images_batch.shape[3:], features.shape[1:]
+        features_shape = features.shape[2:]
+        features_channels = features.shape[1]
 
         # change camera intrinsics
         new_cameras = deepcopy(batch['cameras'])
@@ -396,11 +405,12 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
         proj_matricies_batch = proj_matricies_batch[:,-1,...].unsqueeze(1)
 
         # process features before lifting to volume
-        features = features.view(batch_size, dt, *features_shape)
-        pivot_features = features[:,-1,...].unsqueeze(1)
+        features = features.view(batch_size, dt, features_channels, *features_shape)
+        pivot_features = features[:,-1,...]
         features = features[:,:-1,...]
         style_vector = self.process_features_sequence(features) # [batch_size, 512]
-                            
+        pivot_features = self.process_features(pivot_features).unsqueeze(1)
+        
         if self.use_precalculated_pelvis:
             tri_keypoints_3d = torch.from_numpy(np.array(batch['pred_keypoints_3d'])).type(torch.float).to(device)
 
@@ -424,7 +434,6 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
                                         vol_confidences=vol_confidences
                                         )
         
-        assert volume.shape[1] == 1
         volumes = torch.cat(volumes, 0)
 
         # inference

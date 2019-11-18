@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch.nn.functional as F
+import torch
 
 from IPython.core.debugger import set_trace
         
@@ -53,14 +54,16 @@ class Seq2VecModel(nn.Module):
                                nn.MaxPool2d(2))
         self.lstm = nn.LSTM(400, 512, batch_first=True)
         
-    def forward(self, features):
+    def forward(self, features, eps = 1e-3):
         # [batch size, dt, 256, 96, 96]
 
+        device = torch.cuda.current_device()
         features_shape = features.shape[2:]
         batch_size, dt = features.shape[:2]
         vectors = self.feature2vector(features.view(-1, *features_shape))
         vectors = vectors.view(batch_size, dt, -1)
-        (h0, c0) = torch.randn(1, batch_size, self.hidden_dim), torch.randn(1, batch_size, self.hidden_dim)
+        (h0, c0) = torch.randn(1, batch_size, self.hidden_dim, device=device)*eps,\
+                   torch.randn(1, batch_size, self.hidden_dim, device=device)*eps
         output, (hn, cn) = self.lstm(vectors, (h0, c0))
         return output[:,-1,...]
         

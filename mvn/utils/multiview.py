@@ -22,7 +22,11 @@ class Camera:
         self.K[0, 2], self.K[1, 2] = new_cx, new_cy
 
     def update_after_resize(self, image_shape, new_image_shape):
-        height, width = image_shape
+        try:
+            height, width = image_shape
+        except BaseException:
+            print ('image_shape:',image_shape)
+            raise ValueError('wrong image shape')
         new_width, new_height = new_image_shape
 
         fx, fy, cx, cy = self.K[0, 0], self.K[1, 1], self.K[0, 2], self.K[1, 2]
