@@ -43,7 +43,6 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--logdir", type=str, default="/Vol1/dbstore/datasets/k.iskakov/logs/multi-view-net-repr", help="Path, where logs will be stored")
     parser.add_argument('--experiment_comment', default='', type=str)
-    parser.add_argument('--continue_training', default=False, type=bool)
     parser.add_argument('--experiment_dir', type=str)
 
     args = parser.parse_args()
@@ -205,7 +204,7 @@ def one_epoch(model,
     use_heatmaps = config.backbone.return_heatmaps if hasattr(config.backbone, 'return_heatmaps') else False
     use_temporal_discriminator_loss  = config.opt.use_temporal_discriminator_loss if hasattr(config.opt, "use_temporal_discriminator_loss") else False  
     dump_weights = config.dump_weights if hasattr(config, 'dump_weights') else False
-
+    transfer_cmu_to_human36m = config.transfer_cmu_to_human36m if hasattr(config, "transfer_cmu_to_human36m") else False
 
     if is_train:
         model.train()
@@ -291,7 +290,6 @@ def one_epoch(model,
                         opt_discr.step()
                         continue
 
-
                 loss = criterion(keypoints_3d_pred * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d, keypoints_3d_binary_validity_gt)
                 total_loss += loss
                 metric_dict[f'{config.opt.criterion}'].append(loss.item())
@@ -354,7 +352,7 @@ def one_epoch(model,
                 if master:
                     if n_iters_total % config.vis_freq == 0:
                         vis_kind = config.kind
-                        if (config.transfer_cmu_to_human36m if hasattr(config, "transfer_cmu_to_human36m") else False):
+                        if (transfer_cmu_to_human36m):
                             vis_kind = "coco"
 
                         for batch_i in range(min(batch_size, config.vis_n_elements)):
