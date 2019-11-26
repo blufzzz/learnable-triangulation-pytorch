@@ -167,9 +167,8 @@ class Upsample3DBlockAdaIN(nn.Module):
 
 
 class EncoderDecorder(nn.Module):
-    def __init__(self, AdaIN=False):
+    def __init__(self):
         super().__init__()
-        self.AdaIN = AdaIN
 
         self.encoder_pool1 = Pool3DBlock(2)
         self.encoder_res1 = Res3DBlock(32, 64)
@@ -240,9 +239,8 @@ class EncoderDecorder(nn.Module):
 
 
 class EncoderDecorderAdaIN(nn.Module):
-    def __init__(self, AdaIN=False):
+    def __init__(self):
         super().__init__()
-        self.AdaIN = AdaIN
 
         self.encoder_pool1 = Pool3DBlock(2)
         self.encoder_res1 = Res3DBlockAdaIN(32, 64)

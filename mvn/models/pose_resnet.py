@@ -182,7 +182,10 @@ resnet_spec = {18: (BasicBlock, [2, 2, 2, 2]),
 
 
 class PoseResNet(nn.Module):
-    def __init__(self, block, layers, num_joints,
+    def __init__(self, 
+                 block,
+                 layers, 
+                 num_joints,
                  num_input_channels=3,
                  deconv_with_bias=False,
                  num_deconv_layers=3,

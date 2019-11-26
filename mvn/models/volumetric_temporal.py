@@ -14,7 +14,7 @@ from mvn.utils import img
 from mvn.utils import misc
 from mvn.utils import volumetric
 from mvn.models.v2v import V2VModel, V2VModelAdaIN, V2VModelAdaIN_MiddleVector
-from mvn.models.temporal import Seq2VecRNN, FeaturesAR_CNN1D, FeaturesAR_CNN2D, FeaturesAR_RNN
+from mvn.models.temporal import Seq2VecRNN, FeaturesAR_CNN1D, FeaturesAR_CNN2D_UNet, FeaturesAR_RNN, FeaturesAR_CNN2D_ResNet
 
 from IPython.core.debugger import set_trace
 
@@ -244,9 +244,7 @@ class VolumetricTemporalNet(nn.Module):
                 base_points
                 )
 
-# TODO
 class VolumetricAdaINConditionedTemporalNet(nn.Module):
-
     '''
     Volumetric AdaIN Conditioned Temporal Net
     The model is designed to work with `dt` number of consecutive frames
@@ -289,23 +287,11 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
         self.backbone = pose_resnet.get_pose_net(config.model.backbone)
         self.return_heatmaps = config.model.backbone.return_heatmaps if hasattr(config.model.backbone, 'return_heatmaps') else False  
         self.features_dim = config.model.features_dim if hasattr(config.model, 'features_dim') else 256
-        self.style_vector_dim = config.model.style_vector_dim if hasattr(config.model, 'style_vector_dim') else 512
-        
-        t = time() - t1; t1 = time()
-        print ('backbone inited {}'.format(round(t,4)))
+        self.style_vector_dim = config.model.style_vector_dim if hasattr(config.model, 'style_vector_dim') else 256
         
         self.volume_net = V2VModelAdaIN(32, self.num_joints)
-        t = time() - t1; t1 = time()
-        print ('v2v inited {}'.format(round(t,4)))
-
-        self.features_sequence_to_vector = Seq2VecRNN(self.features_dim, self.style_vector_dim)
-        t = time() - t1; t1 = time()
-        print ('Seq2VecRNN inited {}'.format(round(t,4)))
-                                  
-        self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*C) for C in CHANNELS_LIST]) #range(51)
-        t = time() - t1; t1 = time()
-        print ('affine_mappings inited {}'.format(round(t,4)))
-
+        self.features_sequence_to_vector = Seq2VecRNN(self.features_dim, output_features_dim=self.style_vector_dim)
+        self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*C) for C in CHANNELS_LIST]) # 51
         self.process_features = nn.Sequential(
             nn.Conv2d(256, 32, 1)
         )
@@ -467,7 +453,7 @@ class VolumetricFSNet(nn.Module):
         self.volume_multiplier = config.model.volume_multiplier
         self.volume_size = config.model.volume_size
         self.volume_aggregation_method = config.model.volume_aggregation_method
-
+        self.dt = config.dataset.dt 
         self.cuboid_side = config.model.cuboid_side
         self.cuboid_multiplier = config.model.cuboid_multiplier if hasattr(config.model, "cuboid_multiplier") else 1.0
         self.rotation = config.model.rotation if hasattr(config.model, "rotation") else False
@@ -506,9 +492,10 @@ class VolumetricFSNet(nn.Module):
         )
 
         self.features_regressor = {
-            "RNN": Seq2VecRNN(self.features_dim, self.style_vector_dim)
-            "Conv1D": FeaturesAR_CNN1D(self.features_dim)
-            "Conv2D": FeaturesAR_CNN2D(self.features_dim)
+            "RNN": FeaturesAR_RNN(self.features_dim, self.features_dim),
+            "Conv1D": FeaturesAR_CNN1D(self.features_dim, self.features_dim),
+            "Conv2D_UNet": FeaturesAR_CNN2D_UNet(self.features_dim*self.dt, self.features_dim),
+            "Conv2D_ResNet": FeaturesAR_CNN2D_ResNet(self.features_dim*self.dt, self.features_dim)
         }[config.model.features_regressor]
         
 
