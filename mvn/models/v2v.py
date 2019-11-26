@@ -10,13 +10,28 @@ class AdaIN(nn.Module):
     def forward(self, features, params):
         # features: [batch_size, C, D1, D2, D3]
         # params: [batch_size, 2]
+        use_adain_params = params is not None
         size = features.size()
         batch_size, C = features.shape[:2]
+
+        if use_adain_params:
+            adain_mean = params[:,:C].view(batch_size, C,1,1,1)
+            adain_std = params[:,C:].view(batch_size, C,1,1,1)
+        else:
+           assert batch_size % 2 == 0, \
+           'batch should contain concatenated features and style batches'
+           batch_size = batch_size / 2
+           
+           style = features[batch_size:] 
+           features = features[:batch_size]
+
+           adain_mean = style.view(batch_size, C, -1).mean(-1).view(batch_size, C,1,1,1)
+           adain_std = style.view(batch_size, C, -1).std(-1).view(batch_size, C,1,1,1) 
+        
         features_mean = features.view(batch_size, C, -1).mean(-1).view(batch_size, C,1,1,1)
         features_std = features.view(batch_size, C, -1).std(-1).view(batch_size, C,1,1,1)
         norm_features = (features - features_mean) / features_std
-        adain_std = params[:,:C].view(batch_size, C,1,1,1)
-        adain_mean = params[:,C:].view(batch_size, C,1,1,1)
+                
         return norm_features * adain_std + adain_mean
 
 
@@ -30,7 +45,7 @@ class Basic3DBlockAdaIN(nn.Module):
         self.adain = AdaIN()
         self.activation = nn.ReLU(True)
 
-    def forward(self, x, params):
+    def forward(self, x, params=None):
         x = self.conv(x)
         x = self.adain(x, params)
         x = self.activation(x)
@@ -89,19 +104,20 @@ class Res3DBlockAdaIN(nn.Module):
             self.skip_con_conv = nn.Conv3d(in_planes, out_planes, kernel_size=1, stride=1, padding=0)
             self.skip_con_adain = AdaIN()
 
-    def forward(self, x, params):
-        
+    def forward(self, x, params=None):
+        use_adain_params=params is not None
+
         if self.use_skip_con:
             skip = self.skip_con_conv(x)
-            skip = self.skip_con_adain(skip,params[2])
+            skip = self.skip_con_adain(skip, params[2] if use_adain_params else None)
         else:
             skip = x
 
         x = self.res_conv1(x)
-        x = self.res_adain1(x,params[0])
+        x = self.res_adain1(x, params[0])
         x = self.activation(x)
         x = self.res_conv2(x)
-        x = self.res_adain2(x,params[1])
+        x = self.res_adain2(x, params[1])
 
         return F.relu(x + skip, True)        
 
@@ -143,7 +159,7 @@ class Upsample3DBlockAdaIN(nn.Module):
         self.adain = AdaIN()
         self.activation = nn.ReLU(True)
 
-    def forward(self, x, params):
+    def forward(self, x, params=None):
         x = self.transpose(x)
         x = self.adain(x,params)
         x = self.activation(x)
@@ -259,6 +275,7 @@ class EncoderDecorderAdaIN(nn.Module):
         self.skip_res5 = Res3DBlockAdaIN(128, 128)
 
     def forward(self, x, params):
+        use_adain_params = params is not None
         skip_x1 = self.skip_res1(x, params[:2])
         x = self.encoder_pool1(x)
         x = self.encoder_res1(x, params[2:5])
@@ -362,6 +379,7 @@ class V2VModelAdaIN(nn.Module):
             self._initialize_weights()
 
     def forward(self, x, adain_params):
+        use_adain_params = adain_params is not None
         x = self.front_layer1(x, adain_params[0])
         x = self.front_layer2(x, adain_params[1:4])
         x = self.front_layer3(x, adain_params[4:6])
@@ -383,3 +401,15 @@ class V2VModelAdaIN(nn.Module):
                 nn.init.xavier_normal_(m.weight)
                 # nn.init.normal_(m.weight, 0, 0.001)
                 nn.init.constant_(m.bias, 0)
+
+
+class EncoderDecorderAdaIN_MiddleVector(EncoderDecorder):
+    """docstring for EncoderDecorderAdaIN_Middle"""
+    def __init__(self, arg):
+        super().__init__()
+        self.mid_res = Res3DBlockAdaIN(128, 128)
+        
+class V2VModelAdaIN_MiddleVector(V2VModel):
+    def __init__(self, input_channels, output_channels):
+            super().__init__()
+            self.encoder_decoder = EncoderDecorderAdaIN_MiddleVector()                 
