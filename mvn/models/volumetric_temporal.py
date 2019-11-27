@@ -244,10 +244,8 @@ class VolumetricTemporalNet(nn.Module):
                 base_points
                 )
 
-class VolumetricAdaINConditionedTemporalNet(nn.Module):
+class VolumetricLSTMAdaINNet(nn.Module):
     '''
-    Volumetric AdaIN Conditioned Temporal Net
-    The model is designed to work with `dt` number of consecutive frames
     '''
 
     def __init__(self, config):
@@ -283,12 +281,13 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
         # transfer
         self.transfer_cmu_to_human36m = config.model.transfer_cmu_to_human36m if hasattr(config.model, "transfer_cmu_to_human36m") else False
 
-        # modules
-        self.backbone = pose_resnet.get_pose_net(config.model.backbone)
+        # modules params
         self.return_heatmaps = config.model.backbone.return_heatmaps if hasattr(config.model.backbone, 'return_heatmaps') else False  
         self.features_dim = config.model.features_dim if hasattr(config.model, 'features_dim') else 256
         self.style_vector_dim = config.model.style_vector_dim if hasattr(config.model, 'style_vector_dim') else 256
-        
+
+        # modules
+        self.backbone = pose_resnet.get_pose_net(config.model.backbone) 
         self.volume_net = V2VModelAdaIN(32, self.num_joints)
         self.features_sequence_to_vector = Seq2VecRNN(self.features_dim, output_features_dim=self.style_vector_dim)
         self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*C) for C in CHANNELS_LIST]) # 51
@@ -438,10 +437,9 @@ class VolumetricAdaINConditionedTemporalNet(nn.Module):
 
 
 
-class VolumetricFSNet(nn.Module):
+class VolumetricFRAdaINNet(nn.Module):
 
     '''
-    VolumetricFSNet
     '''
     def __init__(self, config):
         super().__init__()
@@ -474,30 +472,28 @@ class VolumetricFSNet(nn.Module):
         # transfer
         self.transfer_cmu_to_human36m = config.model.transfer_cmu_to_human36m if hasattr(config.model, "transfer_cmu_to_human36m") else False
 
-        # modules
-        self.backbone = pose_resnet.get_pose_net(config.model.backbone)
+        # modules params
         self.return_heatmaps = config.model.backbone.return_heatmaps if hasattr(config.model.backbone, 'return_heatmaps') else False  
         self.features_dim = config.model.features_dim if hasattr(config.model, 'features_dim') else 256
         self.intermediate_features_dim = config.model.intermediate_features_dim if hasattr(config.model, 'intermediate_features_dim') else 32
 
+
+        # modules
+        self.backbone = pose_resnet.get_pose_net(config.model.backbone)
         self.volume_net = {
             "all":V2VModelAdaIN_Vector(self.intermediate_features_dim, self.num_joints)    
             "middle":V2VModelAdaIN_MiddleVector(self.intermediate_features_dim, self.num_joints)    
         }[config.model.adain_type]
-
-        self.features_sequence_to_vector = Seq2VecRNN(self.features_dim, self.style_vector_dim)
-
         self.process_features = nn.Sequential(
             nn.Conv2d(self.features_dim, self.intermediate_features_dim, 1)
         )
-
         self.features_regressor = {
             "RNN": FeaturesAR_RNN(self.features_dim, self.features_dim),
             "Conv1D": FeaturesAR_CNN1D(self.features_dim, self.features_dim),
             "Conv2D_UNet": FeaturesAR_CNN2D_UNet(self.features_dim*self.dt, self.features_dim),
             "Conv2D_ResNet": FeaturesAR_CNN2D_ResNet(self.features_dim*self.dt, self.features_dim)
         }[config.model.features_regressor]
-        
+                
 
     def get_coord_volumes(self, 
                             cuboid_side, 
@@ -638,10 +634,19 @@ class VolumetricFSNet(nn.Module):
         vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
 
         return (vol_keypoints_3d,
-                [features_pivot,features_pred],
+                features_pivot,
+                features_pred,
                 volumes,
                 vol_confidences,
                 cuboids,
                 coord_volumes,
                 base_points
                 )        
+
+
+class VolumetricLSTMV2VNNet(object):
+    """docstring for VolumetricLSTMV2VNNet"""
+    def __init__(self, arg):
+        super(VolumetricLSTMV2VNNet, self).__init__()
+        self.arg = arg
+        

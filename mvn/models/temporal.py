@@ -75,7 +75,6 @@ class TemporalDiscriminator(nn.Module):
         x - input with shape [1,dt,3*J]
         '''
         x=self.features(x)
-        
         return self.softmax(self.linear(x.squeeze(-1)))
 
 
@@ -180,7 +179,6 @@ class FeaturesAR_CNN1D(nn.Module):
         predicted_encoded_feature = self.cnn1d(encoded_features)
         decoded_feature = self.decoder(predicted_encoded_feature)
         return decoded_feature
-
 
 
 class FeaturesAR_CNN2D_UNet(nn.Module):

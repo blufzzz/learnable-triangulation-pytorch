@@ -23,7 +23,12 @@ from torch.nn.parallel import DistributedDataParallel
 from tensorboardX import SummaryWriter
 
 from mvn.models.triangulation import RANSACTriangulationNet, AlgebraicTriangulationNet, VolumetricTriangulationNet
-from mvn.models.triangulation import RANSACTriangulationNet, AlgebraicTriangulationNet, VolumetricTriangulationNet
+from mvn.models.triangulation import RANSACTriangulationNet,\
+                                    AlgebraicTriangulationNet,\
+                                    VolumetricTriangulationNet,\
+                                    VolumetricLSTMAdaINNet
+                                    VolumetricFRAdaINNet, \
+                                    VolumetricLSTMV2VNNet
 from mvn.models.volumetric_temporal import VolumetricTemporalNet, VolumetricAdaINConditionedTemporalNet
 from mvn.models.loss import KeypointsMSELoss, KeypointsMSESmoothLoss, KeypointsMAELoss, KeypointsL2Loss, VolumetricCELoss
 
@@ -205,6 +210,7 @@ def one_epoch(model,
     use_temporal_discriminator_loss  = config.opt.use_temporal_discriminator_loss if hasattr(config.opt, "use_temporal_discriminator_loss") else False  
     dump_weights = config.dump_weights if hasattr(config, 'dump_weights') else False
     transfer_cmu_to_human36m = config.transfer_cmu_to_human36m if hasattr(config, "transfer_cmu_to_human36m") else False
+    use_intermediate_fr_loss = config.opt.use_intermediate_fr_loss if hasattr(config.opt, "use_intermediate_fr_loss") else False
 
     if is_train:
         model.train()
@@ -239,11 +245,14 @@ def one_epoch(model,
                 images_batch, keypoints_3d_gt, keypoints_3d_validity_gt, proj_matricies_batch = dataset_utils.prepare_batch(batch, device, config)
 
                 keypoints_2d_pred, cuboids_pred, base_points_pred = None, None, None
+                
                 if model_type == "alg" or model_type == "ransac":
                     keypoints_3d_pred, keypoints_2d_pred, heatmaps_pred, confidences_pred = model(images_batch, proj_matricies_batch, batch)
-                elif model_type == "vol":
-                    keypoints_3d_pred, heatmaps_pred, volumes_pred, confidences_pred, cuboids_pred, coord_volumes_pred, base_points_pred = model(images_batch, batch)
-
+                elif model_type == "vol_temporal_fr_adain":
+                    keypoints_3d_pred, heatmaps_pred, heatmaps_pred_fr, volumes_pred, confidences_pred, cuboids_pred, coord_volumes_pred, base_points_pred = model(images_batch, batch)
+                else:
+                    keypoints_3d_pred, heatmaps_pred, volumes_pred, confidences_pred, cuboids_pred, coord_volumes_pred, base_points_pred = model(images_batch, batch)    
+                
                 batch_size, n_views, image_shape = images_batch.shape[0], images_batch.shape[1], tuple(images_batch.shape[3:])
                 n_joints = keypoints_3d_pred[0].shape[1]
 
@@ -264,6 +273,13 @@ def one_epoch(model,
 
                 # calculate loss
                 total_loss = 0.0
+
+                if model_type == "vol_temporal_fr_adain" and use_intermediate_fr_loss:
+                    intermediate_fr_loss_weight = config.opt.intermediate_fr_loss_weight if hasattr(config.opt, "intermediate_fr_loss_weight") else 1.
+                    heatmaps_shape = heatmaps_pred.shape[-2:]
+                    fs_loss = torch.sum(torch.abs(heatmaps_pred - heatmaps_pred_fr)) / heatmaps_shape.prod()
+                    total_loss += fs_loss*intermediate_fr_loss_weight
+                    metric_dict['fs_loss'].append(fs_loss.item())
 
                 if use_temporal_discriminator_loss and is_train:
                     pred_keypoints_features = keypoints_to_features(keypoints_3d_batch_pred_list[1]).transpose(1,0)
@@ -502,7 +518,9 @@ def main(args):
         "alg": AlgebraicTriangulationNet,
         "vol": VolumetricTriangulationNet,
         "vol_temporal": VolumetricTemporalNet,
-        "vol_temporal_adain":VolumetricAdaINConditionedTemporalNet
+        "vol_temporal_lstm_adain":VolumetricLSTMAdaINNet,
+        "vol_temporal_fr_adain":VolumetricFRAdaINNet,
+        "vol_temporal_lstm_v2v":VolumetricLSTMV2VNNet
     }[config.model.name](config, device=device).to(device)
 
     if config.model.init_weights:
@@ -529,11 +547,39 @@ def main(args):
     # optimizer
     opt = None
     if not args.eval:
-        if config.model.name == "vol" or "vol_temporal":
+        if config.model.name == "vol":
             opt = torch.optim.Adam(
                 [{'params': model.backbone.parameters()},
                  {'params': model.process_features.parameters(), 'lr': config.opt.process_features_lr if hasattr(config.opt, "process_features_lr") else config.opt.lr},
                  {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr}
+                ],
+                lr=config.opt.lr
+            )
+        elif config.model.name == "vol_temporal_lstm_adain":
+            opt = torch.optim.Adam(
+                [{'params': model.backbone.parameters()},
+                 {'params': model.process_features.parameters(), 'lr': config.opt.process_features_lr if hasattr(config.opt, "process_features_lr") else config.opt.lr},
+                 {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr}
+                 {'params': model.features_sequence_to_vector.parameters(), 'lr': config.opt.features_sequence_to_vector_lr if hasattr(config.opt, "features_sequence_to_vector_lr") else config.opt.lr}
+                 {'params': model.affine_mappings.parameters(), 'lr': config.opt.affine_mappings_lr if hasattr(config.opt, "affine_mappings_lr") else config.opt.lr}
+                ],
+                lr=config.opt.lr
+            )
+        elif config.model.name == "vol_temporal_fr_adain":
+            opt = torch.optim.Adam(
+                [{'params': model.backbone.parameters()},
+                 {'params': model.process_features.parameters(), 'lr': config.opt.process_features_lr if hasattr(config.opt, "process_features_lr") else config.opt.lr},
+                 {'params': model.features_regressor.parameters(), 'lr': config.opt.features_regressor_lr if hasattr(config.opt, "features_regressor_lr") else config.opt.lr},
+                 {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr}
+                ],
+                lr=config.opt.lr
+            )
+        elif config.model.name == "vol_temporal_lstm_v2v":
+            opt = torch.optim.Adam(
+                [{'params': model.backbone.parameters()},
+                 {'params': model.process_features.parameters(), 'lr': config.opt.process_features_lr if hasattr(config.opt, "process_features_lr") else config.opt.lr},
+                 {'params': model.lstm_v2v.parameters(), 'lr': config.opt.lstm_v2v_lr if hasattr(config.opt, "lstm_v2v_lr") else config.opt.lr},
+                 {'params': model.backbone.parameters()}
                 ],
                 lr=config.opt.lr
             )
