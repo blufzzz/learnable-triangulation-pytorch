@@ -4,6 +4,19 @@ import torch
 from pose_resnet import PoseResNet
 from IPython.core.debugger import set_trace
 
+class Basic2DBlock(nn.Module):
+    def __init__(self, in_planes, out_planes, kernel_size):
+        super(Basic2DBlock, self).__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=1, padding=((kernel_size-1)//2)),
+            nn.BatchNorm2d(out_planes),
+            nn.ReLU(True)
+        )
+
+    def forward(self, x):
+        return self.block(x)
+
+
 class Pool2DBlock(nn.Module):
     def __init__(self, pool_size):
         super(Pool2DBlock, self).__init__()
@@ -80,7 +93,7 @@ class TemporalDiscriminator(nn.Module):
 
 class Seq2VecRNN(nn.Module):
     """docstring for Seq2VecModel"""
-    def __init__(self, input_features_dim, output_features_dim=None, hidden_dim = 512):
+    def __init__(self, input_features_dim, output_features_dim=None, hidden_dim = 1024):
         super(Seq2VecModel, self).__init__()
         self.input_features_dim = input_features_dim
         self.hidden_dim = hidden_dim
@@ -101,10 +114,10 @@ class Seq2VecRNN(nn.Module):
                                nn.BatchNorm2d(16),
                                nn.ReLU(),
                                nn.MaxPool2d(2))
-        self.lstm = nn.LSTM(400, 512, batch_first=True)
+        self.lstm = nn.LSTM(400, hidden_dim, batch_first=True)
         if self.output_features_dim is not None:
-          self.output_layer = nn.Linear(self.hidden_dim, self.output_features_dim)
-          self.activation = nn.ReLU()
+            self.output_layer = nn.Linear(self.hidden_dim, self.output_features_dim)
+            self.activation = nn.ReLU()
         
     def forward(self, features, eps = 1e-3):
         # [batch size, dt, 256, 96, 96]

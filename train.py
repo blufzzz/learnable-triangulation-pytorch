@@ -23,13 +23,11 @@ from torch.nn.parallel import DistributedDataParallel
 from tensorboardX import SummaryWriter
 
 from mvn.models.triangulation import RANSACTriangulationNet, AlgebraicTriangulationNet, VolumetricTriangulationNet
-from mvn.models.triangulation import RANSACTriangulationNet,\
-                                    AlgebraicTriangulationNet,\
-                                    VolumetricTriangulationNet,\
-                                    VolumetricLSTMAdaINNet
-                                    VolumetricFRAdaINNet, \
-                                    VolumetricLSTMV2VNNet
-from mvn.models.volumetric_temporal import VolumetricTemporalNet, VolumetricAdaINConditionedTemporalNet
+from mvn.models.volumetric_temporal import VolumetricTemporalNet,\
+                                           VolumetricLSTMAdaINNet,\
+                                           VolumetricFRAdaINNet,\
+                                           VolumetricLSTMV2VNNet
+                                           
 from mvn.models.loss import KeypointsMSELoss, KeypointsMSESmoothLoss, KeypointsMAELoss, KeypointsL2Loss, VolumetricCELoss
 
 from mvn.utils import img, multiview, op, vis, misc, cfg
@@ -57,16 +55,17 @@ def parse_args():
 def setup_human36m_dataloaders(config, is_train, distributed_train):
     train_dataloader = None
     train_sampler = None
+
+    # parameters for both val\train
+    singleview_dataset = config.dataset.singleview if hasattr(config.dataset, 'singleview') else False    
+    pivot_type = config.dataset.pivot_type if hasattr(config.dataset, "pivot_type") else 'first'
+    dt = config.dataset.dt if hasattr(config.dataset, "dt") else 1
+    dataset_type = Human36MSingleViewDataset if singleview_dataset else Human36MMultiViewDataset
+    dilation = config.dataset.dilation if hasattr(config.dataset, 'dilation') else 0
+    keypoints_per_frame=config.dataset.keypoints_per_frame if hasattr(config.dataset, 'keypoints_per_frame') else False
+
     if is_train:
         # train
-
-        singleview_dataset = config.dataset.train.singleview if hasattr(config.dataset.train, 'singleview') else False
-        dataset_type = Human36MSingleViewDataset if singleview_dataset else Human36MMultiViewDataset
-        dt = config.dataset.train.dt if hasattr(config.dataset.train, "dt") else 1
-        dilation = config.dataset.train.dilation if hasattr(config.dataset.train, 'dilation') else 0
-        keypoints_per_frame=config.dataset.train.keypoints_per_frame if hasattr(config.dataset.train, 'keypoints_per_frame') else False
-        pivot_type = config.dataset.train.pivot_type if hasattr(config.dataset.train, "pivot_type") else 'first'
-
         train_dataset = dataset_type(
             h36m_root=config.dataset.train.h36m_root,
             pred_results_path=config.dataset.train.pred_results_path if hasattr(config.dataset.train, "pred_results_path") else None,
@@ -100,15 +99,6 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
             num_workers=config.dataset.train.num_workers,
             worker_init_fn=dataset_utils.worker_init_fn
             )
-
-    # val
-    singleview_dataset = config.dataset.val.singleview if hasattr(config.dataset.val, 'singleview') else False
-    dataset_type = Human36MSingleViewDataset if singleview_dataset else Human36MMultiViewDataset
-    dt = config.dataset.val.dt if hasattr(config.dataset.val, "dt") else 1
-    dilation = config.dataset.val.dilation if  hasattr(config.dataset.val, 'dilation') else 0
-    keypoints_per_frame=config.dataset.val.keypoints_per_frame if hasattr(config.dataset.val, 'keypoints_per_frame') else False
-    pivot_type = config.dataset.val.pivot_type if hasattr(config.dataset.val, "pivot_type") else 'first'
-
 
     val_dataset = dataset_type(
         h36m_root=config.dataset.val.h36m_root,

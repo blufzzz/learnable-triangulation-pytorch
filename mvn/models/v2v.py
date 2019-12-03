@@ -1,6 +1,5 @@
 # Reference: https://github.com/dragonbook/V2V-PoseNet-pytorch
 from IPython.core.debugger import set_trace
-
 import torch.nn as nn
 import torch.nn.functional as F
  
@@ -238,6 +237,88 @@ class EncoderDecorder(nn.Module):
         return x
 
 
+class EncoderDecorderLSTM(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.encoder_pool1 = Pool3DBlock(2)
+        self.encoder_res1 = Res3DBlock(32, 64)
+        self.encoder_pool2 = Pool3DBlock(2)
+        self.encoder_res2 = Res3DBlock(64, 128)
+        self.encoder_pool3 = Pool3DBlock(2)
+        self.encoder_res3 = Res3DBlock(128, 128)
+        self.encoder_pool4 = Pool3DBlock(2)
+        self.encoder_res4 = Res3DBlock(128, 128)
+        self.encoder_pool5 = Pool3DBlock(2)
+        self.encoder_res5 = Res3DBlock(128, 128)
+
+        self.mid_res = Res3DBlock(128, 128)
+
+        self.decoder_res5 = Res3DBlock(128, 128)
+        self.decoder_upsample5 = Upsample3DBlock(128, 128, 2, 2)
+        self.decoder_res4 = Res3DBlock(128, 128)
+        self.decoder_upsample4 = Upsample3DBlock(128, 128, 2, 2)
+        self.decoder_res3 = Res3DBlock(128, 128)
+        self.decoder_upsample3 = Upsample3DBlock(128, 128, 2, 2)
+        self.decoder_res2 = Res3DBlock(128, 128)
+        self.decoder_upsample2 = Upsample3DBlock(128, 64, 2, 2)
+        self.decoder_res1 = Res3DBlock(64, 64)
+        self.decoder_upsample1 = Upsample3DBlock(64, 32, 2, 2)
+
+        self.skip_res1 = Res3DBlock(32, 32)
+        self.skip_res2 = Res3DBlock(64, 64)
+        self.skip_res3 = Res3DBlock(128, 128)
+        self.skip_res4 = Res3DBlock(128, 128)
+        self.skip_res5 = Res3DBlock(128, 128)
+
+        # self.lstm_encoder =  
+        # self.lstm = nn.LSTM(input_size=512, hidden_size=512, batch_first=True)
+        # self.lstm_decoder = 
+
+    def forward(self, x, params=None):
+        batch_size = x.shape[0] 
+        hidden = (torch.randn(batch_size, 1, 3),
+                  torch.randn(batch_size, 1, 3))
+        skip_x1 = self.skip_res1(x)
+        x = self.encoder_pool1(x)
+        x = self.encoder_res1(x)
+        skip_x2 = self.skip_res2(x)
+        x = self.encoder_pool2(x)
+        x = self.encoder_res2(x)
+        skip_x3 = self.skip_res3(x)
+        x = self.encoder_pool3(x)
+        x = self.encoder_res3(x)
+        skip_x4 = self.skip_res4(x)
+        x = self.encoder_pool4(x)
+        x = self.encoder_res4(x)
+        skip_x5 = self.skip_res5(x)
+        x = self.encoder_pool5(x)
+        x = self.encoder_res5(x)
+
+        x = self.mid_res(x)
+        # x = x.view()
+        # x, hidden = self.lstm(x, hidden)
+        # x = x[:,-1,...]
+
+        x = self.decoder_res5(x)
+        x = self.decoder_upsample5(x)
+        x = x + skip_x5
+        x = self.decoder_res4(x)
+        x = self.decoder_upsample4(x)
+        x = x + skip_x4
+        x = self.decoder_res3(x)
+        x = self.decoder_upsample3(x)
+        x = x + skip_x3
+        x = self.decoder_res2(x)
+        x = self.decoder_upsample2(x)
+        x = x + skip_x2
+        x = self.decoder_res1(x)
+        x = self.decoder_upsample1(x)
+        x = x + skip_x1
+
+        return x
+
+
 class EncoderDecorderAdaIN(nn.Module):
     def __init__(self):
         super().__init__()
@@ -310,6 +391,8 @@ class EncoderDecorderAdaIN(nn.Module):
 
         return x
 
+
+
 class V2VModel(nn.Module):
     def __init__(self, input_channels, output_channels):
         super().__init__()
@@ -352,6 +435,8 @@ class V2VModel(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
 
+
+
 class V2VModelAdaIN(nn.Module):
     def __init__(self, input_channels, output_channels):
             super().__init__()
@@ -377,7 +462,6 @@ class V2VModelAdaIN(nn.Module):
             self._initialize_weights()
 
     def forward(self, x, adain_params):
-        use_adain_params = adain_params is not None
         x = self.front_layer1(x, adain_params[0])
         x = self.front_layer2(x, adain_params[1:4])
         x = self.front_layer3(x, adain_params[4:6])
@@ -399,6 +483,56 @@ class V2VModelAdaIN(nn.Module):
                 nn.init.xavier_normal_(m.weight)
                 # nn.init.normal_(m.weight, 0, 0.001)
                 nn.init.constant_(m.bias, 0)
+
+
+
+class V2VModelLSTM(nn.Module):
+    def __init__(self, input_channels, output_channels):
+            super().__init__()
+
+            self.front_layer1 = Basic3DBlockAdaIN(input_channels, 16, 7)
+            self.front_layer2 = Res3DBlockAdaIN(16, 32)
+            self.front_layer3 = Res3DBlockAdaIN(32, 32)
+            self.front_layer4 = Res3DBlockAdaIN(32, 32)
+            # [16, 32,32,32, 32,32, 32,32]
+
+            self.encoder_decoder_lstm = EncoderDecorderLSTM()
+            # [32,32, 64,64,64, 64,64, 128,128,128, 128,128, 128,128,
+            # 128,128, 128,128, 128,128, 128,128, 128,128, 128,128, 128,
+            # 128,128, 128, 128,128, 128, 128,128, 64, 64,64, 32]
+
+            self.back_layer1 =Res3DBlockAdaIN(32, 32)
+            self.back_layer2 =Basic3DBlockAdaIN(32, 32, 1)
+            self.back_layer3 =Basic3DBlockAdaIN(32, 32, 1)
+            # [32,32, 32, 32]
+
+            self.output_layer = nn.Conv3d(32, output_channels, kernel_size=1, stride=1, padding=0)
+            self._initialize_weights()
+
+    def forward(self, x, adain_params):
+        x = self.front_layer1(x, adain_params[0])
+        x = self.front_layer2(x, adain_params[1:4])
+        x = self.front_layer3(x, adain_params[4:6])
+        x = self.front_layer4(x, adain_params[6:8])
+        x = self.encoder_decoder_lstm(x, adain_params[8:47]) 
+        x = self.back_layer1(x, adain_params[47:49])
+        x = self.back_layer2(x, adain_params[49])
+        x = self.back_layer3(x, adain_params[50])
+        x = self.output_layer(x)
+        return x
+
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv3d):
+                nn.init.xavier_normal_(m.weight)
+                # nn.init.normal_(m.weight, 0, 0.001)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.ConvTranspose3d):
+                nn.init.xavier_normal_(m.weight)
+                # nn.init.normal_(m.weight, 0, 0.001)
+                nn.init.constant_(m.bias, 0)
+
+
 
 
 class EncoderDecorderAdaIN_MiddleVector(EncoderDecorder):

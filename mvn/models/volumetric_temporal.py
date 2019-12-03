@@ -14,7 +14,11 @@ from mvn.utils import img
 from mvn.utils import misc
 from mvn.utils import volumetric
 from mvn.models.v2v import V2VModel, V2VModelAdaIN, V2VModelAdaIN_MiddleVector
-from mvn.models.temporal import Seq2VecRNN, FeaturesAR_CNN1D, FeaturesAR_CNN2D_UNet, FeaturesAR_RNN, FeaturesAR_CNN2D_ResNet
+from mvn.models.temporal import Seq2VecRNN,\
+                                FeaturesAR_RNN,\
+                                FeaturesAR_CNN1D,\
+                                FeaturesAR_CNN2D_UNet,\
+                                FeaturesAR_CNN2D_ResNet
 
 from IPython.core.debugger import set_trace
 
@@ -71,9 +75,11 @@ class VolumetricTemporalNet(nn.Module):
         self.process_features = nn.Sequential(
             nn.Conv2d(256, 32, 1)
         )
+        self.volume_net = {
+            "original":V2VModel(32, self.num_joints),
+            "lstm":V2VModelLSTM(32, self.num_joints)
+        }[config.model.v2v_type]
 
-        self.volume_net = V2VModel(32, self.num_joints)
-        
     def get_coord_volumes(self, 
                             cuboid_side, 
                             volume_size, 
@@ -124,12 +130,10 @@ class VolumetricTemporalNet(nn.Module):
             
             center = torch.from_numpy(base_points).type(torch.float).to(device).unsqueeze(-2)
             grid = grid - center
-            
             grid = torch.stack([volumetric.rotate_coord_volume(coord_grid,\
                                 np.random.uniform(0.0, 2 * np.pi), axis) for coord_grid in grid])
-            
             grid = grid + center
-        
+
         grid = grid.view(*bs_dt, volume_size, volume_size, volume_size, 3)
     
         return grid, cuboids, base_points
@@ -244,14 +248,12 @@ class VolumetricTemporalNet(nn.Module):
                 base_points
                 )
 
+
+
 class VolumetricLSTMAdaINNet(nn.Module):
-    '''
-    '''
 
     def __init__(self, config):
         super().__init__()
-
-        t1 = time()
 
         self.num_joints = config.model.backbone.num_joints
 
@@ -437,6 +439,7 @@ class VolumetricLSTMAdaINNet(nn.Module):
 
 
 
+
 class VolumetricFRAdaINNet(nn.Module):
 
     '''
@@ -488,17 +491,17 @@ class VolumetricFRAdaINNet(nn.Module):
             nn.Conv2d(self.features_dim, self.intermediate_features_dim, 1)
         )
         self.features_regressor = {
-            "RNN": FeaturesAR_RNN(self.features_dim, self.features_dim),
-            "Conv1D": FeaturesAR_CNN1D(self.features_dim, self.features_dim),
-            "Conv2D_UNet": FeaturesAR_CNN2D_UNet(self.features_dim*self.dt, self.features_dim),
-            "Conv2D_ResNet": FeaturesAR_CNN2D_ResNet(self.features_dim*self.dt, self.features_dim)
+            "rnn": FeaturesAR_RNN(self.features_dim, self.features_dim),
+            "conv1d": FeaturesAR_CNN1D(self.features_dim, self.features_dim),
+            "conv2d_unet": FeaturesAR_CNN2D_UNet(self.features_dim*self.dt, self.features_dim),
+            "conv2d_resnet": FeaturesAR_CNN2D_ResNet(self.features_dim*self.dt, self.features_dim)
         }[config.model.features_regressor]
                 
 
     def get_coord_volumes(self, 
                             cuboid_side, 
                             volume_size, 
-                            device, 
+                            device,
                             keypoints = None,
                             batch_size = None,
                             dt = None
@@ -583,7 +586,8 @@ class VolumetricFRAdaINNet(nn.Module):
 
         proj_matricies_batch = torch.stack([torch.stack([torch.from_numpy(camera.projection) \
                                             for camera in camera_batch], dim=0) \
-                                            for camera_batch in new_cameras], dim=0).transpose(1, 0)  # shape (batch_size, dt, 3, 4)
+                                            for camera_batch in new_cameras], dim=0).transpose(1, 0)  
+                                            #shape (batch_size, dt, 3, 4)
 
         proj_matricies_batch = proj_matricies_batch.float().to(device)
         proj_matricies_batch = proj_matricies_batch[:,-1,...].unsqueeze(1)
@@ -612,13 +616,13 @@ class VolumetricFRAdaINNet(nn.Module):
 
         # lift each featuremap to distinct volume and aggregate 
         volumes_pred = op.unproject_heatmaps(features_pred,  
-                                        proj_matricies_batch, 
-                                        coord_volumes, 
-                                        volume_aggregation_method=self.volume_aggregation_method,
-                                        vol_confidences=vol_confidences
-                                        )
+                                             proj_matricies_batch, 
+                                             coord_volumes, 
+                                             volume_aggregation_method=self.volume_aggregation_method,
+                                             vol_confidences=vol_confidences
+                                             )
 
-        volumes = op.unproject_heatmaps(pivot_features,  
+        volumes = op.unproject_heatmaps(features_pivot,  
                                         proj_matricies_batch, 
                                         coord_volumes, 
                                         volume_aggregation_method=self.volume_aggregation_method,
@@ -626,12 +630,12 @@ class VolumetricFRAdaINNet(nn.Module):
                                         )
         
         volumes = torch.cat(volumes, 0)
-        volumes_pred = torch.cat(volumes, 0)
+        volumes_pred = torch.cat(volumes_pred, 0)
 
         # inference
-        volumes = self.volume_net(torch.stack(volumes, volumes_pred), adain_params=[None]*len(CHANNELS_LIST))
+        volumes_stacked = self.volume_net(torch.stack(volumes, volumes_pred), adain_params=[None]*len(CHANNELS_LIST))
         # integral 3d
-        vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
+        vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes_stacked * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
 
         return (vol_keypoints_3d,
                 features_pivot,
@@ -642,11 +646,4 @@ class VolumetricFRAdaINNet(nn.Module):
                 coord_volumes,
                 base_points
                 )        
-
-
-class VolumetricLSTMV2VNNet(object):
-    """docstring for VolumetricLSTMV2VNNet"""
-    def __init__(self, arg):
-        super(VolumetricLSTMV2VNNet, self).__init__()
-        self.arg = arg
         

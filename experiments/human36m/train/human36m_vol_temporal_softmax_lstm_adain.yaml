@@ -1,4 +1,4 @@
-title: "human36m_vol_temporal_softmax"
+title: "human36m_vol_temporal_lstm_adain_softmax"
 kind: "human36m"
 vis_freq: 1000
 vis_n_elements: 10
@@ -62,10 +62,10 @@ model:
 dataset:
   kind: "human36m"
   dt: 4
+  singleview: true
+  pivot_type: 'first'
 
   train:
-    singleview: true
-    pivot_type: 'first'
     h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"
     labels_path: "/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy"
     pred_results_path: 
@@ -82,8 +82,6 @@ dataset:
     num_workers: 8
 
   val:
-    singleview: true
-    pivot_type: 'first'
     h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"
     labels_path: "/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy"
     pred_results_path: 
