@@ -435,8 +435,6 @@ class V2VModel(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
 
-
-
 class V2VModelAdaIN(nn.Module):
     def __init__(self, input_channels, output_channels):
             super().__init__()

@@ -38,7 +38,7 @@ model:
 
   cuboid_side: 2500.0
 
-  volume_size: 32
+  volume_size: 64
   volume_multiplier: 1.0
   volume_softmax: true
 
@@ -61,14 +61,14 @@ model:
 
 dataset:
   kind: "human36m"
-  dt: 4
+  dt: 8
   singleview: true
   pivot_type: 'first'
 
   train:
     h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"
     labels_path: "/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy"
-    pred_results_path: 
+    pred_results_path:
 
     with_damaged_actions: true
     undistort_images: false

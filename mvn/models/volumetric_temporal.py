@@ -255,6 +255,7 @@ class VolumetricLSTMAdaINNet(nn.Module):
     def __init__(self, config):
         super().__init__()
 
+        assert config.dataset.pivot_type == 'first', "pivot_type should be first"
         self.num_joints = config.model.backbone.num_joints
 
         # volume
@@ -284,18 +285,18 @@ class VolumetricLSTMAdaINNet(nn.Module):
         self.transfer_cmu_to_human36m = config.model.transfer_cmu_to_human36m if hasattr(config.model, "transfer_cmu_to_human36m") else False
 
         # modules params
-        self.return_heatmaps = config.model.backbone.return_heatmaps if hasattr(config.model.backbone, 'return_heatmaps') else False  
         self.features_dim = config.model.features_dim if hasattr(config.model, 'features_dim') else 256
         self.style_vector_dim = config.model.style_vector_dim if hasattr(config.model, 'style_vector_dim') else 256
 
         # modules
         self.backbone = pose_resnet.get_pose_net(config.model.backbone) 
         self.volume_net = V2VModelAdaIN(32, self.num_joints)
-        self.features_sequence_to_vector = Seq2VecRNN(self.features_dim, output_features_dim=self.style_vector_dim)
+        self.features_sequence_to_vector = Seq2VecRNN(256, output_features_dim=self.style_vector_dim)
         self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*C) for C in CHANNELS_LIST]) # 51
         self.process_features = nn.Sequential(
-            nn.Conv2d(256, 32, 1)
+            nn.Conv2d(256, self.features_dim, 1)
         )
+
         
 
     def get_coord_volumes(self, 
@@ -362,19 +363,19 @@ class VolumetricLSTMAdaINNet(nn.Module):
 
         device = images_batch.device
         batch_size, dt = images_batch.shape[:2]
-        image_shape = images_batch.shape[3:]
+        image_shape = images_batch.shape[-2:]
 
         # reshape for backbone forward
         images_batch = images_batch.view(-1, 3, *image_shape)
 
         # forward backbone
-        heatmaps, features, _, vol_confidences = self.backbone(images_batch)
+        heatmaps, features, alg_confidences, vol_confidences = self.backbone(images_batch)
 
         # reshape back and take only last view (pivot)
         images_batch = images_batch.view(batch_size, dt, *images_batch.shape[1:])[:,-1,...].unsqueeze(1)
         
         # calcualte shapes
-        features_shape = features.shape[2:]
+        features_shape = features.shape[-2:]
         features_channels = features.shape[1]
 
         # change camera intrinsics
@@ -388,14 +389,14 @@ class VolumetricLSTMAdaINNet(nn.Module):
                                             for camera_batch in new_cameras], dim=0).transpose(1, 0)  # shape (batch_size, dt, 3, 4)
 
         proj_matricies_batch = proj_matricies_batch.float().to(device)
-        proj_matricies_batch = proj_matricies_batch[:,-1,...].unsqueeze(1)
+        proj_matricies_batch = proj_matricies_batch[:,-1,...].unsqueeze(1) 
 
         # process features before lifting to volume
         features = features.view(batch_size, dt, features_channels, *features_shape)
-        pivot_features = features[:,-1,...]
+        pivot_features = features[:,-1,...] 
         features = features[:,:-1,...]
         style_vector = self.features_sequence_to_vector(features) # [batch_size, 512]
-        pivot_features = self.process_features(pivot_features).unsqueeze(1)
+        pivot_features = self.process_features(pivot_features).unsqueeze(1) # add fictive view
         
         if self.use_precalculated_pelvis:
             tri_keypoints_3d = torch.from_numpy(np.array(batch['pred_keypoints_3d'])).type(torch.float).to(device)
@@ -480,11 +481,10 @@ class VolumetricFRAdaINNet(nn.Module):
         self.features_dim = config.model.features_dim if hasattr(config.model, 'features_dim') else 256
         self.intermediate_features_dim = config.model.intermediate_features_dim if hasattr(config.model, 'intermediate_features_dim') else 32
 
-
         # modules
         self.backbone = pose_resnet.get_pose_net(config.model.backbone)
         self.volume_net = {
-            "all":V2VModelAdaIN_Vector(self.intermediate_features_dim, self.num_joints)    
+            "all":V2VModelAdaIN(self.intermediate_features_dim, self.num_joints)    
             "middle":V2VModelAdaIN_MiddleVector(self.intermediate_features_dim, self.num_joints)    
         }[config.model.adain_type]
         self.process_features = nn.Sequential(
@@ -562,17 +562,14 @@ class VolumetricFRAdaINNet(nn.Module):
 
         device = images_batch.device
         batch_size, dt = images_batch.shape[:2]
-        image_shape = images_batch.shape[3:]
+        image_shape = images_batch.shape[-2:]
 
         # reshape for backbone forward
         images_batch = images_batch.view(-1, 3, *image_shape)
 
         # forward backbone
-        heatmaps, features, _, vol_confidences = self.backbone(images_batch)
+        heatmaps, features, alg_confidences, vol_confidences = self.backbone(images_batch)
         features = self.process_features(features) # [bs, 256, 96, 96] -> [bs, 32, 96, 96] 
-
-        # reshape back and take only last view (pivot)
-        images_batch = images_batch.view(batch_size, dt, *images_batch.shape[1:])[:,-1,...].unsqueeze(1)
         
         # calcualte shapes
         features_shape = features.shape[2:]
@@ -596,7 +593,7 @@ class VolumetricFRAdaINNet(nn.Module):
         features = features.view(batch_size, dt, features_channels, *features_shape)
         features_pivot = features[:,-1,...].unsqueeze(1)
         features_aux = features[:,:-1,...]
-        features_pred = self.features_regressor(features_aux, decoder=True)
+        features_pred = self.features_regressor(features_aux)
 
         if self.use_precalculated_pelvis:
             tri_keypoints_3d = torch.from_numpy(np.array(batch['pred_keypoints_3d'])).type(torch.float).to(device)
@@ -609,10 +606,10 @@ class VolumetricFRAdaINNet(nn.Module):
                
         # amend coord_volumes position                                                         
         coord_volumes, cuboids, base_points = self.get_coord_volumes(self.cuboid_side,
-                                                                        self.volume_size, 
-                                                                        device,
-                                                                        keypoints=tri_keypoints_3d
-                                                                        )
+                                                                    self.volume_size, 
+                                                                    device,
+                                                                    keypoints=tri_keypoints_3d
+                                                                    )
 
         # lift each featuremap to distinct volume and aggregate 
         volumes_pred = op.unproject_heatmaps(features_pred,  

@@ -29,6 +29,7 @@ model:
   kind: "mpii"
   volume_aggregation_method: "no_aggregation"
   features_regressor: "conv2d_unet"
+  adain_type: "all"
 
   init_weights: false
   checkpoint: ""
