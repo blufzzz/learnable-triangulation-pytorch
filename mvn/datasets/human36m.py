@@ -413,7 +413,7 @@ class Human36MSingleViewDataset(Human36MMultiViewDataset):
         if self.pivot_type == 'intermediate':
             iterator=range(-((self._time_period)//2), ((self._time_period)//2)+1, self.dilation+1)
         elif self.pivot_type == 'first':
-            iterator=range(-(self._time_period-1),1)
+            iterator=range(-(self._time_period-1), 1, self.dilation+1)
         else:
             raise RuntimeError('Unknown `pivot_type` in config.dataset.<train/val>')       
 

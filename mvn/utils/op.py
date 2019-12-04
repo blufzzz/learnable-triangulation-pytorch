@@ -8,6 +8,67 @@ from mvn.utils.img import to_numpy, to_torch
 from mvn.utils import multiview
 
 
+def get_coord_volumes(kind, 
+                        training, 
+                        rotation,
+                        cuboid_side, 
+                        volume_size, 
+                        device, 
+                        keypoints = None,
+                        batch_size = None,
+                        dt = None
+                        ):
+    
+        use_default_basepoint = keypoints is None
+        bs_dt = (batch_size, dt) if use_default_basepoint else keypoints.shape[:-2]
+        sides = torch.tensor([cuboid_side, cuboid_side, cuboid_side], dtype=torch.float).to(device)
+
+        # default base_points are the coordinate's origins
+        base_points = torch.zeros((*bs_dt, 3), dtype=torch.float).to(device)
+        
+        if not use_default_basepoint:    
+            # get root (pelvis) from keypoints   
+            if kind == "coco":
+                base_points = (keypoints[...,11, :3] + keypoints[...,12, :3]) / 2
+            elif kind == "mpii":
+                base_points = keypoints[..., 6, :3] 
+
+        position = base_points - sides / 2
+
+        # build cuboids
+        cuboids = None
+
+        # build coord volume
+        xxx, yyy, zzz = torch.meshgrid(torch.arange(volume_size, device=device),
+                                        torch.arange(volume_size, device=device),
+                                         torch.arange(volume_size, device=device))
+        grid = torch.stack([xxx, yyy, zzz], dim=-1).type(torch.float)
+        grid = grid.view((-1, 3))
+        grid = grid.view(*[1]*len(bs_dt), *grid.shape).repeat(*keypoints.shape[:-2], *[1]*len(grid.shape))
+
+        grid[..., 0] = position[..., 0].unsqueeze(-1) + (sides[0] / (volume_size - 1)) * grid[..., 0]
+        grid[..., 1] = position[..., 1].unsqueeze(-1) + (sides[1] / (volume_size - 1)) * grid[..., 1]
+        grid[..., 2] = position[..., 2].unsqueeze(-1) + (sides[2] / (volume_size - 1)) * grid[..., 2]
+        
+        if kind == "coco":
+            axis = [0, 1, 0]  # y axis
+        elif kind == "mpii":
+            axis = [0, 0, 1]  # z axis
+            
+        # random rotation
+        if training and rotation:    
+            
+            center = torch.from_numpy(base_points).type(torch.float).to(device).unsqueeze(-2)
+            grid = grid - center
+            grid = torch.stack([volumetric.rotate_coord_volume(coord_grid,\
+                                np.random.uniform(0.0, 2 * np.pi), axis) for coord_grid in grid])
+            grid = grid + center
+
+        grid = grid.view(*bs_dt, volume_size, volume_size, volume_size, 3)
+    
+        return grid, cuboids, base_points
+
+
 def root_centering(keypoints, kind, inverse = False):
 
     '''

@@ -21,10 +21,12 @@ from mvn.models.temporal import Seq2VecRNN,\
                                 FeaturesAR_CNN2D_ResNet
 
 from IPython.core.debugger import set_trace
+from op import get_coord_volumes
 
 CHANNELS_LIST = [16, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 64, 64, 64, 64, 128, 128, 128, 128, 128,\
                                   128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128,\
                                   128, 128, 128, 128, 128, 64, 64, 64, 32, 32, 32, 32, 32]
+
 
 class VolumetricTemporalNet(nn.Module):
 
@@ -80,64 +82,6 @@ class VolumetricTemporalNet(nn.Module):
             "lstm":V2VModelLSTM(32, self.num_joints)
         }[config.model.v2v_type]
 
-    def get_coord_volumes(self, 
-                            cuboid_side, 
-                            volume_size, 
-                            device, 
-                            keypoints = None,
-                            batch_size = None,
-                            dt = None
-                            ):
-    
-        use_default_basepoint = keypoints is None
-        bs_dt = (batch_size, dt) if use_default_basepoint else keypoints.shape[:-2]
-        sides = torch.tensor([cuboid_side, cuboid_side, cuboid_side], dtype=torch.float).to(device)
-
-        # default base_points are the coordinate's origins
-        base_points = torch.zeros((*bs_dt, 3), dtype=torch.float).to(device)
-        
-        if not use_default_basepoint:    
-            # get root (pelvis) from keypoints   
-            if self.kind == "coco":
-                base_points = (keypoints[...,11, :3] + keypoints[...,12, :3]) / 2
-            elif self.kind == "mpii":
-                base_points = keypoints[..., 6, :3] 
-
-        position = base_points - sides / 2
-
-        # build cuboids
-        cuboids = None
-
-        # build coord volume
-        xxx, yyy, zzz = torch.meshgrid(torch.arange(volume_size, device=device),
-                                        torch.arange(volume_size, device=device),
-                                         torch.arange(volume_size, device=device))
-        grid = torch.stack([xxx, yyy, zzz], dim=-1).type(torch.float)
-        grid = grid.view((-1, 3))
-        grid = grid.view(*[1]*len(bs_dt), *grid.shape).repeat(*keypoints.shape[:-2], *[1]*len(grid.shape))
-
-        grid[..., 0] = position[..., 0].unsqueeze(-1) + (sides[0] / (volume_size - 1)) * grid[..., 0]
-        grid[..., 1] = position[..., 1].unsqueeze(-1) + (sides[1] / (volume_size - 1)) * grid[..., 1]
-        grid[..., 2] = position[..., 2].unsqueeze(-1) + (sides[2] / (volume_size - 1)) * grid[..., 2]
-        
-        if self.kind == "coco":
-            axis = [0, 1, 0]  # y axis
-        elif self.kind == "mpii":
-            axis = [0, 0, 1]  # z axis
-            
-        # random rotation
-        if self.training and self.rotation:    
-            
-            center = torch.from_numpy(base_points).type(torch.float).to(device).unsqueeze(-2)
-            grid = grid - center
-            grid = torch.stack([volumetric.rotate_coord_volume(coord_grid,\
-                                np.random.uniform(0.0, 2 * np.pi), axis) for coord_grid in grid])
-            grid = grid + center
-
-        grid = grid.view(*bs_dt, volume_size, volume_size, volume_size, 3)
-    
-        return grid, cuboids, base_points
-
     def forward(self, images_batch, batch, root_keypoints=None):
 
         device = images_batch.device
@@ -188,12 +132,15 @@ class VolumetricTemporalNet(nn.Module):
 
         elif self.use_volumetric_pelvis:
 
-            coord_volumes, _, _ = self.get_coord_volumes(self.cuboid_side*self.cuboid_multiplier,
-                                                      self.volume_size, 
-                                                      device, 
-                                                      batch_size = batch_size,
-                                                      dt = dt
-                                                      )
+            coord_volumes, _, _ = get_coord_volumes(self.kind, 
+                                                    self.training, 
+                                                    self.rotation,
+                                                    self.cuboid_side*self.cuboid_multiplier,
+                                                    self.volume_size, 
+                                                    device, 
+                                                    batch_size = batch_size,
+                                                    dt = dt
+                                                    )
 
             volumes = op.unproject_heatmaps(features,
                                               proj_matricies_batch, 
@@ -212,11 +159,14 @@ class VolumetricTemporalNet(nn.Module):
             raise RuntimeError('In absence of precalculated pelvis or gt pelvis, self.use_volumetric_pelvis should be True') 
        
         # amend coord_volumes position                                                         
-        coord_volumes, cuboids, base_points = self.get_coord_volumes(self.cuboid_side,
-                                                        self.volume_size, 
-                                                        device,
-                                                        keypoints=tri_keypoints_3d
-                                                        )
+        coord_volumes, cuboids, base_points = get_coord_volumes(self.kind, 
+                                                                self.training, 
+                                                                self.rotation,
+                                                                self.cuboid_side,
+                                                                self.volume_size, 
+                                                                device,
+                                                                keypoints=tri_keypoints_3d
+                                                                )
 
         if self.process_frames_independently:
             coord_volumes = coord_volumes.view(-1, *coord_volumes.shape[-4:])
@@ -297,67 +247,6 @@ class VolumetricLSTMAdaINNet(nn.Module):
             nn.Conv2d(256, self.features_dim, 1)
         )
 
-        
-
-    def get_coord_volumes(self, 
-                            cuboid_side, 
-                            volume_size, 
-                            device, 
-                            keypoints = None,
-                            batch_size = None,
-                            dt = None
-                            ):
-    
-        use_default_basepoint = keypoints is None
-        bs_dt = (batch_size, dt) if use_default_basepoint else keypoints.shape[:-2]
-        sides = torch.tensor([cuboid_side, cuboid_side, cuboid_side], dtype=torch.float).to(device)
-
-        # default base_points are the coordinate's origins
-        base_points = torch.zeros((*bs_dt, 3), dtype=torch.float).to(device)
-        
-        if not use_default_basepoint:    
-            # get root (pelvis) from keypoints   
-            if self.kind == "coco":
-                base_points = (keypoints[...,11, :3] + keypoints[...,12, :3]) / 2
-            elif self.kind == "mpii":
-                base_points = keypoints[..., 6, :3] 
-
-        position = base_points - sides / 2
-
-        # build cuboids
-        cuboids = None
-
-        # build coord volume
-        xxx, yyy, zzz = torch.meshgrid(torch.arange(volume_size, device=device),
-                                        torch.arange(volume_size, device=device),
-                                         torch.arange(volume_size, device=device))
-        grid = torch.stack([xxx, yyy, zzz], dim=-1).type(torch.float)
-        grid = grid.view((-1, 3))
-        grid = grid.view(*[1]*len(bs_dt), *grid.shape).repeat(*keypoints.shape[:-2], *[1]*len(grid.shape))
-
-        grid[..., 0] = position[..., 0].unsqueeze(-1) + (sides[0] / (volume_size - 1)) * grid[..., 0]
-        grid[..., 1] = position[..., 1].unsqueeze(-1) + (sides[1] / (volume_size - 1)) * grid[..., 1]
-        grid[..., 2] = position[..., 2].unsqueeze(-1) + (sides[2] / (volume_size - 1)) * grid[..., 2]
-        
-        if self.kind == "coco":
-            axis = [0, 1, 0]  # y axis
-        elif self.kind == "mpii":
-            axis = [0, 0, 1]  # z axis
-            
-        # random rotation
-        if self.training and self.rotation:    
-            
-            center = torch.from_numpy(base_points).type(torch.float).to(device).unsqueeze(-2)
-            grid = grid - center
-            
-            grid = torch.stack([volumetric.rotate_coord_volume(coord_grid,\
-                                np.random.uniform(0.0, 2 * np.pi), axis) for coord_grid in grid])
-            
-            grid = grid + center
-        
-        grid = grid.view(*bs_dt, volume_size, volume_size, volume_size, 3)
-    
-        return grid, cuboids, base_points
 
     def forward(self, images_batch, batch, root_keypoints=None):
 
@@ -408,11 +297,15 @@ class VolumetricLSTMAdaINNet(nn.Module):
             raise RuntimeError('In absence of precalculated pelvis or gt pelvis, self.use_volumetric_pelvis should be True') 
        
         # amend coord_volumes position                                                         
-        coord_volumes, cuboids, base_points = self.get_coord_volumes(self.cuboid_side,
-                                                                        self.volume_size, 
-                                                                        device,
-                                                                        keypoints=tri_keypoints_3d
-                                                                        )
+        coord_volumes, cuboids, base_points = get_coord_volumes(self.kind, 
+                                                                self.training, 
+                                                                self.rotation,
+                                                                self.cuboid_side,
+                                                                self.volume_size, 
+                                                                device,
+                                                                keypoints=tri_keypoints_3d
+                                                                )
+        
         # lift each featuremap to distinct volume and aggregate 
         volumes = op.unproject_heatmaps(pivot_features,  
                                         proj_matricies_batch, 
@@ -439,17 +332,9 @@ class VolumetricLSTMAdaINNet(nn.Module):
                 )
 
 
-
-
 class VolumetricFRAdaINNet(nn.Module):
-
-    '''
-    '''
     def __init__(self, config):
         super().__init__()
-
-        self.num_joints = config.model.backbone.num_joints
-
         # volume
         self.volume_softmax = config.model.volume_softmax
         self.volume_multiplier = config.model.volume_multiplier
@@ -477,86 +362,25 @@ class VolumetricFRAdaINNet(nn.Module):
         self.transfer_cmu_to_human36m = config.model.transfer_cmu_to_human36m if hasattr(config.model, "transfer_cmu_to_human36m") else False
 
         # modules params
-        self.return_heatmaps = config.model.backbone.return_heatmaps if hasattr(config.model.backbone, 'return_heatmaps') else False  
-        self.features_dim = config.model.features_dim if hasattr(config.model, 'features_dim') else 256
         self.intermediate_features_dim = config.model.intermediate_features_dim if hasattr(config.model, 'intermediate_features_dim') else 32
+        self.num_joints = config.model.backbone.num_joints
 
         # modules
         self.backbone = pose_resnet.get_pose_net(config.model.backbone)
         self.volume_net = {
-            "all":V2VModelAdaIN(self.intermediate_features_dim, self.num_joints)    
-            "middle":V2VModelAdaIN_MiddleVector(self.intermediate_features_dim, self.num_joints)    
+            "all":V2VModelAdaIN(self.intermediate_features_dim, self.num_joints)
+            # "middle":V2VModelAdaIN_MiddleVector(self.intermediate_features_dim, self.num_joints)    
         }[config.model.adain_type]
         self.process_features = nn.Sequential(
-            nn.Conv2d(self.features_dim, self.intermediate_features_dim, 1)
+            nn.Conv2d(256, self.intermediate_features_dim, 1)
         )
         self.features_regressor = {
-            "rnn": FeaturesAR_RNN(self.features_dim, self.features_dim),
-            "conv1d": FeaturesAR_CNN1D(self.features_dim, self.features_dim),
-            "conv2d_unet": FeaturesAR_CNN2D_UNet(self.features_dim*self.dt, self.features_dim),
-            "conv2d_resnet": FeaturesAR_CNN2D_ResNet(self.features_dim*self.dt, self.features_dim)
+            # "rnn": FeaturesAR_RNN(self.intermediate_features_dim, self.intermediate_features_dim),
+            # "conv1d": FeaturesAR_CNN1D(self.intermediate_features_dim, self.intermediate_features_dim),
+            "conv2d_unet": FeaturesAR_CNN2D_UNet(self.intermediate_features_dim*(self.dt-1), self.intermediate_features_dim)
+            # "conv2d_resnet": FeaturesAR_CNN2D_ResNet(self.intermediate_features_dim*self.dt, self.intermediate_features_dim)
         }[config.model.features_regressor]
                 
-
-    def get_coord_volumes(self, 
-                            cuboid_side, 
-                            volume_size, 
-                            device,
-                            keypoints = None,
-                            batch_size = None,
-                            dt = None
-                            ):
-    
-        use_default_basepoint = keypoints is None
-        bs_dt = (batch_size, dt) if use_default_basepoint else keypoints.shape[:-2]
-        sides = torch.tensor([cuboid_side, cuboid_side, cuboid_side], dtype=torch.float).to(device)
-
-        # default base_points are the coordinate's origins
-        base_points = torch.zeros((*bs_dt, 3), dtype=torch.float).to(device)
-        
-        if not use_default_basepoint:    
-            # get root (pelvis) from keypoints   
-            if self.kind == "coco":
-                base_points = (keypoints[...,11, :3] + keypoints[...,12, :3]) / 2
-            elif self.kind == "mpii":
-                base_points = keypoints[..., 6, :3] 
-
-        position = base_points - sides / 2
-
-        # build cuboids
-        cuboids = None
-
-        # build coord volume
-        xxx, yyy, zzz = torch.meshgrid(torch.arange(volume_size, device=device),
-                                        torch.arange(volume_size, device=device),
-                                         torch.arange(volume_size, device=device))
-        grid = torch.stack([xxx, yyy, zzz], dim=-1).type(torch.float)
-        grid = grid.view((-1, 3))
-        grid = grid.view(*[1]*len(bs_dt), *grid.shape).repeat(*keypoints.shape[:-2], *[1]*len(grid.shape))
-
-        grid[..., 0] = position[..., 0].unsqueeze(-1) + (sides[0] / (volume_size - 1)) * grid[..., 0]
-        grid[..., 1] = position[..., 1].unsqueeze(-1) + (sides[1] / (volume_size - 1)) * grid[..., 1]
-        grid[..., 2] = position[..., 2].unsqueeze(-1) + (sides[2] / (volume_size - 1)) * grid[..., 2]
-        
-        if self.kind == "coco":
-            axis = [0, 1, 0]  # y axis
-        elif self.kind == "mpii":
-            axis = [0, 0, 1]  # z axis
-            
-        # random rotation
-        if self.training and self.rotation:    
-            
-            center = torch.from_numpy(base_points).type(torch.float).to(device).unsqueeze(-2)
-            grid = grid - center
-            
-            grid = torch.stack([volumetric.rotate_coord_volume(coord_grid,\
-                                np.random.uniform(0.0, 2 * np.pi), axis) for coord_grid in grid])
-            
-            grid = grid + center
-        
-        grid = grid.view(*bs_dt, volume_size, volume_size, volume_size, 3)
-    
-        return grid, cuboids, base_points
 
     def forward(self, images_batch, batch, root_keypoints=None):
 
@@ -592,8 +416,9 @@ class VolumetricFRAdaINNet(nn.Module):
         # process features before lifting to volume
         features = features.view(batch_size, dt, features_channels, *features_shape)
         features_pivot = features[:,-1,...].unsqueeze(1)
-        features_aux = features[:,:-1,...]
-        features_pred = self.features_regressor(features_aux)
+        features_aux = features[:,:-1,...].view(batch_size, -1, *features_shape)
+
+        features_pred = self.features_regressor(features_aux).unsqueeze(1)
 
         if self.use_precalculated_pelvis:
             tri_keypoints_3d = torch.from_numpy(np.array(batch['pred_keypoints_3d'])).type(torch.float).to(device)
@@ -605,11 +430,14 @@ class VolumetricFRAdaINNet(nn.Module):
             raise RuntimeError('In absence of precalculated pelvis or gt pelvis, self.use_volumetric_pelvis should be True') 
                
         # amend coord_volumes position                                                         
-        coord_volumes, cuboids, base_points = self.get_coord_volumes(self.cuboid_side,
-                                                                    self.volume_size, 
-                                                                    device,
-                                                                    keypoints=tri_keypoints_3d
-                                                                    )
+        coord_volumes, cuboids, base_points = get_coord_volumes(self.kind, 
+                                                                self.training, 
+                                                                self.rotation,
+                                                                self.cuboid_side,
+                                                                self.volume_size, 
+                                                                device,
+                                                                keypoints=tri_keypoints_3d
+                                                                )
 
         # lift each featuremap to distinct volume and aggregate 
         volumes_pred = op.unproject_heatmaps(features_pred,  
@@ -628,16 +456,22 @@ class VolumetricFRAdaINNet(nn.Module):
         
         volumes = torch.cat(volumes, 0)
         volumes_pred = torch.cat(volumes_pred, 0)
-
         # inference
-        volumes_stacked = self.volume_net(torch.stack(volumes, volumes_pred), adain_params=[None]*len(CHANNELS_LIST))
+        volumes_stacked = self.volume_net(torch.cat([volumes, volumes_pred]), adain_params=[None]*len(CHANNELS_LIST))
         # integral 3d
-        vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes_stacked * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
+        volumes = volumes_stacked[batch_size:]
+        volumes_pred = volumes_stacked[batch_size:]
+
+        vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
+        vol_keypoints_3d_pred, volumes_pred = op.integrate_tensor_3d_with_coordinates(volumes_pred * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
+
 
         return (vol_keypoints_3d,
+                vol_keypoints_3d_pred,
                 features_pivot,
                 features_pred,
                 volumes,
+                volumes_pred,
                 vol_confidences,
                 cuboids,
                 coord_volumes,

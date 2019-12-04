@@ -1,7 +1,6 @@
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
-from pose_resnet import PoseResNet
 from IPython.core.debugger import set_trace
 
 class Basic2DBlock(nn.Module):
@@ -92,9 +91,9 @@ class TemporalDiscriminator(nn.Module):
 
 
 class Seq2VecRNN(nn.Module):
-    """docstring for Seq2VecModel"""
+    """docstring for Seq2VecRNN"""
     def __init__(self, input_features_dim, output_features_dim=None, hidden_dim = 1024):
-        super(Seq2VecModel, self).__init__()
+        super(Seq2VecRNN, self).__init__()
         self.input_features_dim = input_features_dim
         self.hidden_dim = hidden_dim
         self.output_features_dim = output_features_dim
@@ -137,32 +136,31 @@ class Seq2VecRNN(nn.Module):
         
 
 class FeaturesDecoder(nn.Module):
-  """docstring for FeaturesDecoder"""
+    """docstring for FeaturesDecoder"""
     def __init__(self, input_features_dim, output_features_dim):
-        super(FeaturesDecoder, self).__init__()
+        super().__init__()
         self.input_features_dim = input_features_dim
         self.output_features_dim = output_features_dim
     def forward(self, x):
-
         return x    
 
 class FeaturesEncoder(nn.Module):
-      """docstring for FeaturesEncoder"""
+    """docstring for FeaturesEncoder"""
     def __init__(self, input_features_dim, output_features_dim):
-        super(FeaturesEncoder, self).__init__()
+        super().__init__()
         self.input_features_dim = input_features_dim
         self.output_features_dim = output_features_dim
     def forward(self, x):
-
         return x         
         
 class FeaturesAR_CNN1D(nn.Module):
     """docstring for FeaturesAR_CNN1D"""
-    def __init__(self, input_features_dim, output_features_dim):
-        super(FeaturesAR_CNN1D, self).__init__()
+    def __init__(self, input_features_dim, output_features_dim, intermediate_features=400):
+        super().__init__()
         self.input_features_dim = input_features_dim
-        self.encoder = FeaturesEncoder(input_features_dim)
-        self.decoder = FeaturesDecoder(input_features_dim)
+        self.intermediate_features = intermediate_features
+        self.encoder = FeaturesEncoder(input_features_dim, output_features_dim=intermediate_features)
+        self.decoder = FeaturesDecoder(intermediate_features, output_features_dim=output_features_dim)
 
         self.cnn1d = nn.Sequential(nn.Conv1d(400,128,2),
                                nn.BatchNorm2d(128),
@@ -195,49 +193,49 @@ class FeaturesAR_CNN1D(nn.Module):
 
 
 class FeaturesAR_CNN2D_UNet(nn.Module):
-    def __init__(self, input_features_dim, output_features_dim):
+    def __init__(self, input_features_dim, output_features_dim, C = 4):
         super().__init__()
 
-        self.front_layer1 = Basic2DBlock(input_features_dim, 16, 7)
-        self.front_layer2 = Res2DBlock(16, 32)
-        self.front_layer3 = Res2DBlock(32, 32)
-        self.front_layer4 = Res2DBlock(32, 32)
+        self.front_layer1 = Basic2DBlock(input_features_dim, C*2, 7)
+        self.front_layer2 = Res2DBlock(C*2, C*2)
+        self.front_layer3 = Res2DBlock(C*2, C*2)
+        self.front_layer4 = Res2DBlock(C*2, C*2)
 
         self.encoder_pool1 = Pool2DBlock(2)
-        self.encoder_res1 = Res2DBlock(32, 64)
+        self.encoder_res1 = Res2DBlock(C*2, C*4)
         self.encoder_pool2 = Pool2DBlock(2)
-        self.encoder_res2 = Res2DBlock(64, 128)
+        self.encoder_res2 = Res2DBlock(C*4, C*8)
         self.encoder_pool3 = Pool2DBlock(2)
-        self.encoder_res3 = Res2DBlock(128, 128)
+        self.encoder_res3 = Res2DBlock(C*8, C*8)
         self.encoder_pool4 = Pool2DBlock(2)
-        self.encoder_res4 = Res2DBlock(128, 128)
+        self.encoder_res4 = Res2DBlock(C*8, C*8)
         self.encoder_pool5 = Pool2DBlock(2)
-        self.encoder_res5 = Res2DBlock(128, 128)
+        self.encoder_res5 = Res2DBlock(C*8, C*8)
 
-        self.mid_res = Res2DBlock(128, 128)
+        self.mid_res = Res2DBlock(C*8, C*8)
 
-        self.decoder_res5 = Res2DBlock(128, 128)
-        self.decoder_upsample5 = Upsample2DBlock(128, 128, 2, 2)
-        self.decoder_res4 = Res2DBlock(128, 128)
-        self.decoder_upsample4 = Upsample2DBlock(128, 128, 2, 2)
-        self.decoder_res3 = Res2DBlock(128, 128)
-        self.decoder_upsample3 = Upsample2DBlock(128, 128, 2, 2)
-        self.decoder_res2 = Res2DBlock(128, 128)
-        self.decoder_upsample2 = Upsample2DBlock(128, 64, 2, 2)
-        self.decoder_res1 = Res2DBlock(64, 64)
-        self.decoder_upsample1 = Upsample2DBlock(64, 32, 2, 2)
+        self.decoder_res5 = Res2DBlock(C*8, C*8)
+        self.decoder_upsample5 = Upsample2DBlock(C*8, C*8, 2, 2)
+        self.decoder_res4 = Res2DBlock(C*8, C*8)
+        self.decoder_upsample4 = Upsample2DBlock(C*8, C*8, 2, 2)
+        self.decoder_res3 = Res2DBlock(C*8, C*8)
+        self.decoder_upsample3 = Upsample2DBlock(C*8, C*8, 2, 2)
+        self.decoder_res2 = Res2DBlock(C*8, C*8)
+        self.decoder_upsample2 = Upsample2DBlock(C*8, C*4, 2, 2)
+        self.decoder_res1 = Res2DBlock(C*4, C*4)
+        self.decoder_upsample1 = Upsample2DBlock(C*4, C*2, 2, 2)
 
-        self.skip_res1 = Res2DBlock(32, 32)
-        self.skip_res2 = Res2DBlock(64, 64)
-        self.skip_res3 = Res2DBlock(128, 128)
-        self.skip_res4 = Res2DBlock(128, 128)
-        self.skip_res5 = Res2DBlock(128, 128)
+        self.skip_res1 = Res2DBlock(C*2, C*2)
+        self.skip_res2 = Res2DBlock(C*4, C*4)
+        self.skip_res3 = Res2DBlock(C*8, C*8)
+        self.skip_res4 = Res2DBlock(C*8, C*8)
+        self.skip_res5 = Res2DBlock(C*8, C*8)
 
-        self.back_layer1 = Res2DBlock(32, 32)
-        self.back_layer2 = Basic2DBlock(32, 32, 1)
-        self.back_layer3 = Basic2DBlock(32, 32, 1)
+        self.back_layer1 = Res2DBlock(C*2, C*2)
+        self.back_layer2 = Basic2DBlock(C*2, C*2, 1)
+        self.back_layer3 = Basic2DBlock(C*2, C*2, 1)
 
-        self.output_layer = nn.Conv2d(32, output_features_dim, kernel_size=1, stride=1, padding=0)
+        self.output_layer = nn.Conv2d(C*2, output_features_dim, kernel_size=1, stride=1, padding=0)
 
 
     def forward(self, x, params=None):
@@ -292,9 +290,9 @@ class FeaturesAR_CNN2D_UNet(nn.Module):
 class FeaturesAR_RNN(object):
   """docstring for FeaturesAR_RNN"""
   def __init__(self, input_features_dim, output_features_dim=None, hidden_dim = 512):
-      super(FeaturesAR_RNN, self).__init__()
+      super().__init__()
       self.seq2vec = Seq2VecRNN(input_features_dim, output_features_dim, hidden_dim = hidden_dim)
-      self.decoder = FeaturesDecoder(channels = output_features_dim if output_features_dim is not None else hidden_dim)
+      self.decoder = FeaturesDecoder(input_features_dim=hidden_dim, output_features_dim = output_features_dim if output_features_dim is not None else hidden_dim)
   def forward(self, features):
       batch_size = features.shape[0]
       last_hidden_state = self.seq2vec(features)
@@ -303,3 +301,9 @@ class FeaturesAR_RNN(object):
       return result
 
 
+class FeaturesAR_CNN2D_ResNet(object):
+    """docstring for FeaturesAR_CNN2D_ResNet"""
+    def __init__(self, arg):
+        super(FeaturesAR_CNN2D_ResNet, self).__init__()
+        self.arg = arg
+        

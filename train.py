@@ -25,8 +25,7 @@ from tensorboardX import SummaryWriter
 from mvn.models.triangulation import RANSACTriangulationNet, AlgebraicTriangulationNet, VolumetricTriangulationNet
 from mvn.models.volumetric_temporal import VolumetricTemporalNet,\
                                            VolumetricLSTMAdaINNet,\
-                                           VolumetricFRAdaINNet,\
-                                           VolumetricLSTMV2VNNet
+                                           VolumetricFRAdaINNet
                                            
 from mvn.models.loss import KeypointsMSELoss, KeypointsMSESmoothLoss, KeypointsMAELoss, KeypointsL2Loss, VolumetricCELoss
 
@@ -234,14 +233,34 @@ def one_epoch(model,
 
                 images_batch, keypoints_3d_gt, keypoints_3d_validity_gt, proj_matricies_batch = dataset_utils.prepare_batch(batch, device, config)
 
-                keypoints_2d_pred, cuboids_pred, base_points_pred = None, None, None
+                heatmaps_pred, keypoints_2d_pred, cuboids_pred, base_points_pred = None, None, None, None
                 
                 if model_type == "alg" or model_type == "ransac":
-                    keypoints_3d_pred, keypoints_2d_pred, heatmaps_pred, confidences_pred = model(images_batch, proj_matricies_batch, batch)
+                    (keypoints_3d_pred, 
+                    keypoints_2d_pred, 
+                    heatmaps_pred, 
+                    confidences_pred) = model(images_batch, proj_matricies_batch, batch)
+
                 elif model_type == "vol_temporal_fr_adain":
-                    keypoints_3d_pred, heatmaps_pred, heatmaps_pred_fr, volumes_pred, confidences_pred, cuboids_pred, coord_volumes_pred, base_points_pred = model(images_batch, batch)
+                    (keypoints_3d_pred, 
+                     keypoints_3d_pred_fr, 
+                     features_pred, 
+                     features_pred_fr, 
+                     volumes_pred, 
+                     volumes_pred_fr, 
+                     confidences_pred, 
+                     cuboids_pred, 
+                     coord_volumes_pred, 
+                     base_points_pred) = model(images_batch, batch)
+
                 else:
-                    keypoints_3d_pred, heatmaps_pred, volumes_pred, confidences_pred, cuboids_pred, coord_volumes_pred, base_points_pred = model(images_batch, batch)    
+                    (keypoints_3d_pred, 
+                    features_pred, 
+                    volumes_pred, 
+                    confidences_pred, 
+                    cuboids_pred, 
+                    coord_volumes_pred, 
+                    base_points_pred) = model(images_batch, batch)    
                 
                 batch_size, n_views, image_shape = images_batch.shape[0], images_batch.shape[1], tuple(images_batch.shape[3:])
                 n_joints = keypoints_3d_pred[0].shape[1]
@@ -263,11 +282,10 @@ def one_epoch(model,
 
                 # calculate loss
                 total_loss = 0.0
-
                 if model_type == "vol_temporal_fr_adain" and use_intermediate_fr_loss:
                     intermediate_fr_loss_weight = config.opt.intermediate_fr_loss_weight if hasattr(config.opt, "intermediate_fr_loss_weight") else 1.
-                    heatmaps_shape = heatmaps_pred.shape[-2:]
-                    fs_loss = torch.sum(torch.abs(heatmaps_pred - heatmaps_pred_fr)) / heatmaps_shape.prod()
+                    features_shape = features_pred.shape[-2:]
+                    fs_loss = torch.sum(torch.abs(features_pred - features_pred_fr)) / features_shape.prod()
                     total_loss += fs_loss*intermediate_fr_loss_weight
                     metric_dict['fs_loss'].append(fs_loss.item())
 
@@ -329,7 +347,7 @@ def one_epoch(model,
                 metric_dict['l2'].append(l2.item())
 
                 # base point l2
-                if base_points_pred is not None:
+                if base_points_pred is not None and not config.model.use_gt_pelvis:
                     base_point_l2_list = []
                     for batch_i in range(batch_size):
                         base_point_pred = base_points_pred[batch_i]
@@ -363,12 +381,15 @@ def one_epoch(model,
 
                         for batch_i in range(min(batch_size, config.vis_n_elements)):
                             keypoints_vis = vis.visualize_batch(
-                                images_batch, heatmaps_pred, keypoints_2d_pred, proj_matricies_batch,
-                                keypoints_3d_gt, keypoints_3d_pred,
+                                images_batch,
+                                proj_matricies_batch, 
+                                keypoints_3d_gt, 
+                                keypoints_3d_pred,
                                 kind=vis_kind,
                                 cuboids_batch=cuboids_pred,
                                 confidences_batch=confidences_pred,
                                 batch_index=batch_i, size=5,
+                                keypoints_3d_batch_pred_fr = keypoints_3d_pred_fr if model_type == "vol_temporal_fr_adain" else None
                                 max_n_cols=10
                             )
                             writer.add_image(f"{name}/keypoints_vis/{batch_i}", keypoints_vis.transpose(2, 0, 1), global_step=n_iters_total)
@@ -510,7 +531,7 @@ def main(args):
         "vol_temporal": VolumetricTemporalNet,
         "vol_temporal_lstm_adain":VolumetricLSTMAdaINNet,
         "vol_temporal_fr_adain":VolumetricFRAdaINNet,
-        "vol_temporal_lstm_v2v":VolumetricLSTMV2VNNet
+        "vol_temporal_lstm_v2v":VolumetricTemporalNet
     }[config.model.name](config, device=device).to(device)
 
     if config.model.init_weights:
@@ -549,8 +570,8 @@ def main(args):
             opt = torch.optim.Adam(
                 [{'params': model.backbone.parameters()},
                  {'params': model.process_features.parameters(), 'lr': config.opt.process_features_lr if hasattr(config.opt, "process_features_lr") else config.opt.lr},
-                 {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr}
-                 {'params': model.features_sequence_to_vector.parameters(), 'lr': config.opt.features_sequence_to_vector_lr if hasattr(config.opt, "features_sequence_to_vector_lr") else config.opt.lr}
+                 {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr},
+                 {'params': model.features_sequence_to_vector.parameters(), 'lr': config.opt.features_sequence_to_vector_lr if hasattr(config.opt, "features_sequence_to_vector_lr") else config.opt.lr},
                  {'params': model.affine_mappings.parameters(), 'lr': config.opt.affine_mappings_lr if hasattr(config.opt, "affine_mappings_lr") else config.opt.lr}
                 ],
                 lr=config.opt.lr

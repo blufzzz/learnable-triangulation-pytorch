@@ -94,6 +94,7 @@ def visualize_batch(images_batch,
                     pred_kind=None,
                     heatmaps_batch = None,
                     keypoints_2d_batch = None,
+                    keypoints_3d_batch_pred_fr = None,
                     keypoints_per_frame = False
                     ):
     if pred_kind is None:
@@ -110,6 +111,8 @@ def visualize_batch(images_batch,
     n_rows = n_rows + 1 if keypoints_2d_batch is not None else n_rows
     n_rows = n_rows + 1 if cuboids_batch is not None else n_rows
     n_rows = n_rows + 1 if confidences_batch is not None else n_rows
+    n_rows = n_rows + 1 if keypoints_3d_batch_pred_fr is not None else n_rows
+
 
     n_cols = min(n_views, max_n_cols)
     fig, axes = plt.subplots(ncols=n_cols, nrows=n_rows, figsize=(n_cols * size, n_rows * size))
@@ -139,21 +142,31 @@ def visualize_batch(images_batch,
 
     # 2D keypoints (gt projected)
     axes[row_i, 0].set_ylabel("2d keypoints (gt projected)", size='large')
-
     for view_i in range(n_cols):
         axes[row_i][view_i].imshow(images[view_i])
-        keypoints_2d_gt_proj = project_3d_points_to_image_plane_without_distortion(proj_matricies_batch[batch_index, view_i].detach().cpu().numpy(), keypoints_3d_batch_gt[batch_index].detach().cpu().numpy())
+        keypoints_2d_gt_proj = project_3d_points_to_image_plane_without_distortion(proj_matricies_batch[batch_index, view_i].detach().cpu().numpy(),
+                                                                                   keypoints_3d_batch_gt[batch_index].detach().cpu().numpy())
         draw_2d_pose(keypoints_2d_gt_proj, axes[row_i][view_i], kind=kind)
     row_i += 1
 
     # 2D keypoints (pred projected)
     axes[row_i, 0].set_ylabel("2d keypoints (pred projected)", size='large')
-
     for view_i in range(n_cols):
         axes[row_i][view_i].imshow(images[view_i])
-        keypoints_2d_pred_proj = project_3d_points_to_image_plane_without_distortion(proj_matricies_batch[batch_index, view_i].detach().cpu().numpy(), keypoints_3d_batch_pred[batch_index].detach().cpu().numpy())
+        keypoints_2d_pred_proj = project_3d_points_to_image_plane_without_distortion(proj_matricies_batch[batch_index, view_i].detach().cpu().numpy(), 
+                                                                                     keypoints_3d_batch_pred[batch_index].detach().cpu().numpy())
         draw_2d_pose(keypoints_2d_pred_proj, axes[row_i][view_i], kind=pred_kind)
     row_i += 1
+
+    # pred_fr_keypoints
+    if keypoints_3d_batch_pred_fr is not None:
+        axes[row_i, 0].set_ylabel("2d keypoints (pred fr projected)", size='large')
+        for view_i in range(n_cols):
+            axes[row_i][view_i].imshow(images[view_i])
+            keypoints_2d_pred_proj = project_3d_points_to_image_plane_without_distortion(proj_matricies_batch[batch_index, view_i].detach().cpu().numpy(), 
+                                                                                         keypoints_3d_batch_pred_fr[batch_index].detach().cpu().numpy())
+            draw_2d_pose(keypoints_2d_pred_proj, axes[row_i][view_i], kind=pred_kind)
+        row_i += 1
 
     # cuboids
     if cuboids_batch is not None:

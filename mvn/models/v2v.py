@@ -2,6 +2,7 @@
 from IPython.core.debugger import set_trace
 import torch.nn as nn
 import torch.nn.functional as F
+import torch
  
 class AdaIN(nn.Module):
     def __init__(self):
@@ -17,21 +18,22 @@ class AdaIN(nn.Module):
             adain_mean = params[:,:C].view(batch_size, C,1,1,1)
             adain_std = params[:,C:].view(batch_size, C,1,1,1)
         else:
-           assert batch_size % 2 == 0, \
-           'batch should contain concatenated features and style batches'
-           batch_size = batch_size / 2
+            if batch_size % 2 != 0:
+                print ('batch should contain concatenated features and style batches')
+                set_trace()
+            batch_size = batch_size // 2
            
-           style = features[batch_size:] 
-           features = features[:batch_size]
+            style = features[batch_size:] 
+            features = features[:batch_size]
 
-           adain_mean = style.view(batch_size, C, -1).mean(-1).view(batch_size, C,1,1,1)
-           adain_std = style.view(batch_size, C, -1).std(-1).view(batch_size, C,1,1,1) 
+            adain_mean = style.view(batch_size, C, -1).mean(-1).view(batch_size, C,1,1,1)
+            adain_std = style.view(batch_size, C, -1).std(-1).view(batch_size, C,1,1,1) 
         
         features_mean = features.view(batch_size, C, -1).mean(-1).view(batch_size, C,1,1,1)
         features_std = features.view(batch_size, C, -1).std(-1).view(batch_size, C,1,1,1)
         norm_features = (features - features_mean) / features_std
                 
-        return norm_features * adain_std + adain_mean
+        return torch.cat([norm_features * adain_std + adain_mean, style])
 
 
 class Basic3DBlockAdaIN(nn.Module):
