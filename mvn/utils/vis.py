@@ -119,7 +119,6 @@ def visualize_batch(images_batch,
     axes = axes.reshape(n_rows, n_cols)
 
     image_shape = images_batch.shape[3:]
-    heatmap_shape = heatmaps_batch.shape[3:]
 
     row_i = 0
 

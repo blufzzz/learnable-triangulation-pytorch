@@ -32,8 +32,11 @@ class AdaIN(nn.Module):
         features_mean = features.view(batch_size, C, -1).mean(-1).view(batch_size, C,1,1,1)
         features_std = features.view(batch_size, C, -1).std(-1).view(batch_size, C,1,1,1)
         norm_features = (features - features_mean) / features_std
-                
-        return torch.cat([norm_features * adain_std + adain_mean, style])
+        
+        if use_adain_params:
+            return norm_features * adain_std + adain_mean
+        else:    
+            return torch.cat([norm_features * adain_std + adain_mean, style])
 
 
 class Basic3DBlockAdaIN(nn.Module):
@@ -356,7 +359,6 @@ class EncoderDecorderAdaIN(nn.Module):
         self.skip_res5 = Res3DBlockAdaIN(128, 128)
 
     def forward(self, x, params):
-        use_adain_params = params is not None
         skip_x1 = self.skip_res1(x, params[:2])
         x = self.encoder_pool1(x)
         x = self.encoder_res1(x, params[2:5])
@@ -452,9 +454,9 @@ class V2VModelAdaIN(nn.Module):
             # 128,128, 128,128, 128,128, 128,128, 128,128, 128,128, 128,
             # 128,128, 128, 128,128, 128, 128,128, 64, 64,64, 32]
 
-            self.back_layer1 =Res3DBlockAdaIN(32, 32)
-            self.back_layer2 =Basic3DBlockAdaIN(32, 32, 1)
-            self.back_layer3 =Basic3DBlockAdaIN(32, 32, 1)
+            self.back_layer1 = Res3DBlockAdaIN(32, 32)
+            self.back_layer2 = Basic3DBlockAdaIN(32, 32, 1)
+            self.back_layer3 = Basic3DBlockAdaIN(32, 32, 1)
             # [32,32, 32, 32]
 
             self.output_layer = nn.Conv3d(32, output_channels, kernel_size=1, stride=1, padding=0)

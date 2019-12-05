@@ -41,7 +41,7 @@ model:
 
   cuboid_side: 2500.0
 
-  volume_size: 64
+  volume_size: 32
   volume_multiplier: 1.0
   volume_softmax: true
 
@@ -65,9 +65,10 @@ model:
 dataset:
   kind: "human36m"
   dt: 4
-  dilation: 10
+  dilation: 2
   singleview: true
   pivot_type: 'first'
+
 
   train:
     h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"

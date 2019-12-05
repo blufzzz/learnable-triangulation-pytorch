@@ -21,7 +21,7 @@ from mvn.models.temporal import Seq2VecRNN,\
                                 FeaturesAR_CNN2D_ResNet
 
 from IPython.core.debugger import set_trace
-from op import get_coord_volumes
+from mvn.utils.op import get_coord_volumes
 
 CHANNELS_LIST = [16, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 64, 64, 64, 64, 128, 128, 128, 128, 128,\
                                   128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128,\
@@ -34,7 +34,7 @@ class VolumetricTemporalNet(nn.Module):
     The model is designed to work with `dt` number of consecutive frames
     '''
 
-    def __init__(self, config):
+    def __init__(self, config, device='cuda:0'):
         super().__init__()
 
         self.num_joints = config.model.backbone.num_joints
@@ -202,7 +202,7 @@ class VolumetricTemporalNet(nn.Module):
 
 class VolumetricLSTMAdaINNet(nn.Module):
 
-    def __init__(self, config):
+    def __init__(self, config, device='cuda:0'):
         super().__init__()
 
         assert config.dataset.pivot_type == 'first', "pivot_type should be first"
@@ -333,7 +333,7 @@ class VolumetricLSTMAdaINNet(nn.Module):
 
 
 class VolumetricFRAdaINNet(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, device='cuda:0'):
         super().__init__()
         # volume
         self.volume_softmax = config.model.volume_softmax
@@ -380,6 +380,7 @@ class VolumetricFRAdaINNet(nn.Module):
             "conv2d_unet": FeaturesAR_CNN2D_UNet(self.intermediate_features_dim*(self.dt-1), self.intermediate_features_dim)
             # "conv2d_resnet": FeaturesAR_CNN2D_ResNet(self.intermediate_features_dim*self.dt, self.intermediate_features_dim)
         }[config.model.features_regressor]
+        self.volume_net.adain_params=[None]*len(CHANNELS_LIST)
                 
 
     def forward(self, images_batch, batch, root_keypoints=None):
@@ -457,7 +458,7 @@ class VolumetricFRAdaINNet(nn.Module):
         volumes = torch.cat(volumes, 0)
         volumes_pred = torch.cat(volumes_pred, 0)
         # inference
-        volumes_stacked = self.volume_net(torch.cat([volumes, volumes_pred]), adain_params=[None]*len(CHANNELS_LIST))
+        volumes_stacked = self.volume_net(torch.cat([volumes, volumes_pred]))
         # integral 3d
         volumes = volumes_stacked[batch_size:]
         volumes_pred = volumes_stacked[batch_size:]

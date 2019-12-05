@@ -143,7 +143,7 @@ def integrate_tensor_2d(heatmaps, softmax=True):
 
 def integrate_tensor_3d(volumes, softmax=True):
     batch_size, n_volumes, x_size, y_size, z_size = volumes.shape
-
+    volumes = volumes + torch.rand_like(volumes) * 1e-4
     volumes = volumes.reshape((batch_size, n_volumes, -1))
     if softmax:
         volumes = nn.functional.softmax(volumes, dim=2)

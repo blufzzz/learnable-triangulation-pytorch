@@ -195,7 +195,7 @@ def one_epoch(model,
     singleview_dataset = dataloader.dataset.singleview if hasattr(dataloader.dataset, 'singleview') else False
     visualize_volumes = config.visualize_volumes if hasattr(config, 'visualize_volumes') else False
     visualize_heatmaps = config.visualize_heatmaps if hasattr(config, 'visualize_heatmaps') else False
-    use_heatmaps = config.backbone.return_heatmaps if hasattr(config.backbone, 'return_heatmaps') else False
+    use_heatmaps = config.model.backbone.return_heatmaps if hasattr(config.model.backbone, 'return_heatmaps') else False
     use_temporal_discriminator_loss  = config.opt.use_temporal_discriminator_loss if hasattr(config.opt, "use_temporal_discriminator_loss") else False  
     dump_weights = config.dump_weights if hasattr(config, 'dump_weights') else False
     transfer_cmu_to_human36m = config.transfer_cmu_to_human36m if hasattr(config, "transfer_cmu_to_human36m") else False
@@ -264,19 +264,13 @@ def one_epoch(model,
                 
                 batch_size, n_views, image_shape = images_batch.shape[0], images_batch.shape[1], tuple(images_batch.shape[3:])
                 n_joints = keypoints_3d_pred[0].shape[1]
-
                 keypoints_3d_binary_validity_gt = (keypoints_3d_validity_gt > 0.0).type(torch.float32)
-
                 scale_keypoints_3d = config.opt.scale_keypoints_3d if hasattr(config.opt, "scale_keypoints_3d") else 1.0
 
                 # root-relative coordinates for    
                 # singleview dataset of multiview dataset with singleview setup
                 if singleview_dataset  or n_views == 1:
-                    if model.kind == "coco":
-                        base_point = (keypoints_3d_gt[:,11, :3] + keypoints_3d_gt[:,12, :3]) / 2.
-                    elif model.kind == "mpii":
-                        base_point = keypoints_3d_gt[:,6, :3]
-                    coord_volumes_batch = coord_volumes_batch - base_point.unsqueeze(1).unsqueeze(1).unsqueeze(1)
+                    coord_volumes_pred = coord_volumes_pred - base_points_pred.unsqueeze(1).unsqueeze(1).unsqueeze(1)
                     keypoints_3d_gt = op.root_centering(keypoints_3d_gt, config.kind)
                     keypoints_3d_pred = op.root_centering(keypoints_3d_pred, config.kind)
 
@@ -285,7 +279,7 @@ def one_epoch(model,
                 if model_type == "vol_temporal_fr_adain" and use_intermediate_fr_loss:
                     intermediate_fr_loss_weight = config.opt.intermediate_fr_loss_weight if hasattr(config.opt, "intermediate_fr_loss_weight") else 1.
                     features_shape = features_pred.shape[-2:]
-                    fs_loss = torch.sum(torch.abs(features_pred - features_pred_fr)) / features_shape.prod()
+                    fs_loss = torch.sum(torch.abs(features_pred - features_pred_fr)) / features_shape.numel()
                     total_loss += fs_loss*intermediate_fr_loss_weight
                     metric_dict['fs_loss'].append(fs_loss.item())
 
@@ -333,6 +327,7 @@ def one_epoch(model,
 
                 if is_train:
                     opt.zero_grad()
+                    print ("total_loss", total_loss.item())
                     total_loss.backward()
 
                     if hasattr(config.opt, "grad_clip"):
@@ -389,7 +384,7 @@ def one_epoch(model,
                                 cuboids_batch=cuboids_pred,
                                 confidences_batch=confidences_pred,
                                 batch_index=batch_i, size=5,
-                                keypoints_3d_batch_pred_fr = keypoints_3d_pred_fr if model_type == "vol_temporal_fr_adain" else None
+                                keypoints_3d_batch_pred_fr = keypoints_3d_pred_fr if model_type == "vol_temporal_fr_adain" else None,
                                 max_n_cols=10
                             )
                             writer.add_image(f"{name}/keypoints_vis/{batch_i}", keypoints_vis.transpose(2, 0, 1), global_step=n_iters_total)
@@ -446,9 +441,11 @@ def one_epoch(model,
     # calculate evaluation metrics
     if master:
         if not is_train:
+            print ('Validation...')
             results['keypoints_3d'] = np.concatenate(results['keypoints_3d'], axis=0)
             results['indexes'] = np.concatenate(results['indexes'])
-
+            provide_dataset_metric_for_all_cameras = config.dataset.val.provide_dataset_metric_for_all_cameras if hasattr(config.dataset.val,\
+                                                                                        "provide_dataset_metric_for_all_cameras") else False
             try:
                 if singleview_dataset:
                     # we need to consider all cameras
@@ -472,6 +469,7 @@ def one_epoch(model,
                 scalar_metric, full_metric = 0.0, {}
 
             metric_dict['dataset_metric'].append(scalar_metric)
+            print ('Dataset metric', scalar_metric)
 
             checkpoint_dir = os.path.join(experiment_dir, "checkpoints", "{:04}".format(epoch))
             os.makedirs(checkpoint_dir, exist_ok=True)
@@ -523,6 +521,7 @@ def main(args):
     config = cfg.load_config(args.config)
     config.opt.n_iters_per_epoch = config.opt.n_objects_per_epoch // config.opt.batch_size
     config.experiment_comment = args.experiment_comment
+    use_temporal_discriminator_loss  = config.opt.use_temporal_discriminator_loss if hasattr(config.opt, "use_temporal_discriminator_loss") else False  
 
     model = {
         "ransac": RANSACTriangulationNet,
@@ -597,8 +596,10 @@ def main(args):
         else:
             opt = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=config.opt.lr)
 
-    # use_temporal_discriminator_loss        
-    if config.opt.use_temporal_discriminator_loss:
+    # use_temporal_discriminator_loss
+    discriminator = None
+    opt_discr = None    
+    if use_temporal_discriminator_loss:
         discriminator = TemporalDiscriminator().to(device)
         opt_discr = optim.Adam(discriminator.parameters(), lr=config.opt.discr_lr)
 
@@ -622,15 +623,42 @@ def main(args):
             if train_sampler is not None:
                 train_sampler.set_epoch(epoch)
 
-            n_iters_total_train = one_epoch(model, criterion, opt, config, train_dataloader, device, epoch, n_iters_total=n_iters_total_train, is_train=True, master=master, experiment_dir=experiment_dir, writer=writer)
-            n_iters_total_val = one_epoch(model, criterion, opt, config, val_dataloader, device, epoch, n_iters_total=n_iters_total_val, is_train=False, master=master, experiment_dir=experiment_dir, writer=writer)
+            n_iters_total_train = one_epoch(model,
+                                            criterion, 
+                                            opt, 
+                                            config, 
+                                            train_dataloader, 
+                                            device, 
+                                            epoch, 
+                                            n_iters_total=n_iters_total_train, 
+                                            is_train=True, 
+                                            master=master, 
+                                            experiment_dir=experiment_dir, 
+                                            writer=writer,
+                                            discriminator=discriminator,
+                                            opt_discr=opt_discr)
+
+            n_iters_total_val = one_epoch(model, 
+                                          criterion, 
+                                          opt, 
+                                          config, 
+                                          val_dataloader, 
+                                          device, 
+                                          epoch, 
+                                          n_iters_total=n_iters_total_val, 
+                                          is_train=False, 
+                                          master=master, 
+                                          experiment_dir=experiment_dir, 
+                                          writer=writer,
+                                          discriminator=discriminator,
+                                          opt_discr=opt_discr)
 
             if master:
                 checkpoint_dir = os.path.join(experiment_dir, "checkpoints", "{:04}".format(epoch))
                 os.makedirs(checkpoint_dir, exist_ok=True)
 
                 dict_to_save = {'model_state': model.state_dict(),'opt_state' : opt.state_dict()}
-                if config.opt.use_temporal_discriminator_loss:
+                if use_temporal_discriminator_loss:
                     dict_to_save['discr_state'] = discriminator.state_dict()
                     dict_to_save['discr_opt_state'] = opt_discr.state_dict()
                 torch.save(dict_to_save, os.path.join(checkpoint_dir, "weights.pth"))
@@ -638,9 +666,35 @@ def main(args):
             print(f"{n_iters_total_train} iters done.")
     else:
         if args.eval_dataset == 'train':
-            one_epoch(model, criterion, opt, config, train_dataloader, device, 0, n_iters_total=0, is_train=False, master=master, experiment_dir=experiment_dir, writer=writer)
+            one_epoch(model, 
+                      criterion, 
+                      opt, 
+                      config, 
+                      train_dataloader, 
+                      device, 
+                      0, 
+                      n_iters_total=0, 
+                      is_train=False, 
+                      master=master, 
+                      experiment_dir=experiment_dir, 
+                      writer=writer,
+                      discriminator=discriminator,
+                      opt_discr=opt_discr)
         else:
-            one_epoch(model, criterion, opt, config, val_dataloader, device, 0, n_iters_total=0, is_train=False, master=master, experiment_dir=experiment_dir, writer=writer)
+            one_epoch(model, 
+                        criterion, 
+                        opt, 
+                        config, 
+                        val_dataloader, 
+                        device, 
+                        0, 
+                        n_iters_total=0, 
+                        is_train=False, 
+                        master=master, 
+                        experiment_dir=experiment_dir, 
+                        writer=writer,
+                        discriminator=discriminator,
+                        opt_discr=opt_discr)
 
     print("Done.")
 

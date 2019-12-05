@@ -210,7 +210,7 @@ class Human36MMultiViewDataset(Dataset):
         sample.default_factory = None
         return sample
 
-    def evaluate_using_per_pose_error(self, per_pose_error, split_by_subject):
+    def evaluate_using_per_pose_error(self, per_pose_error, split_by_subject, mask = None):
         def evaluate_by_actions(self, per_pose_error, mask=None):
             if mask is None:
                 mask = np.ones_like(per_pose_error, dtype=bool)
@@ -246,7 +246,7 @@ class Human36MMultiViewDataset(Dataset):
             return action_scores
 
         subject_scores = {
-            'Average': evaluate_by_actions(self, per_pose_error)
+            'Average': evaluate_by_actions(self, per_pose_error, mask)
         }
 
         for subject_idx in range(len(self.labels['subject_names'])):
@@ -256,7 +256,13 @@ class Human36MMultiViewDataset(Dataset):
 
         return subject_scores
 
-    def evaluate(self, keypoints_3d_predicted, split_by_subject=False, transfer_cmu_to_human36m=False, transfer_human36m_to_human36m=False):
+    def evaluate(self, 
+                keypoints_3d_predicted, 
+                mask=None, 
+                split_by_subject=False, 
+                transfer_cmu_to_human36m=False, 
+                transfer_human36m_to_human36m=False):
+
         keypoints_gt = self.labels['table']['keypoints'][:, :self.num_keypoints]
         if keypoints_3d_predicted.shape != keypoints_gt.shape:
             raise ValueError(
@@ -288,8 +294,8 @@ class Human36MMultiViewDataset(Dataset):
         per_pose_error_relative = np.sqrt(((keypoints_gt_relative - keypoints_3d_predicted_relative) ** 2).sum(2)).mean(1)
 
         result = {
-            'per_pose_error': self.evaluate_using_per_pose_error(per_pose_error, split_by_subject),
-            'per_pose_error_relative': self.evaluate_using_per_pose_error(per_pose_error_relative, split_by_subject)
+            'per_pose_error': self.evaluate_using_per_pose_error(per_pose_error, split_by_subject, mask),
+            'per_pose_error_relative': self.evaluate_using_per_pose_error(per_pose_error_relative, split_by_subject, mask)
         }
 
         return result['per_pose_error_relative']['Average']['Average'], result
