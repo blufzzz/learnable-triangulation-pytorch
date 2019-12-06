@@ -81,15 +81,13 @@ def root_centering(keypoints, kind, inverse = False):
 
     n_joints = keypoints.shape[-2]
 
+    keypoints_transformed = keypoints.clone()
     if inverse:
-        keypoints_transformed = keypoints.clone()
-        if inverse:
-            keypoints_transformed[..., torch.arange(n_joints) != base_joint,:] += keypoints_transformed[..., base_joint:base_joint + 1,:]
-        else:
-            keypoints_transformed[..., torch.arange(n_joints) != base_joint,:] -= keypoints_transformed[..., base_joint:base_joint + 1,:]
-        keypoints = keypoints_transformed
+        keypoints_transformed[..., torch.arange(n_joints) != base_joint,:] += keypoints_transformed[..., base_joint:base_joint + 1,:]
+    else:
+        keypoints_transformed[..., torch.arange(n_joints) != base_joint,:] -= keypoints_transformed[..., base_joint:base_joint + 1,:]
 
-    return keypoints
+    return keypoints_transformed
 
 
 def keypoints_to_features(keypoints):

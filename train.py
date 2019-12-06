@@ -30,6 +30,7 @@ from mvn.models.volumetric_temporal import VolumetricTemporalNet,\
 from mvn.models.loss import KeypointsMSELoss, KeypointsMSESmoothLoss, KeypointsMAELoss, KeypointsL2Loss, VolumetricCELoss
 
 from mvn.utils import img, multiview, op, vis, misc, cfg
+
 from mvn.datasets.human36m import Human36MSingleViewDataset, Human36MMultiViewDataset
 from mvn.datasets import utils as dataset_utils
 
@@ -197,7 +198,7 @@ def one_epoch(model,
     visualize_heatmaps = config.visualize_heatmaps if hasattr(config, 'visualize_heatmaps') else False
     use_heatmaps = config.model.backbone.return_heatmaps if hasattr(config.model.backbone, 'return_heatmaps') else False
     use_temporal_discriminator_loss  = config.opt.use_temporal_discriminator_loss if hasattr(config.opt, "use_temporal_discriminator_loss") else False  
-    dump_weights = config.dump_weights if hasattr(config, 'dump_weights') else False
+    dump_weights = config.opt.dump_weights if hasattr(config.opt, 'dump_weights') else False
     transfer_cmu_to_human36m = config.transfer_cmu_to_human36m if hasattr(config, "transfer_cmu_to_human36m") else False
     use_intermediate_fr_loss = config.opt.use_intermediate_fr_loss if hasattr(config.opt, "use_intermediate_fr_loss") else False
 
@@ -269,10 +270,12 @@ def one_epoch(model,
 
                 # root-relative coordinates for    
                 # singleview dataset of multiview dataset with singleview setup
-                if singleview_dataset  or n_views == 1:
+                if singleview_dataset:
                     coord_volumes_pred = coord_volumes_pred - base_points_pred.unsqueeze(1).unsqueeze(1).unsqueeze(1)
                     keypoints_3d_gt = op.root_centering(keypoints_3d_gt, config.kind)
                     keypoints_3d_pred = op.root_centering(keypoints_3d_pred, config.kind)
+                    if model_type == "vol_temporal_fr_adain":
+                        keypoints_3d_pred_fr = op.root_centering(keypoints_3d_pred_fr, config.kind)
 
                 # calculate loss
                 total_loss = 0.0
@@ -327,19 +330,24 @@ def one_epoch(model,
 
                 if is_train:
                     opt.zero_grad()
-                    print ("total_loss", total_loss.item())
                     total_loss.backward()
 
                     if hasattr(config.opt, "grad_clip"):
                         torch.nn.utils.clip_grad_norm_(model.parameters(), config.opt.grad_clip / config.opt.lr)
 
                     metric_dict['grad_norm_times_lr'].append(config.opt.lr * misc.calc_gradient_norm(filter(lambda x: x[1].requires_grad, model.named_parameters())))
+                    metric_dict['grad_amplitude_times_lr'].append(config.opt.lr * misc.calc_gradient_magnitude(filter(lambda x: x[1].requires_grad, model.named_parameters())))
 
                     opt.step()
 
                 # calculate metrics
-                l2 = KeypointsL2Loss()(keypoints_3d_pred * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d, keypoints_3d_binary_validity_gt)
+                l2 = KeypointsL2Loss()(keypoints_3d_pred * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d,\
+                                                                                    keypoints_3d_binary_validity_gt)
                 metric_dict['l2'].append(l2.item())
+                if model_type == "vol_temporal_fr_adain":
+                    l2_fr = KeypointsL2Loss()(keypoints_3d_pred_fr * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d,\
+                                                                                            keypoints_3d_binary_validity_gt)
+                    metric_dict['l2_fr'].append(l2_fr.item())
 
                 # base point l2
                 if base_points_pred is not None and not config.model.use_gt_pelvis:
@@ -363,9 +371,11 @@ def one_epoch(model,
                     results['indexes'].append(batch['indexes'])
 
                 # plot visualization
-                if singleview_dataset or n_views == 1:
+                if singleview_dataset:
                     keypoints_3d_gt = op.root_centering(keypoints_3d_gt, config.kind, inverse=True)
-                    keypoints_3d_pred = op.root_centering(keypoints_3d_pred, config.kind, inverse=True)    
+                    keypoints_3d_pred = op.root_centering(keypoints_3d_pred, config.kind, inverse=True)
+                    if model_type == "vol_temporal_fr_adain":
+                        keypoints_3d_pred_fr = op.root_centering(keypoints_3d_pred_fr, config.kind, inverse=True)    
 
 
                 if master:

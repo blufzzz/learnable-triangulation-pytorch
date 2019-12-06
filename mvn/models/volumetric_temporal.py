@@ -364,6 +364,7 @@ class VolumetricFRAdaINNet(nn.Module):
         # modules params
         self.intermediate_features_dim = config.model.intermediate_features_dim if hasattr(config.model, 'intermediate_features_dim') else 32
         self.num_joints = config.model.backbone.num_joints
+        self.features_regressor_base_channels = config.model.features_regressor_base_channels if hasattr(config.model, 'features_regressor_base_channels') else 8
 
         # modules
         self.backbone = pose_resnet.get_pose_net(config.model.backbone)
@@ -377,7 +378,9 @@ class VolumetricFRAdaINNet(nn.Module):
         self.features_regressor = {
             # "rnn": FeaturesAR_RNN(self.intermediate_features_dim, self.intermediate_features_dim),
             # "conv1d": FeaturesAR_CNN1D(self.intermediate_features_dim, self.intermediate_features_dim),
-            "conv2d_unet": FeaturesAR_CNN2D_UNet(self.intermediate_features_dim*(self.dt-1), self.intermediate_features_dim)
+            "conv2d_unet": FeaturesAR_CNN2D_UNet(self.intermediate_features_dim*(self.dt-1),
+                                                 self.intermediate_features_dim,
+                                                 C = self.features_regressor_base_channels)
             # "conv2d_resnet": FeaturesAR_CNN2D_ResNet(self.intermediate_features_dim*self.dt, self.intermediate_features_dim)
         }[config.model.features_regressor]
         self.volume_net.adain_params=[None]*len(CHANNELS_LIST)
@@ -458,7 +461,7 @@ class VolumetricFRAdaINNet(nn.Module):
         volumes = torch.cat(volumes, 0)
         volumes_pred = torch.cat(volumes_pred, 0)
         # inference
-        volumes_stacked = self.volume_net(torch.cat([volumes, volumes_pred]))
+        volumes_stacked = self.volume_net(torch.cat([volumes, volumes_pred]), [None]*len(CHANNELS_LIST))
         # integral 3d
         volumes = volumes_stacked[batch_size:]
         volumes_pred = volumes_stacked[batch_size:]

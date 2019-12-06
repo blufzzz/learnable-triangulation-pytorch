@@ -193,7 +193,7 @@ class FeaturesAR_CNN1D(nn.Module):
 
 
 class FeaturesAR_CNN2D_UNet(nn.Module):
-    def __init__(self, input_features_dim, output_features_dim, C = 4):
+    def __init__(self, input_features_dim, output_features_dim, C = 8):
         super().__init__()
 
         self.front_layer1 = Basic2DBlock(input_features_dim, C*2, 7)

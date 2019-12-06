@@ -1,6 +1,6 @@
 title: "human36m_vol_temporal_fr_adain_softmax"
 kind: "human36m"
-vis_freq: 1000
+vis_freq: 100
 vis_n_elements: 10
 
 image_shape: [384, 384]
@@ -9,14 +9,17 @@ opt:
   criterion: "MAE"
 
   use_volumetric_ce_loss: true
-  volumetric_ce_loss_weight: 0.01
+  volumetric_ce_loss_weight: 0.1 #0.01
+
   use_intermediate_fr_loss: true
-  intermediate_fr_loss_weight: 0.01
+  intermediate_fr_loss_weight: 0.1 #0.01
+  
   n_objects_per_epoch: 15000
   n_epochs: 9999
+  dump_weights: False
 
-  batch_size: 2
-  val_batch_size: 2
+  batch_size: 1
+  val_batch_size: 1
 
   lr: 0.0001
   process_features_lr: 0.001
@@ -30,7 +33,9 @@ model:
   volume_aggregation_method: "no_aggregation"
   features_regressor: "conv2d_unet"
   adain_type: "all"
-  intermediate_features_dim: 64
+  intermediate_features_dim: 32
+  features_regressor_base_channels: 16
+
 
   init_weights: false
   checkpoint: ""
@@ -41,7 +46,7 @@ model:
 
   cuboid_side: 2500.0
 
-  volume_size: 32
+  volume_size: 64
   volume_multiplier: 1.0
   volume_softmax: true
 
@@ -65,10 +70,9 @@ model:
 dataset:
   kind: "human36m"
   dt: 4
-  dilation: 2
+  dilation: 3
   singleview: true
   pivot_type: 'first'
-
 
   train:
     h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"

@@ -38,3 +38,16 @@ def calc_gradient_norm(named_parameters):
     total_norm = total_norm ** (1. / 2)
 
     return total_norm
+
+
+def calc_gradient_magnitude(named_parameters):
+    total_amplitude = []
+    for name, p in named_parameters:
+        # print(name)
+        param_amplitude = p.grad.data.abs().max()
+        total_amplitude += [param_amplitude.item()]
+
+    total_amplitude = max(total_amplitude)
+
+    return total_amplitude
+

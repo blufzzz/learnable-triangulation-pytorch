@@ -7,7 +7,7 @@ import torch
 class AdaIN(nn.Module):
     def __init__(self):
         super(AdaIN, self).__init__()
-    def forward(self, features, params):
+    def forward(self, features, params, eps = 1e-4):
         # features: [batch_size, C, D1, D2, D3]
         # params: [batch_size, 2]
         use_adain_params = params is not None
@@ -31,7 +31,10 @@ class AdaIN(nn.Module):
         
         features_mean = features.view(batch_size, C, -1).mean(-1).view(batch_size, C,1,1,1)
         features_std = features.view(batch_size, C, -1).std(-1).view(batch_size, C,1,1,1)
-        norm_features = (features - features_mean) / features_std
+        # features_std[torch.isclose(features_std, torch.zeros_like(features_std))] = \
+        #             features_std[torch.isclose(features_std, torch.zeros_like(features_std))] + eps
+        assert (features_std > 0.).any()
+        norm_features = (features - features_mean) / (features_std + eps)
         
         if use_adain_params:
             return norm_features * adain_std + adain_mean
@@ -108,12 +111,10 @@ class Res3DBlockAdaIN(nn.Module):
             self.skip_con_conv = nn.Conv3d(in_planes, out_planes, kernel_size=1, stride=1, padding=0)
             self.skip_con_adain = AdaIN()
 
-    def forward(self, x, params=None):
-        use_adain_params=params is not None
-
+    def forward(self, x, params=[None,None,None]):
         if self.use_skip_con:
             skip = self.skip_con_conv(x)
-            skip = self.skip_con_adain(skip, params[2] if use_adain_params else None)
+            skip = self.skip_con_adain(skip, params[2])
         else:
             skip = x
 
@@ -276,10 +277,6 @@ class EncoderDecorderLSTM(nn.Module):
         self.skip_res4 = Res3DBlock(128, 128)
         self.skip_res5 = Res3DBlock(128, 128)
 
-        # self.lstm_encoder =  
-        # self.lstm = nn.LSTM(input_size=512, hidden_size=512, batch_first=True)
-        # self.lstm_decoder = 
-
     def forward(self, x, params=None):
         batch_size = x.shape[0] 
         hidden = (torch.randn(batch_size, 1, 3),
@@ -373,7 +370,7 @@ class EncoderDecorderAdaIN(nn.Module):
         x = self.encoder_res4(x, params[16:18])
         skip_x5 = self.skip_res5(x, params[18:20])
         x = self.encoder_pool5(x)
-        x = self.encoder_res5(x, params[20:22])
+        x = self.encoder_res5(x, params[20:22]) #here
 
         x = self.mid_res(x, params[22:24])
 
@@ -533,8 +530,6 @@ class V2VModelLSTM(nn.Module):
                 nn.init.xavier_normal_(m.weight)
                 # nn.init.normal_(m.weight, 0, 0.001)
                 nn.init.constant_(m.bias, 0)
-
-
 
 
 class EncoderDecorderAdaIN_MiddleVector(EncoderDecorder):
