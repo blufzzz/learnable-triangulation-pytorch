@@ -30,7 +30,7 @@ model:
   name: "vol_temporal_lstm_adain"
   kind: "mpii"
   volume_aggregation_method: "no_aggregation"
-  adain_type: "all"
+  adain_type: "middle"
   encoder_type: "backbone"
   pretrained_encoder: false
   encoded_feature_space: 1024

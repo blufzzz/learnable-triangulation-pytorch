@@ -393,7 +393,6 @@ class EncoderDecorderAdaIN(nn.Module):
         return x
 
 
-
 class V2VModel(nn.Module):
     def __init__(self, input_channels, output_channels):
         super().__init__()
@@ -537,19 +536,53 @@ class EncoderDecorderAdaIN_MiddleVector(EncoderDecorder):
     def __init__(self):
         super().__init__()
         self.mid_res = Res3DBlockAdaIN(128, 128)
+    def forward(self, x, adain_params=None):
+        
+        skip_x1 = self.skip_res1(x)
+        x = self.encoder_pool1(x)
+        x = self.encoder_res1(x)
+        skip_x2 = self.skip_res2(x)
+        x = self.encoder_pool2(x)
+        x = self.encoder_res2(x)
+        skip_x3 = self.skip_res3(x)
+        x = self.encoder_pool3(x)
+        x = self.encoder_res3(x)
+        skip_x4 = self.skip_res4(x)
+        x = self.encoder_pool4(x)
+        x = self.encoder_res4(x)
+        skip_x5 = self.skip_res5(x)
+        x = self.encoder_pool5(x)
+        x = self.encoder_res5(x)
+
+        if adain_params is not None:
+            x = self.mid_res(x, adain_params)
+        else:
+            x = self.mid_res(x)    
+
+        x = self.decoder_res5(x)
+        x = self.decoder_upsample5(x)
+        x = x + skip_x5
+        x = self.decoder_res4(x)
+        x = self.decoder_upsample4(x)
+        x = x + skip_x4
+        x = self.decoder_res3(x)
+        x = self.decoder_upsample3(x)
+        x = x + skip_x3
+        x = self.decoder_res2(x)
+        x = self.decoder_upsample2(x)
+        x = x + skip_x2
+        x = self.decoder_res1(x)
+        x = self.decoder_upsample1(x)
+        x = x + skip_x1 
+        return x    
         
 class V2VModelAdaIN_MiddleVector(V2VModel):
     def __init__(self, input_channels, output_channels):
             super().__init__(input_channels, output_channels)
             self.encoder_decoder = EncoderDecorderAdaIN_MiddleVector()
-    def forward(self, x, adain_params):
-        x = self.front_layer1(x)
-        x = self.front_layer2(x)
-        x = self.front_layer3(x)
-        x = self.front_layer4(x)
+    def forward(self, x, adain_params=None):
+        x = self.front_layers(x)
         x = self.encoder_decoder(x,adain_params) 
-        x = self.back_layer1(x)
-        x = self.back_layer2(x)
-        x = self.back_layer3(x)
+        x = self.back_layers(x)
         x = self.output_layer(x)
         return x                         

@@ -256,14 +256,22 @@ class VolumetricLSTMAdaINNet(nn.Module):
             "backbone":FeaturesEncoder_Bottleneck(self.encoded_feature_space,
                                                  C = self.encoder_capacity_multiplier)
         }[self.encoder_type]
+        
         self.volume_net = {
             "all":V2VModelAdaIN(32, self.num_joints),
             "middle":V2VModelAdaIN_MiddleVector(32, self.num_joints)
         }[self.adain_type]
+
         self.features_sequence_to_vector = Seq2VecRNN(self.encoded_feature_space,
                                                       self.style_vector_dim)
 
-        self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*C) for C in CHANNELS_LIST]) # 51
+        if self.adain_type == 'all':
+            self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*C) for C in CHANNELS_LIST]) # 51
+        elif self.adain_type =='middle':
+            self.affine_mappings = nn.Linear(self.style_vector_dim, 2*128)
+        else:
+            raise RuntimeError('Wrong adain_type') 
+                
         self.process_features = nn.Sequential(
             nn.Conv2d(256, 32, 1)
         )
@@ -353,7 +361,11 @@ class VolumetricLSTMAdaINNet(nn.Module):
             volumes = torch.cat(volumes, 0)
 
         # inference
-        adain_params = [affine_map(style_vector) for affine_map in self.affine_mappings]
+        if self.adain_type == 'all':
+            adain_params = [affine_map(style_vector) for affine_map in self.affine_mappings]
+        elif self.adain_type == 'middle':
+            adain_params = self.affine_mappings(style_vector)          
+
         volumes = self.volume_net(volumes, adain_params=adain_params)
         # integral 3d
         vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
