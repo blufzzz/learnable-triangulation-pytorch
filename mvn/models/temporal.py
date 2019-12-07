@@ -2,6 +2,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 from IPython.core.debugger import set_trace
+from torchvision import models
 
 class Basic2DBlock(nn.Module):
     def __init__(self, in_planes, out_planes, kernel_size):

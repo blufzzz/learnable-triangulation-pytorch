@@ -313,7 +313,7 @@ class VolumetricLSTMAdaINNet(nn.Module):
 
         features = features.view(batch_size, dt, features_channels, *features_shape)
         pivot_features = features[:,-1,...]
-        style_features = features[:,:-1,...]
+        style_features = features[:,:-1,...].contiguous()
         pivot_features = self.process_features(pivot_features).unsqueeze(1) # add fictive view
 
         if self.encoder_type == 'backbone':
@@ -329,7 +329,7 @@ class VolumetricLSTMAdaINNet(nn.Module):
             style_features = style_features.view(batch_size*(dt-1), features_channels, *features_shape)
             if self.style_grad_for_backbone:
                 style_features = style_features.detach()
-            encoded_features = self.encoder()
+            encoded_features = self.encoder(style_features)
 
         encoded_features = encoded_features.view(batch_size, (dt-1), self.encoded_feature_space)
         style_vector = self.features_sequence_to_vector(encoded_features, device=device) # [batch_size, 512]

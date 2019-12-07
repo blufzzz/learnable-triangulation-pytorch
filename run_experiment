@@ -4,4 +4,4 @@ srun -p TitanX --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangu
 python3.6 train.py \
 --logdir=../logs/adain_lstm \
 --config=./experiments/human36m/train/human36m_vol_temporal_softmax_lstm_adain.yaml \
---experiment_comment="h36_sv64_dist_adain-lstm-middle_f2v-backbone-C2-1024_dt-8_dil-3_bs-1-1_lr-1e-4"
+--experiment_comment="h36_sv64_dist_adain-lstm-middle_f2v-densenet-pretr-1024_dt-8_dil-3_bs-1-1_lr-1e-4"
