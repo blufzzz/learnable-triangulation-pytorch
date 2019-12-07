@@ -18,7 +18,8 @@ from mvn.models.temporal import Seq2VecRNN,\
                                 FeaturesAR_RNN,\
                                 FeaturesAR_CNN1D,\
                                 FeaturesAR_CNN2D_UNet,\
-                                FeaturesAR_CNN2D_ResNet
+                                FeaturesAR_CNN2D_ResNet,\
+                                FeaturesEncoder_Bottleneck
 
 from IPython.core.debugger import set_trace
 from mvn.utils.op import get_coord_volumes
@@ -147,7 +148,9 @@ class VolumetricTemporalNet(nn.Module):
                                               coord_volumes, 
                                               volume_aggregation_method=self.volume_aggregation_method, 
                                               vol_confidences=vol_confidences)
-        
+            
+            if self.volume_aggregation_method == 'no_aggregation':
+                volumes = torch.cat(volumes, 0)
             # set True to save intermediate result                                                
             volumes_final = self.volume_net_basepoint(volumes) if self.use_separate_v2v_for_basepoint else self.volume_net(volumes)
             
@@ -239,16 +242,19 @@ class VolumetricLSTMAdaINNet(nn.Module):
         self.style_vector_dim = config.model.style_vector_dim if hasattr(config.model, 'style_vector_dim') else 256
         self.features_regressor_base_channels = config.model.features_regressor_base_channels if hasattr(config.model, 'features_regressor_base_channels') else 8
         self.adain_type = config.model.adain_type
-        self.fr_grad_for_backbone = config.model.fr_grad_for_backbone
+        self.style_grad_for_backbone = config.model.style_grad_for_backbone
         self.encoder_type = config.model.encoder_type
         self.pretrained_encoder = config.model.pretrained_encoder
         self.encoded_feature_space = config.model.encoded_feature_space
+        self.encoder_capacity_multiplier = config.model.encoder_capacity_multiplier
+
         # modules
         self.backbone = pose_resnet.get_pose_net(config.model.backbone) 
         self.encoder = {
-            "custom":FeaturesEncoder(256, pretrained = self.pretrained_encoder),
-            "resnet":FeaturesEncoder_ResNet(256, pretrained = self.pretrained_encoder),
-            "backbone":None
+            # "custom":FeaturesEncoder(256, self.encoded_feature_space, pretrained = self.pretrained_encoder),
+            # "resnet":FeaturesEncoder_ResNet(256, self.encoded_feature_space, pretrained = self.pretrained_encoder),
+            "backbone":FeaturesEncoder_Bottleneck(self.encoded_feature_space,
+                                                 C = self.encoder_capacity_multiplier)
         }[self.encoder_type]
         self.volume_net = {
             "all":V2VModelAdaIN(32, self.num_joints),
@@ -256,7 +262,11 @@ class VolumetricLSTMAdaINNet(nn.Module):
         }[self.adain_type]
         self.features_sequence_to_vector = Seq2VecRNN(self.encoded_feature_space,
                                                       self.style_vector_dim)
+
         self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*C) for C in CHANNELS_LIST]) # 51
+        self.process_features = nn.Sequential(
+            nn.Conv2d(256, 32, 1)
+        )
 
     def forward(self, images_batch, batch, root_keypoints=None):
 
@@ -268,7 +278,7 @@ class VolumetricLSTMAdaINNet(nn.Module):
         images_batch = images_batch.view(-1, 3, *image_shape)
 
         # forward backbone
-        heatmaps, features, alg_confidences, vol_confidences = self.backbone(images_batch)
+        heatmaps, features, alg_confidences, vol_confidences, bottleneck = self.backbone(images_batch)
 
         # reshape back and take only last view (pivot)
         images_batch = images_batch.view(batch_size, dt, *images_batch.shape[1:])[:,-1,...].unsqueeze(1)
@@ -290,13 +300,28 @@ class VolumetricLSTMAdaINNet(nn.Module):
         proj_matricies_batch = proj_matricies_batch.float().to(device)
         proj_matricies_batch = proj_matricies_batch[:,-1,...].unsqueeze(1) 
 
-        # process features before lifting to volume
-        encoded_features = self.encoder(features)
         features = features.view(batch_size, dt, features_channels, *features_shape)
-        pivot_features = features[:,-1,...] 
-        features = features[:,:-1,...]
-        style_vector = self.features_sequence_to_vector(features) # [batch_size, 512]
+        pivot_features = features[:,-1,...]
+        style_features = features[:,:-1,...]
         pivot_features = self.process_features(pivot_features).unsqueeze(1) # add fictive view
+
+        if self.encoder_type == 'backbone':
+            bottleneck_shape = bottleneck.shape[-2:]
+            bottleneck_channels = bottleneck.shape[1]
+            bottleneck = bottleneck.view(batch_size, dt, bottleneck_channels, *bottleneck_shape)
+            bottleneck = bottleneck[:,:-1,...].contiguous()
+            bottleneck = bottleneck.view(batch_size*(dt-1), bottleneck_channels, *bottleneck_shape)
+            if not self.style_grad_for_backbone:
+                bottleneck = bottleneck.detach()
+            encoded_features = self.encoder(bottleneck)
+        else:
+            style_features = style_features.view(batch_size*(dt-1), features_channels, *features_shape)
+            if self.style_grad_for_backbone:
+                style_features = style_features.detach()
+            encoded_features = self.encoder()
+
+        encoded_features = encoded_features.view(batch_size, (dt-1), self.encoded_feature_space)
+        style_vector = self.features_sequence_to_vector(encoded_features, device=device) # [batch_size, 512]
         
         if self.use_precalculated_pelvis:
             tri_keypoints_3d = torch.from_numpy(np.array(batch['pred_keypoints_3d'])).type(torch.float).to(device)
@@ -324,8 +349,8 @@ class VolumetricLSTMAdaINNet(nn.Module):
                                         volume_aggregation_method=self.volume_aggregation_method,
                                         vol_confidences=vol_confidences
                                         )
-        
-        volumes = torch.cat(volumes, 0)
+        if self.volume_aggregation_method == 'no_aggregation':
+            volumes = torch.cat(volumes, 0)
 
         # inference
         adain_params = [affine_map(style_vector) for affine_map in self.affine_mappings]
@@ -473,9 +498,10 @@ class VolumetricFRAdaINNet(nn.Module):
                                         volume_aggregation_method=self.volume_aggregation_method,
                                         vol_confidences=vol_confidences
                                         )
-        
-        volumes = torch.cat(volumes, 0)
-        volumes_pred = torch.cat(volumes_pred, 0)
+        if self.volume_aggregation_method == 'no_aggregation':
+            volumes = torch.cat(volumes, 0)
+            volumes_pred = torch.cat(volumes_pred, 0)
+
         # inference
         if self.adain_type == 'all':
             volumes_stacked = self.volume_net(torch.cat([volumes, volumes_pred]), [None]*len(CHANNELS_LIST))

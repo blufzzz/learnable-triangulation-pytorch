@@ -194,7 +194,8 @@ class PoseResNet(nn.Module):
                  final_conv_kernel=1,
                  alg_confidences=False,
                  vol_confidences=False,
-                 return_heatmaps = False
+                 return_heatmaps = False,
+                 return_bottleneck = False
                  ):
         super().__init__()
 
@@ -205,6 +206,7 @@ class PoseResNet(nn.Module):
         self.deconv_with_bias = deconv_with_bias
         self.num_deconv_layers, self.num_deconv_filters, self.num_deconv_kernels = num_deconv_layers, num_deconv_filters, num_deconv_kernels
         self.final_conv_kernel = final_conv_kernel
+        self.return_bottleneck = return_bottleneck
 
         self.conv1 = nn.Conv2d(num_input_channels, 64, kernel_size=7, stride=2, padding=3,
                                bias=False)
@@ -314,6 +316,10 @@ class PoseResNet(nn.Module):
         if hasattr(self, "vol_confidences"):
             vol_confidences = self.vol_confidences(x)
 
+        bottleneck = None
+        if self.return_bottleneck:
+            bottleneck = x 
+
         x = self.deconv_layers(x)
         features = x
 
@@ -321,8 +327,8 @@ class PoseResNet(nn.Module):
         if hasattr(self, "final_layer"):
             x = self.final_layer(x)
             heatmaps = x
-
-        return heatmaps, features, alg_confidences, vol_confidences
+            
+        return heatmaps, features, alg_confidences, vol_confidences, bottleneck
 
 
 def get_pose_net(config, device='cuda:0'):
@@ -338,9 +344,10 @@ def get_pose_net(config, device='cuda:0'):
         num_deconv_filters=(256, 256, 256),
         num_deconv_kernels=(4, 4, 4),
         final_conv_kernel=1,
-        alg_confidences=config.alg_confidences,
-        vol_confidences=config.vol_confidences,
-        return_heatmaps=config.return_heatmaps
+        alg_confidences=config.alg_confidences if hasattr(config, "alg_confidences") else False,
+        vol_confidences=config.vol_confidences if hasattr(config, "vol_confidences") else False,
+        return_heatmaps=config.return_heatmaps if hasattr(config, "return_heatmaps") else False,
+        return_bottleneck =config.return_bottleneck  if hasattr(config, "return_bottleneck") else False
     )
 
     if config.init_weights:

@@ -92,43 +92,24 @@ class TemporalDiscriminator(nn.Module):
 
 class Seq2VecRNN(nn.Module):
     """docstring for Seq2VecRNN"""
-    def __init__(self, input_features_dim, output_features_dim=None, hidden_dim = 1024):
+    def __init__(self, input_features_dim, output_features_dim=1024, hidden_dim = 1024):
         super(Seq2VecRNN, self).__init__()
         self.input_features_dim = input_features_dim
-        self.hidden_dim = hidden_dim
         self.output_features_dim = output_features_dim
-        self.feature2vector = nn.Sequential(nn.Conv2d(self.input_features_dim,128,3),
-                               nn.BatchNorm2d(128),
-                               nn.ReLU(),
-                               nn.MaxPool2d(2),
-                               nn.Conv2d(128,64,3),
-                               nn.BatchNorm2d(64),
-                               nn.ReLU(),
-                               nn.MaxPool2d(2),
-                               nn.Conv2d(64,32,1),
-                               nn.BatchNorm2d(32),
-                               nn.ReLU(),
-                               nn.MaxPool2d(2),
-                               nn.Conv2d(32,16,1),
-                               nn.BatchNorm2d(16),
-                               nn.ReLU(),
-                               nn.MaxPool2d(2))
-        self.lstm = nn.LSTM(400, hidden_dim, batch_first=True)
-        if self.output_features_dim is not None:
+        self.hidden_dim = hidden_dim
+        
+        self.lstm = nn.LSTM(self.input_features_dim, self.hidden_dim, batch_first=True)
+        
+        if self.output_features_dim != self.hidden_dim :
             self.output_layer = nn.Linear(self.hidden_dim, self.output_features_dim)
             self.activation = nn.ReLU()
         
-    def forward(self, features, eps = 1e-3):
-        # [batch size, dt, 256, 96, 96]
-
-        device = torch.cuda.current_device()
-        features_shape = features.shape[2:]
-        batch_size, dt = features.shape[:2]
-        vectors = self.feature2vector(features.view(-1, *features_shape))
-        vectors = vectors.view(batch_size, dt, -1)
+    def forward(self, features, eps = 1e-3, device='cuda:0'):
+        # [bathc_size, dt, feature_shape]
+        batch_size = features.shape[0]
         (h0, c0) = torch.randn(1, batch_size, self.hidden_dim, device=device)*eps,\
                    torch.randn(1, batch_size, self.hidden_dim, device=device)*eps
-        output, (hn, cn) = self.lstm(vectors, (h0, c0))
+        output, (hn, cn) = self.lstm(features, (h0, c0))
         output = output[:,-1,...]
         if self.output_features_dim is not None:
             output = self.activation(self.output_layer(output))
@@ -144,14 +125,47 @@ class FeaturesDecoder(nn.Module):
     def forward(self, x):
         return x    
 
-class FeaturesEncoder(nn.Module):
-    """docstring for FeaturesEncoder"""
-    def __init__(self, input_features_dim, output_features_dim):
+class FeaturesEncoder_Bottleneck(nn.Module):
+    """docstring for FeaturesEncoder_Bottleneck"""
+    def __init__(self, output_features_dim, C = 4, multiplier=128):
         super().__init__()
-        self.input_features_dim = input_features_dim
         self.output_features_dim = output_features_dim
+        self.C = C
+        self.multiplier = multiplier
+        self.features=nn.Sequential(nn.Conv2d(2048, 
+                                              self.C * self.multiplier, 
+                                              kernel_size=3, 
+                                              stride=2),
+                                      nn.BatchNorm2d(self.C * self.multiplier),
+                                      nn.ReLU(),
+                                      nn.Conv2d(self.C * self.multiplier, 
+                                                self.C * self.multiplier//2, 
+                                                kernel_size=3, 
+                                                stride=1),
+                                      nn.BatchNorm2d(self.C * self.multiplier//2),
+                                      nn.ReLU(),
+                                      nn.Conv2d(self.C * self.multiplier//2,
+                                                self.C * self.multiplier//4, 
+                                                kernel_size=3, 
+                                                stride=1),
+                                      nn.BatchNorm2d(self.C * self.multiplier//4),
+                                      nn.ReLU(),
+                                      nn.Conv2d(self.C * self.multiplier//4,
+                                                self.C * self.multiplier//4, kernel_size=1),
+                                      nn.BatchNorm2d(self.C * self.multiplier//4),
+                                      nn.ReLU()
+                                    )
+        
+        self.linear = nn.Linear(self.C * self.multiplier//4, output_features_dim)
+        self.activation = nn.ReLU()
+        
     def forward(self, x):
-        return x         
+        batch_size = x.shape[0]
+        x = self.features(x)
+        x = x.view(batch_size, -1)
+        x = self.linear(x)
+        x = self.activation(x)
+        return x          
         
 class FeaturesAR_CNN1D(nn.Module):
     """docstring for FeaturesAR_CNN1D"""

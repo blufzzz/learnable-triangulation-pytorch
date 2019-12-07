@@ -547,7 +547,7 @@ class V2VModelAdaIN_MiddleVector(V2VModel):
         x = self.front_layer2(x)
         x = self.front_layer3(x)
         x = self.front_layer4(x)
-        x = self.encoder_decoder(x, adain_params) 
+        x = self.encoder_decoder(x,adain_params) 
         x = self.back_layer1(x)
         x = self.back_layer2(x)
         x = self.back_layer3(x)

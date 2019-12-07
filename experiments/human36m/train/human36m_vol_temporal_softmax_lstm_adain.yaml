@@ -23,13 +23,19 @@ opt:
   volume_net_lr: 0.001
   affine_mappings_lr: 0.001
   features_sequence_to_vector_lr: 0.001
+  encoder_lr: 0.001
   scale_keypoints_3d: 0.1
 
 model:
   name: "vol_temporal_lstm_adain"
   kind: "mpii"
   volume_aggregation_method: "no_aggregation"
-  adain_type: "middle"
+  adain_type: "all"
+  encoder_type: "backbone"
+  pretrained_encoder: false
+  encoded_feature_space: 1024
+  encoder_capacity_multiplier: 2
+  style_grad_for_backbone: false
 
   init_weights: false
   checkpoint: ""
@@ -60,6 +66,7 @@ model:
     alg_confidences: false
     vol_confidences: false
     return_heatmaps: false
+    return_bottleneck: true
 
 dataset:
   kind: "human36m"
