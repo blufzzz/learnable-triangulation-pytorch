@@ -31,10 +31,10 @@ model:
   kind: "mpii"
   volume_aggregation_method: "no_aggregation"
   adain_type: "middle"
-  encoder_type: "backbone"
-  pretrained_encoder: false
+  encoder_type: "densenet"
+  pretrained_encoder: true
   encoded_feature_space: 1024
-  encoder_capacity_multiplier: 2
+  encoder_capacity_multiplier: 8
   style_grad_for_backbone: false
 
   init_weights: false

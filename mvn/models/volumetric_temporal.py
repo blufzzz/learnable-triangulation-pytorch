@@ -19,7 +19,8 @@ from mvn.models.temporal import Seq2VecRNN,\
                                 FeaturesAR_CNN1D,\
                                 FeaturesAR_CNN2D_UNet,\
                                 FeaturesAR_CNN2D_ResNet,\
-                                FeaturesEncoder_Bottleneck
+                                FeaturesEncoder_Bottleneck,\
+                                FeaturesEncoder_DenseNet
 
 from IPython.core.debugger import set_trace
 from mvn.utils.op import get_coord_volumes
@@ -252,11 +253,13 @@ class VolumetricLSTMAdaINNet(nn.Module):
         self.backbone = pose_resnet.get_pose_net(config.model.backbone) 
         self.encoder = {
             # "custom":FeaturesEncoder(256, self.encoded_feature_space, pretrained = self.pretrained_encoder),
-            # "resnet":FeaturesEncoder_ResNet(256, self.encoded_feature_space, pretrained = self.pretrained_encoder),
+            "densenet":FeaturesEncoder_DenseNet(256, 
+                                                self.encoded_feature_space, 
+                                                pretrained = self.pretrained_encoder),
             "backbone":FeaturesEncoder_Bottleneck(self.encoded_feature_space,
-                                                 C = self.encoder_capacity_multiplier)
+                                                  C = self.encoder_capacity_multiplier)
         }[self.encoder_type]
-        
+
         self.volume_net = {
             "all":V2VModelAdaIN(32, self.num_joints),
             "middle":V2VModelAdaIN_MiddleVector(32, self.num_joints)
@@ -268,7 +271,7 @@ class VolumetricLSTMAdaINNet(nn.Module):
         if self.adain_type == 'all':
             self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*C) for C in CHANNELS_LIST]) # 51
         elif self.adain_type =='middle':
-            self.affine_mappings = nn.Linear(self.style_vector_dim, 2*128)
+            self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*128) for _ in range(2)])
         else:
             raise RuntimeError('Wrong adain_type') 
                 
@@ -361,10 +364,7 @@ class VolumetricLSTMAdaINNet(nn.Module):
             volumes = torch.cat(volumes, 0)
 
         # inference
-        if self.adain_type == 'all':
-            adain_params = [affine_map(style_vector) for affine_map in self.affine_mappings]
-        elif self.adain_type == 'middle':
-            adain_params = self.affine_mappings(style_vector)          
+        adain_params = [affine_map(style_vector) for affine_map in self.affine_mappings]
 
         volumes = self.volume_net(volumes, adain_params=adain_params)
         # integral 3d

@@ -125,6 +125,35 @@ class FeaturesDecoder(nn.Module):
     def forward(self, x):
         return x    
 
+
+class FeaturesEncoder_DenseNet(nn.Module):
+    """docstring for FeaturesEncoder_DenseNet"""
+    def __init__(self, input_features_dim, output_features_dim, pretrained=False):
+        super().__init__()
+        self.input_features_dim = input_features_dim
+        self.output_features_dim = output_features_dim
+        self.pretrained = pretrained
+        self.backbone = models.densenet121(pretrained=pretrained).features
+        self.backbone.conv0 = nn.Sequential(nn.Conv2d(input_features_dim,
+                                                      input_features_dim//2, 
+                                                      kernel_size=3,
+                                                      stride = 2),
+                                           nn.Conv2d(input_features_dim//2,
+                                                     64,
+                                                     kernel_size=3,
+                                                     stride = 2))
+        self.output = nn.Linear(1024, output_features_dim) if output_features_dim != 1024 else nn.Sequential()
+        self.activation = nn.ReLU()
+    def forward(self, x):
+        x = self.backbone(x)
+        x = x.squeeze(-1).squeeze(-1)
+        x = self.output(x)
+        x = self.activation(x)
+        return x   
+
+
+
+
 class FeaturesEncoder_Bottleneck(nn.Module):
     """docstring for FeaturesEncoder_Bottleneck"""
     def __init__(self, output_features_dim, C = 4, multiplier=128):
