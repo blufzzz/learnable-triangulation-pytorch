@@ -662,8 +662,9 @@ def main(args):
                                           writer=writer,
                                           discriminator=discriminator,
                                           opt_discr=opt_discr)
-
+            # saving    
             if master:
+
                 checkpoint_dir = os.path.join(experiment_dir, "checkpoints", "{:04}".format(epoch))
                 os.makedirs(checkpoint_dir, exist_ok=True)
 

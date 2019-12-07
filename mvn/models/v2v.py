@@ -534,11 +534,22 @@ class V2VModelLSTM(nn.Module):
 
 class EncoderDecorderAdaIN_MiddleVector(EncoderDecorder):
     """docstring for EncoderDecorderAdaIN_Middle"""
-    def __init__(self, arg):
+    def __init__(self):
         super().__init__()
         self.mid_res = Res3DBlockAdaIN(128, 128)
         
 class V2VModelAdaIN_MiddleVector(V2VModel):
     def __init__(self, input_channels, output_channels):
-            super().__init__()
-            self.encoder_decoder = EncoderDecorderAdaIN_MiddleVector()                 
+            super().__init__(input_channels, output_channels)
+            self.encoder_decoder = EncoderDecorderAdaIN_MiddleVector()
+    def forward(self, x, adain_params):
+        x = self.front_layer1(x)
+        x = self.front_layer2(x)
+        x = self.front_layer3(x)
+        x = self.front_layer4(x)
+        x = self.encoder_decoder(x, adain_params) 
+        x = self.back_layer1(x)
+        x = self.back_layer2(x)
+        x = self.back_layer3(x)
+        x = self.output_layer(x)
+        return x                         

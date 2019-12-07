@@ -237,16 +237,26 @@ class VolumetricLSTMAdaINNet(nn.Module):
         # modules params
         self.features_dim = config.model.features_dim if hasattr(config.model, 'features_dim') else 256
         self.style_vector_dim = config.model.style_vector_dim if hasattr(config.model, 'style_vector_dim') else 256
-
+        self.features_regressor_base_channels = config.model.features_regressor_base_channels if hasattr(config.model, 'features_regressor_base_channels') else 8
+        self.adain_type = config.model.adain_type
+        self.fr_grad_for_backbone = config.model.fr_grad_for_backbone
+        self.encoder_type = config.model.encoder_type
+        self.pretrained_encoder = config.model.pretrained_encoder
+        self.encoded_feature_space = config.model.encoded_feature_space
         # modules
         self.backbone = pose_resnet.get_pose_net(config.model.backbone) 
-        self.volume_net = V2VModelAdaIN(32, self.num_joints)
-        self.features_sequence_to_vector = Seq2VecRNN(256, output_features_dim=self.style_vector_dim)
+        self.encoder = {
+            "custom":FeaturesEncoder(256, pretrained = self.pretrained_encoder),
+            "resnet":FeaturesEncoder_ResNet(256, pretrained = self.pretrained_encoder),
+            "backbone":None
+        }[self.encoder_type]
+        self.volume_net = {
+            "all":V2VModelAdaIN(32, self.num_joints),
+            "middle":V2VModelAdaIN_MiddleVector(32, self.num_joints)
+        }[self.adain_type]
+        self.features_sequence_to_vector = Seq2VecRNN(self.encoded_feature_space,
+                                                      self.style_vector_dim)
         self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*C) for C in CHANNELS_LIST]) # 51
-        self.process_features = nn.Sequential(
-            nn.Conv2d(256, self.features_dim, 1)
-        )
-
 
     def forward(self, images_batch, batch, root_keypoints=None):
 
@@ -281,6 +291,7 @@ class VolumetricLSTMAdaINNet(nn.Module):
         proj_matricies_batch = proj_matricies_batch[:,-1,...].unsqueeze(1) 
 
         # process features before lifting to volume
+        encoded_features = self.encoder(features)
         features = features.view(batch_size, dt, features_channels, *features_shape)
         pivot_features = features[:,-1,...] 
         features = features[:,:-1,...]
@@ -365,13 +376,14 @@ class VolumetricFRAdaINNet(nn.Module):
         self.intermediate_features_dim = config.model.intermediate_features_dim if hasattr(config.model, 'intermediate_features_dim') else 32
         self.num_joints = config.model.backbone.num_joints
         self.features_regressor_base_channels = config.model.features_regressor_base_channels if hasattr(config.model, 'features_regressor_base_channels') else 8
-
+        self.adain_type = config.model.adain_type
+        self.fr_grad_for_backbone = config.model.fr_grad_for_backbone if hasattr(config.model, 'fr_grad_for_backbone') else False
         # modules
         self.backbone = pose_resnet.get_pose_net(config.model.backbone)
         self.volume_net = {
-            "all":V2VModelAdaIN(self.intermediate_features_dim, self.num_joints)
-            # "middle":V2VModelAdaIN_MiddleVector(self.intermediate_features_dim, self.num_joints)    
-        }[config.model.adain_type]
+            "all":V2VModelAdaIN(self.intermediate_features_dim, self.num_joints),
+            "middle":V2VModelAdaIN_MiddleVector(self.intermediate_features_dim, self.num_joints)    
+        }[self.adain_type]
         self.process_features = nn.Sequential(
             nn.Conv2d(256, self.intermediate_features_dim, 1)
         )
@@ -420,7 +432,11 @@ class VolumetricFRAdaINNet(nn.Module):
         # process features before lifting to volume
         features = features.view(batch_size, dt, features_channels, *features_shape)
         features_pivot = features[:,-1,...].unsqueeze(1)
-        features_aux = features[:,:-1,...].view(batch_size, -1, *features_shape)
+        if not self.fr_grad_for_backbone:
+            features_aux = features[:,:-1,...].view(batch_size, -1, *features_shape).detach()
+        else:
+            features_aux = features[:,:-1,...].view(batch_size, -1, *features_shape)
+            
 
         features_pred = self.features_regressor(features_aux).unsqueeze(1)
 
@@ -461,7 +477,11 @@ class VolumetricFRAdaINNet(nn.Module):
         volumes = torch.cat(volumes, 0)
         volumes_pred = torch.cat(volumes_pred, 0)
         # inference
-        volumes_stacked = self.volume_net(torch.cat([volumes, volumes_pred]), [None]*len(CHANNELS_LIST))
+        if self.adain_type == 'all':
+            volumes_stacked = self.volume_net(torch.cat([volumes, volumes_pred]), [None]*len(CHANNELS_LIST))
+        elif self.adain_type == 'middle':
+            volumes_stacked = self.volume_net(torch.cat([volumes, volumes_pred]))
+            
         # integral 3d
         volumes = volumes_stacked[batch_size:]
         volumes_pred = volumes_stacked[batch_size:]

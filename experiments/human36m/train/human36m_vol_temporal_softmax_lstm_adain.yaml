@@ -13,6 +13,7 @@ opt:
 
   n_objects_per_epoch: 15000
   n_epochs: 9999
+  dump_weights: False
 
   batch_size: 1
   val_batch_size: 1
@@ -28,6 +29,7 @@ model:
   name: "vol_temporal_lstm_adain"
   kind: "mpii"
   volume_aggregation_method: "no_aggregation"
+  adain_type: "middle"
 
   init_weights: false
   checkpoint: ""
@@ -62,6 +64,7 @@ model:
 dataset:
   kind: "human36m"
   dt: 8
+  dilation: 3
   singleview: true
   pivot_type: 'first'
 

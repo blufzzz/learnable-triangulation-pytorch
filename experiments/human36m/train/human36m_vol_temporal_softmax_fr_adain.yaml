@@ -1,6 +1,6 @@
 title: "human36m_vol_temporal_fr_adain_softmax"
 kind: "human36m"
-vis_freq: 100
+vis_freq: 1000
 vis_n_elements: 10
 
 image_shape: [384, 384]
@@ -9,11 +9,11 @@ opt:
   criterion: "MAE"
 
   use_volumetric_ce_loss: true
-  volumetric_ce_loss_weight: 0.1 #0.01
+  volumetric_ce_loss_weight: 0.01 #0.01
 
   use_intermediate_fr_loss: true
-  intermediate_fr_loss_weight: 0.1 #0.01
-  
+  intermediate_fr_loss_weight: 0.01 #0.01
+
   n_objects_per_epoch: 15000
   n_epochs: 9999
   dump_weights: False
@@ -32,10 +32,9 @@ model:
   kind: "mpii"
   volume_aggregation_method: "no_aggregation"
   features_regressor: "conv2d_unet"
-  adain_type: "all"
+  adain_type: "middle"
   intermediate_features_dim: 32
-  features_regressor_base_channels: 16
-
+  features_regressor_base_channels: 2
 
   init_weights: false
   checkpoint: ""
