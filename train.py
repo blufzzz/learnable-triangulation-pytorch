@@ -600,10 +600,18 @@ def main(args):
                 [{'params': model.backbone.parameters()},
                  {'params': model.process_features.parameters(), 'lr': config.opt.process_features_lr if hasattr(config.opt, "process_features_lr") else config.opt.lr},
                  {'params': model.lstm_v2v.parameters(), 'lr': config.opt.lstm_v2v_lr if hasattr(config.opt, "lstm_v2v_lr") else config.opt.lr},
-                 {'params': model.backbone.parameters()}
+                 {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr}
                 ],
                 lr=config.opt.lr
             )
+        elif config.model.name == "vol_temporal":
+            opt = torch.optim.Adam(
+                [{'params': model.backbone.parameters()},
+                 {'params': model.process_features.parameters(), 'lr': config.opt.process_features_lr if hasattr(config.opt, "process_features_lr") else config.opt.lr},
+                 {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr}
+                ],
+                lr=config.opt.lr
+            )    
         else:
             opt = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=config.opt.lr)
 

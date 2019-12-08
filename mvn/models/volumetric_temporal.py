@@ -49,7 +49,7 @@ class VolumetricTemporalNet(nn.Module):
 
         self.cuboid_side = config.model.cuboid_side
         self.cuboid_multiplier = config.model.cuboid_multiplier if hasattr(config.model, "cuboid_multiplier") else 1.0
-        self.rotation = config.model.rotation if hasattr(config.model, "rotation") else False
+        self.rotation = config.model.rotation if hasattr(config.model, "rotation") else True
 
         self.process_frames_independently = config.model.process_frames_independently if hasattr(config.model, 'process_frames_independently') else False
 
@@ -75,13 +75,13 @@ class VolumetricTemporalNet(nn.Module):
         # modules
         self.backbone = pose_resnet.get_pose_net(config.model.backbone)
         self.return_heatmaps = config.model.backbone.return_heatmaps if hasattr(config.model.backbone, 'return_heatmaps') else False  
-
+        self.features_channels = config.model.features_channels if hasattr(config.model, 'features_channels') else 32  
         self.process_features = nn.Sequential(
-            nn.Conv2d(256, 32, 1)
+            nn.Conv2d(256, self.features_channels, 1)
         )
         self.volume_net = {
-            "original":V2VModel(32, self.num_joints),
-            "lstm":V2VModelLSTM(32, self.num_joints)
+            "channel_stack":V2VModel(self.features_channels*config.dataset.dt, self.num_joints),
+            "lstm":V2VModelLSTM(self.features_channels, self.num_joints)
         }[config.model.v2v_type]
 
     def forward(self, images_batch, batch, root_keypoints=None):
@@ -93,12 +93,14 @@ class VolumetricTemporalNet(nn.Module):
         images_batch = images_batch.view(-1, *images_batch.shape[2:])
 
         # forward backbone
-        heatmaps, features, _, vol_confidences = self.backbone(images_batch)
+        heatmaps, features, _, vol_confidences , _= self.backbone(images_batch)
+        features = self.process_features(features)
+
+        features_shape = features.shape[-2:]
 
         # reshape back
         images_batch = images_batch.view(batch_size, dt, *images_batch.shape[1:])
-        heatmaps = heatmaps.view(batch_size, dt, *heatmaps.shape[1:]) if self.return_heatmaps else heatmaps
-        features = features.view(batch_size, dt, *features.shape[1:])
+        features = features.view(batch_size, dt, self.,*features_shape)
 
         # calcualte shapes
         image_shape, features_shape = tuple(images_batch.shape[3:]), tuple(features.shape[3:])
@@ -122,45 +124,14 @@ class VolumetricTemporalNet(nn.Module):
         proj_matricies_batch = proj_matricies_batch.float().to(device)
         
         # process features before lifting to volume
-        features = features.view(-1, *features.shape[2:])
         features = self.process_features(features)
-        features = features.unsqueeze(1) # [bs*dt, 1, features_shape]
                     
         if self.use_precalculated_pelvis:
             tri_keypoints_3d = torch.from_numpy(np.array(batch['pred_keypoints_3d'])).type(torch.float).to(device)
-
         elif self.use_gt_pelvis:
             tri_keypoints_3d = torch.from_numpy(np.array(batch['keypoints_3d'])).type(torch.float).to(device)
-
-        elif self.use_volumetric_pelvis:
-
-            coord_volumes, _, _ = get_coord_volumes(self.kind, 
-                                                    self.training, 
-                                                    self.rotation,
-                                                    self.cuboid_side*self.cuboid_multiplier,
-                                                    self.volume_size, 
-                                                    device, 
-                                                    batch_size = batch_size,
-                                                    dt = dt
-                                                    )
-
-            volumes = op.unproject_heatmaps(features,
-                                              proj_matricies_batch, 
-                                              coord_volumes, 
-                                              volume_aggregation_method=self.volume_aggregation_method, 
-                                              vol_confidences=vol_confidences)
-            
-            if self.volume_aggregation_method == 'no_aggregation':
-                volumes = torch.cat(volumes, 0)
-            # set True to save intermediate result                                                
-            volumes_final = self.volume_net_basepoint(volumes) if self.use_separate_v2v_for_basepoint else self.volume_net(volumes)
-            
-            tri_keypoints_3d, volumes_final = op.integrate_tensor_3d_with_coordinates(volumes_final * self.volume_multiplier, 
-                                                                        coord_volumes, 
-                                                                        softmax=self.volume_softmax)
-        
         else:
-            raise RuntimeError('In absence of precalculated pelvis or gt pelvis, self.use_volumetric_pelvis should be True') 
+            raise RuntimeError('In absence of precalculated pelvis or gt pelvis should be True') 
        
         # amend coord_volumes position                                                         
         coord_volumes, cuboids, base_points = get_coord_volumes(self.kind, 
@@ -175,7 +146,10 @@ class VolumetricTemporalNet(nn.Module):
         if self.process_frames_independently:
             coord_volumes = coord_volumes.view(-1, *coord_volumes.shape[-4:])
             proj_matricies_batch = proj_matricies_batch.view(-1, 1, *proj_matricies_batch.shape[-2:])
-                   
+            features = features.unsqueeze(1) # [bs*dt, 1, features_shape]
+        else:
+            features = features.view(batch_size, dt, self.features_channels, *features_shape)    
+
         # lift each featuremap to distinct volume and aggregate 
         volumes = op.unproject_heatmaps(features,  
                                         proj_matricies_batch, 
@@ -186,8 +160,8 @@ class VolumetricTemporalNet(nn.Module):
 
         # cat along view dimension
         if self.volume_aggregation_method == 'no_aggregation':        
-            volumes = torch.cat(volumes, 0)  
-
+            volumes = torch.stack(volumes, 0) # [batch_size, dt, ...]
+            volumes = volumes.view(batch_size, dt*self.features_channels, coord_volumes.shape[-3:])  
         # inference
         volumes = self.volume_net(volumes)
         # integral 3d

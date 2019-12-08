@@ -25,7 +25,6 @@ class Pool2DBlock(nn.Module):
     def forward(self, x):
         return F.max_pool2d(x, kernel_size=self.pool_size, stride=self.pool_size)
 
-
 class Res2DBlock(nn.Module):
     def __init__(self, in_planes, out_planes):
         super(Res2DBlock, self).__init__()

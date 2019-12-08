@@ -24,9 +24,10 @@ opt:
   scale_keypoints_3d: 0.1
 
 model:
-  name: "vol_temporal_adain"
+  name: "vol_temporal"
   kind: "mpii"
   volume_aggregation_method: "no_aggregation"
+  v2v_type: "channel_stack"
 
   init_weights: false
   checkpoint: ""
@@ -61,10 +62,11 @@ model:
 dataset:
   kind: "human36m"
   dt: 4
+  dilation: 3
+  singleview: true
+  pivot_type: 'first'
 
   train:
-    singleview: true
-    pivot_type: 'first'
     h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"
     labels_path: "/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy"
     pred_results_path: 
@@ -81,8 +83,6 @@ dataset:
     num_workers: 8
 
   val:
-    singleview: true
-    pivot_type: 'first'
     h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"
     labels_path: "/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy"
     pred_results_path: 
