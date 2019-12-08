@@ -1,7 +1,9 @@
 #!/bin/bash
  
-srun -p TitanX --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w hpc2 \
+srun --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch \
 python3.6 train.py \
---logdir=../logs/adain_lstm \
---config=./experiments/human36m/train/human36m_vol_temporal_softmax_lstm_adain.yaml \
---experiment_comment="h36_sv64_dist_adain-lstm-middle_f2v-densenet-pretr-1024_dt-8_dil-3_bs-1-1_lr-1e-4"
+--logdir=../logs/vol_temporal \
+--config=./experiments/human36m/train/human36m_vol_temporal_softmax.yaml \
+--experiment_comment="h36_sv64_dist_voltemporal_C-32_vm-001_dt-3_dil-3_bs-2-2_lr-1e-4"
+
+#--experiment_comment="h36_sv64_dist_adain-lstm-middle_f2v-densenet-pretr-1024_dt-8_dil-3_bs-1-1_lr-1e-4"

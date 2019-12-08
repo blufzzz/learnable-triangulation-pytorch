@@ -365,11 +365,6 @@ def one_epoch(model,
                     base_point_l2 = 0.0 if len(base_point_l2_list) == 0 else np.mean(base_point_l2_list)
                     metric_dict['base_point_l2'].append(base_point_l2)
 
-                # save answers for evalulation
-                if not is_train:
-                    results['keypoints_3d'].append(keypoints_3d_pred.detach().cpu().numpy())
-                    results['indexes'].append(batch['indexes'])
-
                 # plot visualization
                 if singleview_dataset:
                     keypoints_3d_gt = op.root_centering(keypoints_3d_gt, config.kind, inverse=True)
@@ -377,7 +372,11 @@ def one_epoch(model,
                     if model_type == "vol_temporal_fr_adain":
                         keypoints_3d_pred_fr = op.root_centering(keypoints_3d_pred_fr, config.kind, inverse=True)    
 
-
+                 # save answers for evalulation
+                if not is_train:
+                    results['keypoints_3d'].append(keypoints_3d_pred.detach().cpu().numpy())
+                    results['indexes'].append(batch['indexes'])
+                        
                 if master:
                     if n_iters_total % config.vis_freq == 0:
                         vis_kind = config.kind

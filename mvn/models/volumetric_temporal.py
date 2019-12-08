@@ -39,6 +39,7 @@ class VolumetricTemporalNet(nn.Module):
     def __init__(self, config, device='cuda:0'):
         super().__init__()
 
+        self.dt = config.dataset.dt
         self.num_joints = config.model.backbone.num_joints
         self.volume_aggregation_method = config.model.volume_aggregation_method # if hasattr(config.model, 'volume_aggregation_method') else None
 
@@ -73,6 +74,8 @@ class VolumetricTemporalNet(nn.Module):
             config.model.backbone.vol_confidences = True
 
         # modules
+        self.volumes_multipliers = config.model.volumes_multipliers if hasattr(config.model, "volumes_multipliers") else [1.]*self.dt
+        assert len(self.volumes_multipliers == self.dt)
         self.backbone = pose_resnet.get_pose_net(config.model.backbone)
         self.return_heatmaps = config.model.backbone.return_heatmaps if hasattr(config.model.backbone, 'return_heatmaps') else False  
         self.features_channels = config.model.features_channels if hasattr(config.model, 'features_channels') else 32  
@@ -80,7 +83,7 @@ class VolumetricTemporalNet(nn.Module):
             nn.Conv2d(256, self.features_channels, 1)
         )
         self.volume_net = {
-            "channel_stack":V2VModel(self.features_channels*config.dataset.dt, self.num_joints),
+            "channel_stack":V2VModel(self.features_channels*self.dt, self.num_joints),
             "lstm":V2VModelLSTM(self.features_channels, self.num_joints)
         }[config.model.v2v_type]
 
@@ -88,6 +91,7 @@ class VolumetricTemporalNet(nn.Module):
 
         device = images_batch.device
         batch_size, dt = images_batch.shape[:2]
+        assert self.dt == dt
 
         # reshape for backbone forward
         images_batch = images_batch.view(-1, *images_batch.shape[2:])
@@ -155,7 +159,8 @@ class VolumetricTemporalNet(nn.Module):
                                         proj_matricies_batch, 
                                         coord_volumes, 
                                         volume_aggregation_method=self.volume_aggregation_method,
-                                        vol_confidences=vol_confidences
+                                        vol_confidences=vol_confidences,
+                                        volumes_multipliers = self.volumes_multipliers
                                         )
 
         # cat along view dimension
