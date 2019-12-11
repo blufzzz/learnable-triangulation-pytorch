@@ -201,8 +201,11 @@ def visualize_batch(images_batch,
 def visualize_heatmaps(images_batch, 
                        heatmaps_batch,
                        kind="cmu",
-                       batch_index=0, size=5,
-                       max_n_rows=10, max_n_cols=10):
+                       batch_index=0,
+                       size=5,
+                       max_n_rows=10, 
+                       max_n_cols=10):
+
     n_views, n_joints = heatmaps_batch.shape[1], heatmaps_batch.shape[2]
     heatmap_shape = heatmaps_batch.shape[3:]
 
@@ -238,6 +241,54 @@ def visualize_heatmaps(images_batch,
     plt.close('all')
 
     return fig_image
+
+
+def visualize_features(images_batch, 
+                       features,
+                       kind="cmu",
+                       batch_index=0,
+                       size=5,
+                       max_n_rows=10, 
+                       max_n_cols=10):
+    
+    heatmaps = heatmaps.copy()
+    n_views, C = features.shape[1], features.shape[2]
+    features_shape = features.shape[3:]
+
+    n_rows, n_cols = min(C + 1, max_n_cols), min(n_views + 2, max_n_rows)
+    fig, axes = plt.subplots(ncols=n_cols, nrows=n_rows, figsize=(n_cols * size, n_rows * size))
+    axes = axes.reshape(n_rows, n_cols)
+
+    # images
+    images = image_batch_to_numpy(images_batch[batch_index])
+    images = denormalize_image(images).astype(np.uint8)
+    images = images[..., ::-1]  # bgr ->
+
+    # heatmaps
+    heatmaps = to_numpy(heatmaps_batch[batch_index])
+    heatmaps = heatmaps[-n_cols:]
+
+    for row in range(n_rows):
+        for col in range(n_cols):
+            if col == 0:
+                axes[row, col].set_ylabel(str(row), size='large')
+                axes[row, col].imshow(images[row])
+            else:
+                axes[row, col].imshow(heatmaps[row, col - 1], alpha=0.5)
+
+                if col == n_cols-1:
+                    axes[row,col].set_title('predictted heatmap')
+                if col == n_cols-2:
+                    axes[row,col].set_title('real heatmap')    
+                    
+    fig.tight_layout()
+
+    fig_image = fig_to_array(fig)
+
+    plt.close('all')
+
+    return fig_image
+
 
 
 def visualize_volumes(images_batch, volumes_batch, proj_matricies_batch,

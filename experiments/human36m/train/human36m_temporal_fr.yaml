@@ -1,18 +1,19 @@
 title: "human36m_vol_temporal_fr_adain_softmax"
 kind: "human36m"
-vis_freq: 1000
+vis_freq: 1
 vis_n_elements: 10
 
 image_shape: [384, 384]
 
-n_objects_per_epoch: 15000
-n_epochs: 9999
+opt:
+  n_objects_per_epoch: 20 #15000
+  n_epochs: 9999
 
-batch_size: 10
-val_batch_size: 10
+  batch_size: 2
+  val_batch_size: 2
 
-lr: 0.001
-process_features_lr: 0.001
+  lr: 0.001
+  process_features_lr: 0.001
 
 kind: "mpii"
 features_regressor: "conv2d_unet"
@@ -76,4 +77,4 @@ dataset:
     max_n_views: null
     num_workers: 8
 
-    retain_every_n_frames_in_test: 30
+    retain_every_n_frames_in_test: 700

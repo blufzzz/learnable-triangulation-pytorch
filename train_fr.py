@@ -87,8 +87,8 @@ def one_epoch(features_regressor,
         end = time.time()
 
         iterator = enumerate(dataloader)
-        if is_train and config.n_iters_per_epoch is not None:
-            iterator = islice(iterator, config.n_iters_per_epoch)
+        if is_train and config.opt.n_iters_per_epoch is not None:
+            iterator = islice(iterator, config.opt.n_iters_per_epoch)
 
         for iter_i, batch in iterator:
             with autograd.detect_anomaly():
@@ -148,10 +148,14 @@ def one_epoch(features_regressor,
                             images_batch, 
                             features_pred,
                             kind=vis_kind,
-                            batch_index=batch_i, size=5,
-                            max_n_rows=10, max_n_cols=10
+                            batch_index=batch_i, 
+                            size=5,
+                            max_n_rows=10, 
+                            max_n_cols=10
                         )
-                        writer.add_image(f"{name}/heatmaps/{batch_i}", heatmaps_vis.transpose(2, 0, 1), global_step=n_iters_total)
+                        writer.add_image(f"{name}/heatmaps/{batch_i}", 
+                                        heatmaps_vis.transpose(2, 0, 1), 
+                                        global_step=n_iters_total)
 
                     # dump weights to tensoboard
                     if n_iters_total % config.vis_freq == 0 and dump_weights:
@@ -219,11 +223,9 @@ def main(args):
             nn.Conv2d(256, config.intermediate_features_dim, 1)
         )
     backbone = pose_resnet.get_pose_net(config.backbone)
-    features_regressor = {
-        "conv2d_unet": FeaturesAR_CNN2D_UNet(config.intermediate_features_dim*(config.dataset.dt-1),
+    features_regressor = FeaturesAR_CNN2D_UNet(config.intermediate_features_dim*(config.dataset.dt-1),
                                                  config.intermediate_features_dim,
-                                                 C = config.features_regressor_base_channels)
-    }[config.features_regressor](config, device=device).to(device)
+                                                 C = config.features_regressor_base_channels).to(device)
 
     if config.init_weights:
         state_dict = torch.load(config.checkpoint)
@@ -237,8 +239,8 @@ def main(args):
     # optimizer
     opt = None
     if not args.eval:
-        opt = optim.Adam([{'params':process_features.parameters(), lr=config.process_features_lr},
-                            'params':features_regressor.parameters(), lr=config.lr])
+        opt = optim.Adam([{'params':process_features.parameters(), 'lr':config.opt.process_features_lr},
+                            {'params':features_regressor.parameters(), 'lr':config.opt.lr}])
 
     # datasets
     print("Loading data...")
@@ -256,7 +258,7 @@ def main(args):
     if not args.eval:
         # train loop
         n_iters_total_train, n_iters_total_val = 0, 0
-        for epoch in range(config.n_epochs):
+        for epoch in range(config.opt.n_epochs):
             if train_sampler is not None:
                 train_sampler.set_epoch(epoch)
 
