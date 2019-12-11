@@ -68,7 +68,7 @@ model:
 
 dataset:
   kind: "human36m"
-  dt: 4
+  dt: 3
   dilation: 3
   singleview: true
   pivot_type: 'first'

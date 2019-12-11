@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from mvn.utils.img import to_numpy, to_torch
-from mvn.utils import multiview
+from mvn.utils import multiview, volumetric
 
 
 def get_coord_volumes(kind, 
@@ -58,7 +58,7 @@ def get_coord_volumes(kind,
         # random rotation
         if training and rotation:    
             
-            center = torch.from_numpy(base_points).type(torch.float).to(device).unsqueeze(-2)
+            center = torch.tensor(base_points).type(torch.float).to(device).unsqueeze(-2)
             grid = grid - center
             grid = torch.stack([volumetric.rotate_coord_volume(coord_grid,\
                                 np.random.uniform(0.0, 2 * np.pi), axis) for coord_grid in grid])

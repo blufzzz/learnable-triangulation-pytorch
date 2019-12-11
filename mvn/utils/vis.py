@@ -198,7 +198,8 @@ def visualize_batch(images_batch,
     return fig_image
 
 
-def visualize_heatmaps(images_batch, heatmaps_batch,
+def visualize_heatmaps(images_batch, 
+                       heatmaps_batch,
                        kind="cmu",
                        batch_index=0, size=5,
                        max_n_rows=10, max_n_cols=10):

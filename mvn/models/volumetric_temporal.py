@@ -50,7 +50,7 @@ class VolumetricTemporalNet(nn.Module):
 
         self.cuboid_side = config.model.cuboid_side
         self.cuboid_multiplier = config.model.cuboid_multiplier if hasattr(config.model, "cuboid_multiplier") else 1.0
-        self.rotation = config.model.rotation if hasattr(config.model, "rotation") else True
+        self.rotation = config.model.rotation if hasattr(config.model, "rotation") else False
 
         self.process_frames_independently = config.model.process_frames_independently if hasattr(config.model, 'process_frames_independently') else False
 
@@ -75,7 +75,7 @@ class VolumetricTemporalNet(nn.Module):
 
         # modules
         self.volumes_multipliers = config.model.volumes_multipliers if hasattr(config.model, "volumes_multipliers") else [1.]*self.dt
-        assert len(self.volumes_multipliers == self.dt)
+        assert len(self.volumes_multipliers) == self.dt
         self.backbone = pose_resnet.get_pose_net(config.model.backbone)
         self.return_heatmaps = config.model.backbone.return_heatmaps if hasattr(config.model.backbone, 'return_heatmaps') else False  
         self.features_channels = config.model.features_channels if hasattr(config.model, 'features_channels') else 32  
@@ -83,31 +83,30 @@ class VolumetricTemporalNet(nn.Module):
             nn.Conv2d(256, self.features_channels, 1)
         )
         self.volume_net = {
-            "channel_stack":V2VModel(self.features_channels*self.dt, self.num_joints),
-            "lstm":V2VModelLSTM(self.features_channels, self.num_joints)
+            "channel_stack":V2VModel(self.features_channels*self.dt, self.num_joints)
+            # "lstm":V2VModelLSTM(self.features_channels, self.num_joints)
         }[config.model.v2v_type]
 
     def forward(self, images_batch, batch, root_keypoints=None):
 
         device = images_batch.device
         batch_size, dt = images_batch.shape[:2]
+        image_shape = images_batch.shape[-2:]
         assert self.dt == dt
 
         # reshape for backbone forward
-        images_batch = images_batch.view(-1, *images_batch.shape[2:])
+        images_batch = images_batch.view(-1, 3, *image_shape)
 
         # forward backbone
+
         heatmaps, features, _, vol_confidences , _= self.backbone(images_batch)
         features = self.process_features(features)
 
         features_shape = features.shape[-2:]
 
         # reshape back
-        images_batch = images_batch.view(batch_size, dt, *images_batch.shape[1:])
-        features = features.view(batch_size, dt, self.,*features_shape)
-
-        # calcualte shapes
-        image_shape, features_shape = tuple(images_batch.shape[3:]), tuple(features.shape[3:])
+        images_batch = images_batch.view(batch_size, dt, 3, *image_shape)
+        features = features.view(batch_size, dt, self.features_channels,*features_shape)
 
         if self.volume_aggregation_method.startswith('conf'):
             vol_confidences = vol_confidences.view(batch_size, dt, *vol_confidences.shape[1:])
@@ -127,9 +126,6 @@ class VolumetricTemporalNet(nn.Module):
 
         proj_matricies_batch = proj_matricies_batch.float().to(device)
         
-        # process features before lifting to volume
-        features = self.process_features(features)
-                    
         if self.use_precalculated_pelvis:
             tri_keypoints_3d = torch.from_numpy(np.array(batch['pred_keypoints_3d'])).type(torch.float).to(device)
         elif self.use_gt_pelvis:
@@ -150,9 +146,7 @@ class VolumetricTemporalNet(nn.Module):
         if self.process_frames_independently:
             coord_volumes = coord_volumes.view(-1, *coord_volumes.shape[-4:])
             proj_matricies_batch = proj_matricies_batch.view(-1, 1, *proj_matricies_batch.shape[-2:])
-            features = features.unsqueeze(1) # [bs*dt, 1, features_shape]
-        else:
-            features = features.view(batch_size, dt, self.features_channels, *features_shape)    
+            features = features.view(batch_size*dt, 1, self.features_channels,*features_shape)
 
         # lift each featuremap to distinct volume and aggregate 
         volumes = op.unproject_heatmaps(features,  
@@ -166,11 +160,11 @@ class VolumetricTemporalNet(nn.Module):
         # cat along view dimension
         if self.volume_aggregation_method == 'no_aggregation':        
             volumes = torch.stack(volumes, 0) # [batch_size, dt, ...]
-            volumes = volumes.view(batch_size, dt*self.features_channels, coord_volumes.shape[-3:])  
+            volumes = volumes.view(batch_size, dt*self.features_channels, self.volume_size, self.volume_size, self.volume_size)  
         # inference
         volumes = self.volume_net(volumes)
         # integral 3d
-        vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes_final * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
+        vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
 
         return (vol_keypoints_3d,
                 features,
@@ -359,6 +353,7 @@ class VolumetricLSTMAdaINNet(nn.Module):
                 )
 
 
+# FIX IT!
 class VolumetricFRAdaINNet(nn.Module):
     def __init__(self, config, device='cuda:0'):
         super().__init__()
@@ -394,6 +389,7 @@ class VolumetricFRAdaINNet(nn.Module):
         self.features_regressor_base_channels = config.model.features_regressor_base_channels if hasattr(config.model, 'features_regressor_base_channels') else 8
         self.adain_type = config.model.adain_type
         self.fr_grad_for_backbone = config.model.fr_grad_for_backbone if hasattr(config.model, 'fr_grad_for_backbone') else False
+        
         # modules
         self.backbone = pose_resnet.get_pose_net(config.model.backbone)
         self.volume_net = {
@@ -428,7 +424,7 @@ class VolumetricFRAdaINNet(nn.Module):
         features = self.process_features(features) # [bs, 256, 96, 96] -> [bs, 32, 96, 96] 
         
         # calcualte shapes
-        features_shape = features.shape[2:]
+        features_shape = features.shape[-2:]
         features_channels = features.shape[1] # 32
 
         # change camera intrinsics
