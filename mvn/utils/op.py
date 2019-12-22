@@ -188,7 +188,7 @@ def integrate_tensor_3d_with_coordinates(volumes, coord_volumes, softmax=True):
     return coordinates, volumes
 
 
-def unproject_heatmaps(heatmaps, proj_matricies, coord_volumes, volume_aggregation_method='sum', vol_confidences=None, volumes_multipliers=1.):
+def unproject_heatmaps(heatmaps, proj_matricies, coord_volumes, volume_aggregation_method='sum', vol_confidences=None, volumes_multipliers=None):
     device = heatmaps.device
     batch_size, n_views, n_joints, heatmap_shape = heatmaps.shape[0], heatmaps.shape[1], heatmaps.shape[2], tuple(heatmaps.shape[3:])
     volume_shape = coord_volumes.shape[1:4]
@@ -251,7 +251,11 @@ def unproject_heatmaps(heatmaps, proj_matricies, coord_volumes, volume_aggregati
             volume_batch[batch_i] = (volume_batch_to_aggregate * volume_batch_to_aggregate_softmin).sum(0)
 
         elif volume_aggregation_method == 'no_aggregation':
-            volume_batch.append(volume_batch_to_aggregate*volumes_multipliers[view_i])
+            if volumes_multipliers is not None:
+                volume_batch.append(volume_batch_to_aggregate*volumes_multipliers[view_i])
+            else:
+                volume_batch.append(volume_batch_to_aggregate)
+                    
         else:
             raise ValueError("Unknown volume_aggregation_method: {}".format(volume_aggregation_method))
 

@@ -14,8 +14,8 @@ opt:
   n_objects_per_epoch: 15000
   n_epochs: 9999
 
-  batch_size: 5
-  val_batch_size: 10
+  batch_size: 1
+  val_batch_size: 1
 
   lr: 0.0001
   process_features_lr: 0.001
@@ -26,7 +26,7 @@ opt:
 model:
   name: "vol"
   kind: "mpii"
-  volume_aggregation_method: "softmax"
+  volume_aggregation_method: "no_aggregation"
 
   init_weights: false
   checkpoint: ""
@@ -36,6 +36,7 @@ model:
   use_volumetric_pelvis: false
 
   cuboid_side: 2500.0
+  rotation: true
 
   volume_size: 64
   volume_multiplier: 1.0
@@ -54,15 +55,17 @@ model:
     num_joints: 17
     num_layers: 152
 
-    alg_confidences: true
-    vol_confidences: true
+    alg_confidences: false
+    vol_confidences: false
     return_heatmaps: true
+    return_bottleneck: false
 
 dataset:
   kind: "human36m"
-  singleview: true
   dt: 1
   dilation: 0
+  singleview: true
+  pivot_type: 'first'
 
   train:
     h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"

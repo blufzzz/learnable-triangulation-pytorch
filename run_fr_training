@@ -4,4 +4,4 @@ srun -p TitanX --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangu
 python3.6 train_fr.py \
 --logdir=../logs/feature_regressor \
 --config=./experiments/human36m/train/human36m_temporal_fr.yaml \
---experiment_comment="h36_sv_dist_fr-only_dt-3_dil-3_bs-10-10_C-2_lr-1e-3"
+--experiment_comment="h36_sv_dist_fr-only_dt-4_dil-100_bs-5-5_C-2_lr-1e-3"

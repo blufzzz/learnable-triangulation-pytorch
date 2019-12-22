@@ -211,6 +211,7 @@ class VolumetricTriangulationNet(nn.Module):
         self.volume_softmax = config.model.volume_softmax
         self.volume_multiplier = config.model.volume_multiplier
         self.volume_size = config.model.volume_size
+        self.rotation = config.model.rotation
 
         self.cuboid_side = config.model.cuboid_side
 
@@ -251,7 +252,7 @@ class VolumetricTriangulationNet(nn.Module):
         images = images.view(-1, *images.shape[2:])
 
         # forward backbone
-        heatmaps, features, _, vol_confidences = self.backbone(images)
+        heatmaps, features, _, vol_confidences, _ = self.backbone(images)
 
         # reshape back
         images = images.view(batch_size, n_views, *images.shape[1:])
@@ -329,9 +330,10 @@ class VolumetricTriangulationNet(nn.Module):
             center = torch.from_numpy(base_point).type(torch.float).to(device)
 
             # rotate
-            coord_volume = coord_volume - center
-            coord_volume = volumetric.rotate_coord_volume(coord_volume, theta, axis)
-            coord_volume = coord_volume + center
+            if self.rotation:
+                coord_volume = coord_volume - center
+                coord_volume = volumetric.rotate_coord_volume(coord_volume, theta, axis)
+                coord_volume = coord_volume + center
 
             # transfer
             if self.transfer_cmu_to_human36m:  # different world coordinates
@@ -347,7 +349,14 @@ class VolumetricTriangulationNet(nn.Module):
         features = features.view(batch_size, n_views, *features.shape[1:])
 
         # lift to volume
-        volumes = op.unproject_heatmaps(features, proj_matricies, coord_volumes, volume_aggregation_method=self.volume_aggregation_method, vol_confidences=vol_confidences)
+        volumes = op.unproject_heatmaps(features, 
+                                        proj_matricies, 
+                                        coord_volumes, 
+                                        volume_aggregation_method=self.volume_aggregation_method, 
+                                        vol_confidences=vol_confidences)
+
+        if self.volume_aggregation_method == 'no_aggregation':
+            volumes = torch.cat(volumes, 0)
 
         # integral 3d
         volumes = self.volume_net(volumes)

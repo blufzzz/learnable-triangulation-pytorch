@@ -9,12 +9,12 @@ opt:
   criterion: "MAE"
 
   use_volumetric_ce_loss: true
-  volumetric_ce_loss_weight: 0.01 #0.01
+  volumetric_ce_loss_weight: 0.01 
 
   use_intermediate_fr_loss: true
-  intermediate_fr_loss_weight: 0.01 #0.01
+  intermediate_fr_loss_weight: 0.01
 
-  n_objects_per_epoch: 15000
+  n_objects_per_epoch: 1000 #15000
   n_epochs: 9999
   dump_weights: False
 
@@ -35,6 +35,7 @@ model:
   adain_type: "middle"
   intermediate_features_dim: 32
   features_regressor_base_channels: 2
+  fr_grad_for_backbone: false
 
   init_weights: false
   checkpoint: ""
@@ -68,7 +69,7 @@ model:
 
 dataset:
   kind: "human36m"
-  dt: 3
+  dt: 4
   dilation: 3
   singleview: true
   pivot_type: 'first'

@@ -20,9 +20,9 @@ class AdaIN(nn.Module):
         else:
             if batch_size % 2 != 0:
                 print ('batch should contain concatenated features and style batches')
-                set_trace()
             batch_size = batch_size // 2
            
+            # dont change the order!
             style = features[batch_size:] 
             features = features[:batch_size]
 
@@ -35,7 +35,7 @@ class AdaIN(nn.Module):
         #             features_std[torch.isclose(features_std, torch.zeros_like(features_std))] + eps
         assert (features_std > 0.).any()
         norm_features = (features - features_mean) / (features_std + eps)
-        
+
         if use_adain_params:
             return norm_features * adain_std + adain_mean
         else:    

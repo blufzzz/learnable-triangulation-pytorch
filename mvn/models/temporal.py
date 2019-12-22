@@ -282,7 +282,7 @@ class FeaturesAR_CNN2D_UNet(nn.Module):
 
 
     def forward(self, x, params=None):
-
+        
         x = self.front_layer1(x)
         x = self.front_layer2(x)
         x = self.front_layer3(x)

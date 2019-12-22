@@ -89,7 +89,12 @@ def to_torch(ndarray):
 
 def image_batch_to_numpy(image_batch):
     image_batch = to_numpy(image_batch)
-    image_batch = np.transpose(image_batch, (0, 2, 3, 1)) # BxCxHxW -> BxHxWxC
+    if len(image_batch.shape) == 4: 
+        image_batch = np.transpose(image_batch, (0, 2, 3, 1)) # BxCxHxW -> BxHxWxC
+    elif len(image_batch.shape) == 5:
+        image_batch = np.transpose(image_batch, (0, 1, 3, 4, 2)) # BxTxCxHxW -> BxTxHxWxC
+    else:
+        raise RuntimeError('{} is a bad image ndims'.format(len(image_batch.shape)))        
     return image_batch
 
 

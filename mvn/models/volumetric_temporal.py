@@ -407,7 +407,6 @@ class VolumetricFRAdaINNet(nn.Module):
                                                  C = self.features_regressor_base_channels)
             # "conv2d_resnet": FeaturesAR_CNN2D_ResNet(self.intermediate_features_dim*self.dt, self.intermediate_features_dim)
         }[config.model.features_regressor]
-        self.volume_net.adain_params=[None]*len(CHANNELS_LIST)
                 
 
     def forward(self, images_batch, batch, root_keypoints=None):
@@ -420,7 +419,7 @@ class VolumetricFRAdaINNet(nn.Module):
         images_batch = images_batch.view(-1, 3, *image_shape)
 
         # forward backbone
-        heatmaps, features, alg_confidences, vol_confidences = self.backbone(images_batch)
+        heatmaps, features, alg_confidences, vol_confidences, _ = self.backbone(images_batch)
         features = self.process_features(features) # [bs, 256, 96, 96] -> [bs, 32, 96, 96] 
         
         # calcualte shapes
@@ -485,6 +484,7 @@ class VolumetricFRAdaINNet(nn.Module):
                                         volume_aggregation_method=self.volume_aggregation_method,
                                         vol_confidences=vol_confidences
                                         )
+
         if self.volume_aggregation_method == 'no_aggregation':
             volumes = torch.cat(volumes, 0)
             volumes_pred = torch.cat(volumes_pred, 0)

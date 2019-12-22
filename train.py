@@ -282,7 +282,7 @@ def one_epoch(model,
                 if model_type == "vol_temporal_fr_adain" and use_intermediate_fr_loss:
                     intermediate_fr_loss_weight = config.opt.intermediate_fr_loss_weight if hasattr(config.opt, "intermediate_fr_loss_weight") else 1.
                     features_shape = features_pred.shape[-2:]
-                    fs_loss = torch.sum(torch.abs(features_pred - features_pred_fr)) / features_shape.numel()
+                    fs_loss = torch.sum(torch.abs(features_pred - features_pred_fr)**2) / (features_shape.numel() * batch_size)
                     total_loss += fs_loss*intermediate_fr_loss_weight
                     metric_dict['fs_loss'].append(fs_loss.item())
 

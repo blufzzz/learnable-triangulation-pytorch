@@ -4,6 +4,7 @@ import skimage
 import cv2
 
 import torch
+from IPython.core.debugger import set_trace
 
 import matplotlib
 from matplotlib import pylab as plt
@@ -244,42 +245,40 @@ def visualize_heatmaps(images_batch,
 
 
 def visualize_features(images_batch, 
-                       features,
+                       features, # [aux, pred, gt]
                        kind="cmu",
                        batch_index=0,
                        size=5,
                        max_n_rows=10, 
                        max_n_cols=10):
     
-    heatmaps = heatmaps.copy()
+    
     n_views, C = features.shape[1], features.shape[2]
     features_shape = features.shape[3:]
 
-    n_rows, n_cols = min(C + 1, max_n_cols), min(n_views + 2, max_n_rows)
+    n_rows, n_cols = min(C + 1, max_n_cols), min(n_views, max_n_rows)
     fig, axes = plt.subplots(ncols=n_cols, nrows=n_rows, figsize=(n_cols * size, n_rows * size))
-    axes = axes.reshape(n_rows, n_cols)
 
     # images
     images = image_batch_to_numpy(images_batch[batch_index])
     images = denormalize_image(images).astype(np.uint8)
-    images = images[..., ::-1]  # bgr ->
-
-    # heatmaps
-    heatmaps = to_numpy(heatmaps_batch[batch_index])
-    heatmaps = heatmaps[-n_cols:]
+    images = images[..., ::-1]  # bgr -> rgb 
+    # features
+    features = to_numpy(features[batch_index, -n_cols:])
 
     for row in range(n_rows):
         for col in range(n_cols):
-            if col == 0:
+            if row == 0:
                 axes[row, col].set_ylabel(str(row), size='large')
-                axes[row, col].imshow(images[row])
+                indx = np.clip(col,0,images.shape[0]-1)
+                axes[row, col].imshow(images[indx])
             else:
-                axes[row, col].imshow(heatmaps[row, col - 1], alpha=0.5)
+                axes[row, col].imshow(features[col, row-1], alpha=0.5)
 
                 if col == n_cols-1:
-                    axes[row,col].set_title('predictted heatmap')
+                    axes[row-1,col].set_title('predicted heatmap')
                 if col == n_cols-2:
-                    axes[row,col].set_title('real heatmap')    
+                    axes[row-1,col].set_title('real heatmap')    
                     
     fig.tight_layout()
 

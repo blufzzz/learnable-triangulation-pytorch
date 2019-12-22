@@ -43,7 +43,156 @@ from mvn.datasets import utils as dataset_utils
 
 from IPython.core.debugger import set_trace
 
-from train import init_distributed, setup_dataloaders, parse_args, setup_human36m_dataloaders, setup_experiment
+
+def setup_human36m_dataloaders(config, is_train, distributed_train):
+    train_dataloader = None
+    train_sampler = None
+
+    # parameters for both val\train
+    singleview_dataset = config.dataset.singleview if hasattr(config.dataset, 'singleview') else False    
+    pivot_type = config.dataset.pivot_type if hasattr(config.dataset, "pivot_type") else 'first'
+    dt = config.dataset.dt if hasattr(config.dataset, "dt") else 1
+    dataset_type = Human36MSingleViewDataset if singleview_dataset else Human36MMultiViewDataset
+    dilation = config.dataset.dilation if hasattr(config.dataset, 'dilation') else 0
+    keypoints_per_frame=config.dataset.keypoints_per_frame if hasattr(config.dataset, 'keypoints_per_frame') else False
+
+    if is_train:
+        # train
+        train_dataset = dataset_type(
+            h36m_root=config.dataset.train.h36m_root,
+            pred_results_path=config.dataset.train.pred_results_path if hasattr(config.dataset.train, "pred_results_path") else None,
+            train=True,
+            test=False,
+            image_shape=config.image_shape if hasattr(config, "image_shape") else (256, 256),
+            labels_path=config.dataset.train.labels_path,
+            with_damaged_actions=config.dataset.train.with_damaged_actions,
+            scale_bbox=config.dataset.train.scale_bbox,
+            kind=config.kind,
+            undistort_images=config.dataset.train.undistort_images,
+            ignore_cameras=config.dataset.train.ignore_cameras if hasattr(config.dataset.train, "ignore_cameras") else [],
+            crop=config.dataset.train.crop if hasattr(config.dataset.train, "crop") else True,
+            dt = dt,
+            dilation = dilation,
+            evaluate_cameras = config.dataset.train.evaluate_cameras if hasattr(config.dataset.train, "evaluate_cameras") else [0,1,2,3],
+            keypoints_per_frame=keypoints_per_frame,
+            pivot_type = pivot_type
+            )
+
+        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if distributed_train else None
+
+        train_dataloader = DataLoader(
+            train_dataset,
+            batch_size=config.opt.batch_size,
+            shuffle=config.dataset.train.shuffle and (train_sampler is None), # debatable
+            sampler=train_sampler,
+            collate_fn=dataset_utils.make_collate_fn(randomize_n_views=config.dataset.train.randomize_n_views,
+                                                     min_n_views=config.dataset.train.min_n_views,
+                                                     max_n_views=config.dataset.train.max_n_views),
+            num_workers=config.dataset.train.num_workers,
+            worker_init_fn=dataset_utils.worker_init_fn
+            )
+
+    val_dataset = dataset_type(
+        h36m_root=config.dataset.val.h36m_root,
+        pred_results_path=config.dataset.val.pred_results_path if hasattr(config.dataset.val, "pred_results_path") else None,
+        train=False,
+        test=True,
+        image_shape=config.image_shape if hasattr(config, "image_shape") else (256, 256),
+        labels_path=config.dataset.val.labels_path,
+        with_damaged_actions=config.dataset.val.with_damaged_actions,
+        retain_every_n_frames_in_test=config.dataset.val.retain_every_n_frames_in_test,
+        scale_bbox=config.dataset.val.scale_bbox,
+        kind=config.kind,
+        undistort_images=config.dataset.val.undistort_images,
+        ignore_cameras=config.dataset.val.ignore_cameras if hasattr(config.dataset.val, "ignore_cameras") else [],
+        crop=config.dataset.val.crop if hasattr(config.dataset.val, "crop") else True,
+        dt = dt,
+        dilation = dilation,
+        evaluate_cameras = config.dataset.train.evaluate_cameras if hasattr(config.dataset.train, "evaluate_cameras") else [0,1,2,3],
+        keypoints_per_frame=keypoints_per_frame,
+        pivot_type = pivot_type
+        )
+
+    val_dataloader = DataLoader(
+        val_dataset,
+        batch_size=config.opt.val_batch_size if hasattr(config.opt, "val_batch_size") else config.opt.batch_size,
+        shuffle=config.dataset.val.shuffle,
+        collate_fn=dataset_utils.make_collate_fn(randomize_n_views=config.dataset.val.randomize_n_views,
+                                                 min_n_views=config.dataset.val.min_n_views,
+                                                 max_n_views=config.dataset.val.max_n_views),
+        num_workers=config.dataset.val.num_workers,
+        worker_init_fn=dataset_utils.worker_init_fn
+        )
+
+    return train_dataloader, val_dataloader, train_sampler
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--config", type=str, required=True, help="Path, where config file is stored")
+    parser.add_argument('--eval', action='store_true', help="If set, then only evaluation will be done")
+    parser.add_argument('--eval_dataset', type=str, default='val', help="Dataset split on which evaluate. Can be 'train' and 'val'")
+    parser.add_argument("--local_rank", type=int, help="Local rank of the process on the node")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    parser.add_argument("--logdir", type=str, default="/Vol1/dbstore/datasets/k.iskakov/logs/multi-view-net-repr", help="Path, where logs will be stored")
+    parser.add_argument('--experiment_comment', default='', type=str)
+    parser.add_argument('--experiment_dir', type=str)
+
+    args = parser.parse_args()
+    return args
+
+
+def setup_dataloaders(config, is_train=True, distributed_train=False):
+    if config.dataset.kind == 'human36m':
+        train_dataloader, val_dataloader, train_sampler = setup_human36m_dataloaders(config, is_train, distributed_train)
+    else:
+        raise NotImplementedError("Unknown dataset: {}".format(config.dataset.kind))
+
+    return train_dataloader, val_dataloader, train_sampler
+
+
+def setup_experiment(config, model_name, is_train=True):
+    prefix = "" if is_train else "eval_"
+
+    if config.title:
+        experiment_title = config.title + "_" + model_name
+    else:
+        experiment_title = model_name
+
+    experiment_title = config.experiment_comment if config.experiment_comment else prefix + experiment_title
+
+    experiment_name = '{}@{}'.format(experiment_title, datetime.now().strftime("%d.%m.%Y-%H:%M:%S"))
+    print("Experiment name: {}".format(experiment_name))
+
+    experiment_dir = os.path.join(args.logdir, experiment_name)
+    os.makedirs(experiment_dir, exist_ok=True)
+
+    checkpoints_dir = os.path.join(experiment_dir, "checkpoints")
+    os.makedirs(checkpoints_dir, exist_ok=True)
+
+    shutil.copy(args.config, os.path.join(experiment_dir, "config.yaml"))
+
+    # tensorboard
+    writer = SummaryWriter(os.path.join(experiment_dir, "tb"))
+
+    # dump config to tensorboard
+    writer.add_text(misc.config_to_str(config), "config", 0)
+
+    return experiment_dir, writer
+
+
+def init_distributed(args):
+    if "WORLD_SIZE" not in os.environ or int(os.environ["WORLD_SIZE"]) < 1:
+        return False
+
+    torch.cuda.set_device(args.local_rank)
+
+    assert os.environ["MASTER_PORT"], "set the MASTER_PORT variable or use pytorch launcher"
+    assert os.environ["RANK"], "use pytorch launcher and explicityly state the rank of the process"
+
+    torch.manual_seed(args.seed)
+    torch.distributed.init_process_group(backend="nccl", init_method="env://")
 
 
 def one_epoch(features_regressor,
@@ -103,8 +252,8 @@ def one_epoch(features_regressor,
                 
                 batch_size, dt = images_batch.shape[:2]
                 image_shape = images_batch.shape[-2:]
-
                 images_batch = images_batch.view(-1, 3, *image_shape)
+                
                 heatmaps, features, alg_confidences, vol_confidences, bottleneck = backbone(images_batch)
                 features = features.detach()
                 
@@ -115,15 +264,15 @@ def one_epoch(features_regressor,
                 # process features before lifting to volume
                 features = features.view(batch_size, dt, features_channels, *features_shape)
                 features_gt = features[:,-1,...]
-                features_aux = features[:,:-1,...].view(batch_size, dt, features_channels, *features_shape)
-
-                features_pred = features_regressor(features_aux).unsqueeze(1)
+                features_aux = features[:,:-1,...]
+		          
+                features_pred = features_regressor(features_aux.view(batch_size, -1, *features_shape))
 
                 # calculate loss
-                fr_loss = 0.0
-                fr_loss = torch.sum(torch.abs(features_pred - features_gt)**2) / (features_channels * features_shape.numel() * batch_size)
+                total_loss = 0.0
+                fr_loss = torch.sum(torch.abs(features_pred - features_gt)**2) / batch_size
                 total_loss += fr_loss
-                metric_dict['fr_loss'].append(fr_loss.item())
+                metric_dict['fr_loss'].append(total_loss.item())
 
                 if is_train:
                     opt.zero_grad()
@@ -144,9 +293,11 @@ def one_epoch(features_regressor,
 
                     for batch_i in range(min(batch_size, config.vis_n_elements)):
 
-                        heatmaps_vis = vis.visualize_heatmaps(
-                            images_batch, 
-                            features_pred,
+                        heatmaps_vis = vis.visualize_features(
+                            images_batch.view(batch_size, dt, 3, *image_shape), 
+                            torch.cat([features_aux,
+                                       features_pred.unsqueeze(1), 
+                                       features_gt.unsqueeze(1)], 1).detach(),
                             kind=vis_kind,
                             batch_index=batch_i, 
                             size=5,
@@ -158,7 +309,7 @@ def one_epoch(features_regressor,
                                         global_step=n_iters_total)
 
                     # dump weights to tensoboard
-                    if n_iters_total % config.vis_freq == 0 and dump_weights:
+                    if dump_weights:
                         for p_name, p in features_regressor.named_parameters():
                             try:
                                 writer.add_histogram(p_name, p.clone().cpu().data.numpy(), n_iters_total)
@@ -167,30 +318,29 @@ def one_epoch(features_regressor,
                                 print(p_name, p)
                                 exit()
 
-                    # measure elapsed time
-                    batch_time.update(time.time() - end)
-                    end = time.time()
+                # measure elapsed time
+                batch_time.update(time.time() - end)
+                end = time.time()
 
-                    # dump to tensorboard per-iter loss/metric stats
-                    if is_train:
-                        for title, value in metric_dict.items():
-                            writer.add_scalar(f"{name}/{title}", value[-1], n_iters_total)
+                # dump to tensorboard per-iter loss/metric stats
+                if is_train:
+                    for title, value in metric_dict.items():
+                        writer.add_scalar(f"{name}/{title}", value[-1], n_iters_total)
 
-                    # dump to tensorboard per-iter time stats
-                    writer.add_scalar(f"{name}/batch_time", batch_time.avg, n_iters_total)
-                    writer.add_scalar(f"{name}/data_time", data_time.avg, n_iters_total)
+                # dump to tensorboard per-iter time stats
+                writer.add_scalar(f"{name}/batch_time", batch_time.avg, n_iters_total)
+                writer.add_scalar(f"{name}/data_time", data_time.avg, n_iters_total)
 
-                    # dump to tensorboard per-iter stats about sizes
-                    writer.add_scalar(f"{name}/batch_size", batch_size, n_iters_total)
-                    writer.add_scalar(f"{name}/n_views", n_views, n_iters_total)
+                # dump to tensorboard per-iter stats about sizes
+                writer.add_scalar(f"{name}/batch_size", batch_size, n_iters_total)
+                writer.add_scalar(f"{name}/dt", dt, n_iters_total)
 
-                    n_iters_total += 1
-                    batch_start_time = time.time()
+                n_iters_total += 1
+                batch_start_time = time.time()
 
     # calculate evaluation metrics
     if master:
         if not is_train:
-
             checkpoint_dir = os.path.join(experiment_dir, "checkpoints", "{:04}".format(epoch))
             os.makedirs(checkpoint_dir, exist_ok=True)
 
@@ -219,10 +369,9 @@ def main(args):
     config.opt.n_iters_per_epoch = config.opt.n_objects_per_epoch // config.opt.batch_size
     config.experiment_comment = args.experiment_comment
 
-    process_features = nn.Sequential(
-            nn.Conv2d(256, config.intermediate_features_dim, 1)
-        )
-    backbone = pose_resnet.get_pose_net(config.backbone)
+    process_features = nn.Sequential(nn.Conv2d(256, config.intermediate_features_dim, 1)).to(device)
+
+    backbone = pose_resnet.get_pose_net(config.backbone).to(device)
     features_regressor = FeaturesAR_CNN2D_UNet(config.intermediate_features_dim*(config.dataset.dt-1),
                                                  config.intermediate_features_dim,
                                                  C = config.features_regressor_base_channels).to(device)
@@ -262,6 +411,7 @@ def main(args):
             if train_sampler is not None:
                 train_sampler.set_epoch(epoch)
 
+            print ('EPOCH', epoch)    
             n_iters_total_train = one_epoch(features_regressor,
                                             process_features,
                                             backbone,  
@@ -289,7 +439,8 @@ def main(args):
                                           master=master, 
                                           experiment_dir=experiment_dir, 
                                           writer=writer)
-            # saving    
+
+            saving    
             if master:
 
                 checkpoint_dir = os.path.join(experiment_dir, "checkpoints", "{:04}".format(epoch))
@@ -314,6 +465,7 @@ def main(args):
                       master=master, 
                       experiment_dir=experiment_dir, 
                       writer=writer)
+
         else:
             one_epoch(features_regressor,
                         process_features,
