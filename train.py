@@ -62,6 +62,7 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
     dt = config.dataset.dt if hasattr(config.dataset, "dt") else 1
     dataset_type = Human36MSingleViewDataset if singleview_dataset else Human36MMultiViewDataset
     dilation = config.dataset.dilation if hasattr(config.dataset, 'dilation') else 0
+    dilation_type = config.dataset.dilation_type if hasattr(config.dataset, 'dilation_type') else 'constant'
     keypoints_per_frame=config.dataset.keypoints_per_frame if hasattr(config.dataset, 'keypoints_per_frame') else False
 
     if is_train:
@@ -83,7 +84,8 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
             dilation = dilation,
             evaluate_cameras = config.dataset.train.evaluate_cameras if hasattr(config.dataset.train, "evaluate_cameras") else [0,1,2,3],
             keypoints_per_frame=keypoints_per_frame,
-            pivot_type = pivot_type
+            pivot_type = pivot_type,
+            dilation_type = dilation_type
             )
 
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if distributed_train else None
@@ -118,7 +120,8 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
         dilation = dilation,
         evaluate_cameras = config.dataset.train.evaluate_cameras if hasattr(config.dataset.train, "evaluate_cameras") else [0,1,2,3],
         keypoints_per_frame=keypoints_per_frame,
-        pivot_type = pivot_type
+        pivot_type = pivot_type,
+        dilation_type = dilation_type
         )
 
     val_dataloader = DataLoader(
@@ -172,6 +175,18 @@ def setup_experiment(config, model_name, is_train=True):
     writer.add_text(misc.config_to_str(config), "config", 0)
 
     return experiment_dir, writer
+
+
+def save_model(experiment_dir, model, opt, epoch, discriminator, opt_discr):
+
+    checkpoint_dir = os.path.join(experiment_dir, "checkpoints", "{:04}".format(epoch))
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
+    dict_to_save = {'model_state': model.state_dict(),'opt_state' : opt.state_dict()}
+    if use_temporal_discriminator_loss:
+        dict_to_save['discr_state'] = discriminator.state_dict()
+        dict_to_save['discr_opt_state'] = opt_discr.state_dict()
+    torch.save(dict_to_save, os.path.join(checkpoint_dir, "weights.pth"))
 
 
 def one_epoch(model,
@@ -531,6 +546,7 @@ def main(args):
     config.opt.n_iters_per_epoch = config.opt.n_objects_per_epoch // config.opt.batch_size
     config.experiment_comment = args.experiment_comment
     use_temporal_discriminator_loss  = config.opt.use_temporal_discriminator_loss if hasattr(config.opt, "use_temporal_discriminator_loss") else False  
+    save_model = config.opt.save_model if hasattr(config.opt, "save_model") else False
 
     model = {
         "ransac": RANSACTriangulationNet,
@@ -634,55 +650,52 @@ def main(args):
     if is_distributed:
         model = DistributedDataParallel(model, device_ids=[device])
 
+    
     if not args.eval:
-        # train loop
-        n_iters_total_train, n_iters_total_val = 0, 0
-        for epoch in range(config.opt.n_epochs):
-            if train_sampler is not None:
-                train_sampler.set_epoch(epoch)
+        try:
+            # train loop
+            n_iters_total_train, n_iters_total_val = 0, 0
+            for epoch in range(config.opt.n_epochs):
+                if train_sampler is not None:
+                    train_sampler.set_epoch(epoch)
 
-            n_iters_total_train = one_epoch(model,
-                                            criterion, 
-                                            opt, 
-                                            config, 
-                                            train_dataloader, 
-                                            device, 
-                                            epoch, 
-                                            n_iters_total=n_iters_total_train, 
-                                            is_train=True, 
-                                            master=master, 
-                                            experiment_dir=experiment_dir, 
-                                            writer=writer,
-                                            discriminator=discriminator,
-                                            opt_discr=opt_discr)
+                n_iters_total_train = one_epoch(model,
+                                                criterion, 
+                                                opt, 
+                                                config, 
+                                                train_dataloader, 
+                                                device, 
+                                                epoch, 
+                                                n_iters_total=n_iters_total_train, 
+                                                is_train=True, 
+                                                master=master, 
+                                                experiment_dir=experiment_dir, 
+                                                writer=writer,
+                                                discriminator=discriminator,
+                                                opt_discr=opt_discr)
 
-            n_iters_total_val = one_epoch(model, 
-                                          criterion, 
-                                          opt, 
-                                          config, 
-                                          val_dataloader, 
-                                          device, 
-                                          epoch, 
-                                          n_iters_total=n_iters_total_val, 
-                                          is_train=False, 
-                                          master=master, 
-                                          experiment_dir=experiment_dir, 
-                                          writer=writer,
-                                          discriminator=discriminator,
-                                          opt_discr=opt_discr)
-            # saving    
-            if master:
-
-                checkpoint_dir = os.path.join(experiment_dir, "checkpoints", "{:04}".format(epoch))
-                os.makedirs(checkpoint_dir, exist_ok=True)
-
-                dict_to_save = {'model_state': model.state_dict(),'opt_state' : opt.state_dict()}
-                if use_temporal_discriminator_loss:
-                    dict_to_save['discr_state'] = discriminator.state_dict()
-                    dict_to_save['discr_opt_state'] = opt_discr.state_dict()
-                torch.save(dict_to_save, os.path.join(checkpoint_dir, "weights.pth"))
-
-            print(f"{n_iters_total_train} iters done.")
+                n_iters_total_val = one_epoch(model, 
+                                              criterion, 
+                                              opt, 
+                                              config, 
+                                              val_dataloader, 
+                                              device, 
+                                              epoch, 
+                                              n_iters_total=n_iters_total_val, 
+                                              is_train=False, 
+                                              master=master, 
+                                              experiment_dir=experiment_dir, 
+                                              writer=writer,
+                                              discriminator=discriminator,
+                                              opt_discr=opt_discr)
+                # saving    
+                if master and save_model:
+                    save_model(experiment_dir, model, opt, epoch, discriminator, opt_discr)
+                print(f"{n_iters_total_train} iters done.")
+        except BaseException:
+            print ('Saving model...')
+            save_model(experiment_dir, model, opt, epoch, discriminator, opt_discr)
+                    
     else:
         if args.eval_dataset == 'train':
             one_epoch(model, 

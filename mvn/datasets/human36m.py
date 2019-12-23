@@ -349,6 +349,8 @@ class Human36MSingleViewDataset(Human36MMultiViewDataset):
         self.dt = kwargs['dt']
         # time dilation betweem frames
         self.dilation = kwargs['dilation']
+        self.dilation_type = kwargs['dilation_type']
+        
         self.keypoints_per_frame=kwargs['keypoints_per_frame']
         self.pivot_type = kwargs['pivot_type']
 
@@ -372,7 +374,15 @@ class Human36MSingleViewDataset(Human36MMultiViewDataset):
         # Initially, consider all frames as pivots
         pivot_mask = np.ones((n_frames,),dtype=np.bool)
         # the whole time period covered with dilation
-        self._time_period = self.dt + (self.dt-1)*(self.dilation)
+        if self.dilation_type == 'exponential':
+            self._time_period = np.exp(self.dilation+self.dt-2) + 1
+        elif self.dilation_type == 'constant':
+            self._time_period = self.dt + (self.dt-1)*(self.dilation)
+        elif self.dilation_type == 'square':
+            self._time_period = (self.dilation+self.dt-2)**2 + 1
+            
+        else:
+            raise RuntimeError('Wrong dilation_type') 
 
         if self.dt != 0:
 
@@ -417,9 +427,13 @@ class Human36MSingleViewDataset(Human36MMultiViewDataset):
 
         # take shots that are consecutive in time, with specified pivot
         if self.pivot_type == 'intermediate':
+            assert self.dilation_type == 'constant'
             iterator=range(-((self._time_period)//2), ((self._time_period)//2)+1, self.dilation+1)
         elif self.pivot_type == 'first':
-            iterator=range(-(self._time_period-1), 1, self.dilation+1)
+            iterator={'constant':range(-(self._time_period-1), 1, self.dilation+1),
+                      'exponential':np.concatenate([[0], -np.exp(np.arange(self.dilation, self.dilation+self.dt-1)).astype(int)])[::-1],
+                      'square':np.concatenate([[0], -(np.arange(self.dilation, self.dilation+self.dt-1)**2).astype(int)])[::-1]
+                      }[self.dilation_type]
         else:
             raise RuntimeError('Unknown `pivot_type` in config.dataset.<train/val>')       
 

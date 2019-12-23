@@ -4,7 +4,7 @@ srun -p TitanBlack --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-tri
 python3.6 train.py \
 --logdir=../logs/baseline \
 --config=./experiments/human36m/train/human36m_vol_softmax.yaml \
---experiment_comment="h36_sv64_dist_baseline_bs-1-1_rotation"
+--experiment_comment="h36_sv64_dist_baseline_bs-1-1_rotation_softmax"
 
 #--experiment_comment="h36_sv64_dist_adain-fr-middle_dt-4_dil-3_bs-1-1_vcew-0.01_frw_0.01_C-2_lr-1e-4_no-backbn-grad-fr"
 #--experiment_comment="h36_sv64_dist_baseline_bs-1-1_norot"
