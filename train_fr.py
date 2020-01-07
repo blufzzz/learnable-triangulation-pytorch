@@ -55,7 +55,7 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
     dataset_type = Human36MSingleViewDataset if singleview_dataset else Human36MMultiViewDataset
     dilation = config.dataset.dilation if hasattr(config.dataset, 'dilation') else 0
     keypoints_per_frame=config.dataset.keypoints_per_frame if hasattr(config.dataset, 'keypoints_per_frame') else False
-
+    dilation_type = config.dataset.dilation_type if hasattr(config.dataset, 'dilation_type') else 'constant'
     if is_train:
         # train
         train_dataset = dataset_type(
@@ -75,7 +75,8 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
             dilation = dilation,
             evaluate_cameras = config.dataset.train.evaluate_cameras if hasattr(config.dataset.train, "evaluate_cameras") else [0,1,2,3],
             keypoints_per_frame=keypoints_per_frame,
-            pivot_type = pivot_type
+            pivot_type = pivot_type,
+            dilation_type = dilation_type
             )
 
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if distributed_train else None
@@ -110,7 +111,8 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
         dilation = dilation,
         evaluate_cameras = config.dataset.train.evaluate_cameras if hasattr(config.dataset.train, "evaluate_cameras") else [0,1,2,3],
         keypoints_per_frame=keypoints_per_frame,
-        pivot_type = pivot_type
+        pivot_type = pivot_type,
+        dilation_type = dilation_type
         )
 
     val_dataloader = DataLoader(
@@ -268,9 +270,11 @@ def one_epoch(features_regressor,
 		          
                 features_pred = features_regressor(features_aux.view(batch_size, -1, *features_shape))
 
+                # set_trace()
+
                 # calculate loss
                 total_loss = 0.0
-                fr_loss = torch.sum(torch.abs(features_pred - features_gt)**2) / batch_size
+                fr_loss = torch.sum((features_pred - features_gt)**2) / batch_size
                 total_loss += fr_loss
                 metric_dict['fr_loss'].append(total_loss.item())
 
@@ -368,6 +372,7 @@ def main(args):
     config = cfg.load_config(args.config)
     config.opt.n_iters_per_epoch = config.opt.n_objects_per_epoch // config.opt.batch_size
     config.experiment_comment = args.experiment_comment
+    save_model = config.opt.save_model if hasattr(config.opt, 'save_model') else False
 
     process_features = nn.Sequential(nn.Conv2d(256, config.intermediate_features_dim, 1)).to(device)
 
@@ -440,13 +445,15 @@ def main(args):
                                           experiment_dir=experiment_dir, 
                                           writer=writer)
 
-            saving    
-            if master:
+            if master and save_model:
 
                 checkpoint_dir = os.path.join(experiment_dir, "checkpoints", "{:04}".format(epoch))
                 os.makedirs(checkpoint_dir, exist_ok=True)
 
-                dict_to_save = {'model_state': features_regressor.state_dict(),'opt_state' : opt.state_dict()}
+                dict_to_save = {'model_state': features_regressor.state_dict(),
+                                'opt_state' : opt.state_dict(),
+                                'process_features_state':process_features.state_dict()}
+                                
                 torch.save(dict_to_save, os.path.join(checkpoint_dir, "weights.pth"))
 
             print(f"{n_iters_total_train} iters done.")

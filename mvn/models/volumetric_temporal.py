@@ -13,7 +13,7 @@ from mvn.utils import multiview
 from mvn.utils import img
 from mvn.utils import misc
 from mvn.utils import volumetric
-from mvn.models.v2v import V2VModel, V2VModelAdaIN, V2VModelAdaIN_MiddleVector
+from mvn.models.v2v import V2VModel, V2VModelAdaIN_MiddleVector
 from mvn.models.temporal import Seq2VecRNN,\
                                 FeaturesAR_RNN,\
                                 FeaturesAR_CNN1D,\
@@ -76,7 +76,7 @@ class VolumetricTemporalNet(nn.Module):
         # modules
         self.volumes_multipliers = config.model.volumes_multipliers if hasattr(config.model, "volumes_multipliers") else [1.]*self.dt
         assert len(self.volumes_multipliers) == self.dt
-        self.backbone = pose_resnet.get_pose_net(config.model.backbone)
+        self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
         self.return_heatmaps = config.model.backbone.return_heatmaps if hasattr(config.model.backbone, 'return_heatmaps') else False  
         self.features_channels = config.model.features_channels if hasattr(config.model, 'features_channels') else 32  
         self.process_features = nn.Sequential(
@@ -84,7 +84,6 @@ class VolumetricTemporalNet(nn.Module):
         )
         self.volume_net = {
             "channel_stack":V2VModel(self.features_channels*self.dt, self.num_joints)
-            # "lstm":V2VModelLSTM(self.features_channels, self.num_joints)
         }[config.model.v2v_type]
 
     def forward(self, images_batch, batch, root_keypoints=None):
@@ -220,22 +219,25 @@ class VolumetricLSTMAdaINNet(nn.Module):
         self.encoder_type = config.model.encoder_type
         self.pretrained_encoder = config.model.pretrained_encoder
         self.encoded_feature_space = config.model.encoded_feature_space
-        self.encoder_capacity_multiplier = config.model.encoder_capacity_multiplier
+        self.normalization_type = config.model.normalization_type if hasattr(config.model, 'normalization_type') else 'batch_norm'
 
         # modules
-        self.backbone = pose_resnet.get_pose_net(config.model.backbone) 
-        self.encoder = {
-            # "custom":FeaturesEncoder(256, self.encoded_feature_space, pretrained = self.pretrained_encoder),
-            "densenet":FeaturesEncoder_DenseNet(256, 
-                                                self.encoded_feature_space, 
-                                                pretrained = self.pretrained_encoder),
-            "backbone":FeaturesEncoder_Bottleneck(self.encoded_feature_space,
-                                                  C = self.encoder_capacity_multiplier)
-        }[self.encoder_type]
+        self.backbone = pose_resnet.get_pose_net(config.model.backbone)  #, device=device
+         
+        if self.encoder_type == "densenet":
+            self.encoder = FeaturesEncoder_DenseNet(256, 
+                                                    self.encoded_feature_space, 
+                                                    pretrained = self.pretrained_encoder)
+        elif self.encoder_type == "backbone":
+            self.encoder =  FeaturesEncoder_Bottleneck(self.encoded_feature_space,
+                                                        C = config.model.encoder_capacity_multiplier)
 
+        else:
+            raise RuntimeError('Wrong encoder_type!')    
+            
         self.volume_net = {
-            "all":V2VModelAdaIN(32, self.num_joints),
-            "middle":V2VModelAdaIN_MiddleVector(32, self.num_joints)
+            "all":V2VModel(32, self.num_joints, normalization_type='adain'),
+            "middle":V2VModelAdaIN_MiddleVector(32, self.num_joints, normalization_type=self.normalization_type)
         }[self.adain_type]
 
         self.features_sequence_to_vector = Seq2VecRNN(self.encoded_feature_space,
@@ -265,7 +267,7 @@ class VolumetricLSTMAdaINNet(nn.Module):
         heatmaps, features, alg_confidences, vol_confidences, bottleneck = self.backbone(images_batch)
 
         # reshape back and take only last view (pivot)
-        images_batch = images_batch.view(batch_size, dt, *images_batch.shape[1:])[:,-1,...].unsqueeze(1)
+        images_batch = images_batch.view(batch_size, dt, 3, *image_shape)[:,-1,...].unsqueeze(1)
         
         # calcualte shapes
         features_shape = features.shape[-2:]
@@ -287,7 +289,7 @@ class VolumetricLSTMAdaINNet(nn.Module):
         features = features.view(batch_size, dt, features_channels, *features_shape)
         pivot_features = features[:,-1,...]
         style_features = features[:,:-1,...].contiguous()
-        pivot_features = self.process_features(pivot_features).unsqueeze(1) # add fictive view
+        pivot_features = self.process_features(pivot_features).unsqueeze(1)
 
         if self.encoder_type == 'backbone':
             bottleneck_shape = bottleneck.shape[-2:]
@@ -353,7 +355,6 @@ class VolumetricLSTMAdaINNet(nn.Module):
                 )
 
 
-# FIX IT!
 class VolumetricFRAdaINNet(nn.Module):
     def __init__(self, config, device='cuda:0'):
         super().__init__()
@@ -389,12 +390,20 @@ class VolumetricFRAdaINNet(nn.Module):
         self.features_regressor_base_channels = config.model.features_regressor_base_channels if hasattr(config.model, 'features_regressor_base_channels') else 8
         self.adain_type = config.model.adain_type
         self.fr_grad_for_backbone = config.model.fr_grad_for_backbone if hasattr(config.model, 'fr_grad_for_backbone') else False
+        self.normalization_type = config.model.normalization_type if hasattr(config.model, 'normalization_type') else 'batch_norm'
         
         # modules
-        self.backbone = pose_resnet.get_pose_net(config.model.backbone)
+        self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
         self.volume_net = {
-            "all":V2VModelAdaIN(self.intermediate_features_dim, self.num_joints),
-            "middle":V2VModelAdaIN_MiddleVector(self.intermediate_features_dim, self.num_joints)    
+            "all":V2VModel(self.intermediate_features_dim, 
+                                self.num_joints, 
+                                normalization_type='adain'),
+            "middle":V2VModelAdaIN_MiddleVector(self.intermediate_features_dim, 
+                                                self.num_joints, 
+                                                normalization_type=self.normalization_type),
+            "no_adain": V2VModel(self.intermediate_features_dim*2, 
+                                 self.num_joints, 
+                                 normalization_type=self.normalization_type)    
         }[self.adain_type]
         self.process_features = nn.Sequential(
             nn.Conv2d(256, self.intermediate_features_dim, 1)
@@ -494,13 +503,18 @@ class VolumetricFRAdaINNet(nn.Module):
             volumes_stacked = self.volume_net(torch.cat([volumes, volumes_pred]), [None]*len(CHANNELS_LIST))
         elif self.adain_type == 'middle':
             volumes_stacked = self.volume_net(torch.cat([volumes, volumes_pred]))
-            
-        # integral 3d
-        volumes = volumes_stacked[batch_size:]
-        volumes_pred = volumes_stacked[batch_size:]
+        
+        if self.adain_type == 'no_adain':
+            volumes = self.volume_net(torch.cat([volumes, volumes_pred], 1)) # stack along channel
+            vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
+            vol_keypoints_3d_pred, volumes_pred = None, None
+        else:    
+            # integral 3d
+            volumes = volumes_stacked[batch_size:]
+            volumes_pred = volumes_stacked[batch_size:]
 
-        vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
-        vol_keypoints_3d_pred, volumes_pred = op.integrate_tensor_3d_with_coordinates(volumes_pred * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
+            vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
+            vol_keypoints_3d_pred, volumes_pred = op.integrate_tensor_3d_with_coordinates(volumes_pred * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
 
 
         return (vol_keypoints_3d,

@@ -8,6 +8,7 @@ from collections import defaultdict
 from itertools import islice
 import pickle
 import copy
+import sys
 
 import numpy as np
 import cv2
@@ -177,7 +178,7 @@ def setup_experiment(config, model_name, is_train=True):
     return experiment_dir, writer
 
 
-def save_model(experiment_dir, model, opt, epoch, discriminator, opt_discr):
+def save(experiment_dir, model, opt, epoch, discriminator, opt_discr, use_temporal_discriminator_loss):
 
     checkpoint_dir = os.path.join(experiment_dir, "checkpoints", "{:04}".format(epoch))
     os.makedirs(checkpoint_dir, exist_ok=True)
@@ -289,7 +290,7 @@ def one_epoch(model,
                     coord_volumes_pred = coord_volumes_pred - base_points_pred.unsqueeze(1).unsqueeze(1).unsqueeze(1)
                     keypoints_3d_gt = op.root_centering(keypoints_3d_gt, config.kind)
                     keypoints_3d_pred = op.root_centering(keypoints_3d_pred, config.kind)
-                    if model_type == "vol_temporal_fr_adain":
+                    if model_type == "vol_temporal_fr_adain" and keypoints_3d_pred_fr is not None:
                         keypoints_3d_pred_fr = op.root_centering(keypoints_3d_pred_fr, config.kind)
 
                 # calculate loss
@@ -297,9 +298,9 @@ def one_epoch(model,
                 if model_type == "vol_temporal_fr_adain" and use_intermediate_fr_loss:
                     intermediate_fr_loss_weight = config.opt.intermediate_fr_loss_weight if hasattr(config.opt, "intermediate_fr_loss_weight") else 1.
                     features_shape = features_pred.shape[-2:]
-                    fs_loss = torch.sum(torch.abs(features_pred - features_pred_fr)**2) / (features_shape.numel() * batch_size)
-                    total_loss += fs_loss*intermediate_fr_loss_weight
-                    metric_dict['fs_loss'].append(fs_loss.item())
+                    fr_loss = torch.sum(torch.abs(features_pred - features_pred_fr)**2) / (features_shape.numel() * batch_size)
+                    total_loss += fr_loss*intermediate_fr_loss_weight
+                    metric_dict['fr_loss'].append(fr_loss.item())
 
                 if use_temporal_discriminator_loss and is_train:
                     pred_keypoints_features = keypoints_to_features(keypoints_3d_batch_pred_list[1]).transpose(1,0)
@@ -359,7 +360,7 @@ def one_epoch(model,
                 l2 = KeypointsL2Loss()(keypoints_3d_pred * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d,\
                                                                                     keypoints_3d_binary_validity_gt)
                 metric_dict['l2'].append(l2.item())
-                if model_type == "vol_temporal_fr_adain":
+                if model_type == "vol_temporal_fr_adain" and keypoints_3d_pred_fr is not None:
                     l2_fr = KeypointsL2Loss()(keypoints_3d_pred_fr * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d,\
                                                                                             keypoints_3d_binary_validity_gt)
                     metric_dict['l2_fr'].append(l2_fr.item())
@@ -384,7 +385,8 @@ def one_epoch(model,
                 if singleview_dataset:
                     keypoints_3d_gt = op.root_centering(keypoints_3d_gt, config.kind, inverse=True)
                     keypoints_3d_pred = op.root_centering(keypoints_3d_pred, config.kind, inverse=True)
-                    if model_type == "vol_temporal_fr_adain":
+                    
+                    if model_type == "vol_temporal_fr_adain" and keypoints_3d_pred_fr is not None:
                         keypoints_3d_pred_fr = op.root_centering(keypoints_3d_pred_fr, config.kind, inverse=True)    
 
                  # save answers for evalulation
@@ -546,7 +548,7 @@ def main(args):
     config.opt.n_iters_per_epoch = config.opt.n_objects_per_epoch // config.opt.batch_size
     config.experiment_comment = args.experiment_comment
     use_temporal_discriminator_loss  = config.opt.use_temporal_discriminator_loss if hasattr(config.opt, "use_temporal_discriminator_loss") else False  
-    save_model = config.opt.save_model if hasattr(config.opt, "save_model") else False
+    save_model = config.opt.save_model if hasattr(config.opt, "save_model") else True
 
     model = {
         "ransac": RANSACTriangulationNet,
@@ -652,49 +654,51 @@ def main(args):
 
     
     if not args.eval:
-        try:
-            # train loop
-            n_iters_total_train, n_iters_total_val = 0, 0
-            for epoch in range(config.opt.n_epochs):
-                if train_sampler is not None:
-                    train_sampler.set_epoch(epoch)
+        # try:
+        # train loop
+        n_iters_total_train, n_iters_total_val = 0, 0
+        for epoch in range(config.opt.n_epochs):
+            if train_sampler is not None:
+                train_sampler.set_epoch(epoch)
 
-                n_iters_total_train = one_epoch(model,
-                                                criterion, 
-                                                opt, 
-                                                config, 
-                                                train_dataloader, 
-                                                device, 
-                                                epoch, 
-                                                n_iters_total=n_iters_total_train, 
-                                                is_train=True, 
-                                                master=master, 
-                                                experiment_dir=experiment_dir, 
-                                                writer=writer,
-                                                discriminator=discriminator,
-                                                opt_discr=opt_discr)
+            n_iters_total_train = one_epoch(model,
+                                            criterion, 
+                                            opt, 
+                                            config, 
+                                            train_dataloader, 
+                                            device, 
+                                            epoch, 
+                                            n_iters_total=n_iters_total_train, 
+                                            is_train=True, 
+                                            master=master, 
+                                            experiment_dir=experiment_dir, 
+                                            writer=writer,
+                                            discriminator=discriminator,
+                                            opt_discr=opt_discr)
 
-                n_iters_total_val = one_epoch(model, 
-                                              criterion, 
-                                              opt, 
-                                              config, 
-                                              val_dataloader, 
-                                              device, 
-                                              epoch, 
-                                              n_iters_total=n_iters_total_val, 
-                                              is_train=False, 
-                                              master=master, 
-                                              experiment_dir=experiment_dir, 
-                                              writer=writer,
-                                              discriminator=discriminator,
-                                              opt_discr=opt_discr)
-                # saving    
-                if master and save_model:
-                    save_model(experiment_dir, model, opt, epoch, discriminator, opt_discr)
-                print(f"{n_iters_total_train} iters done.")
-        except BaseException:
-            print ('Saving model...')
-            save_model(experiment_dir, model, opt, epoch, discriminator, opt_discr)
+            n_iters_total_val = one_epoch(model, 
+                                          criterion, 
+                                          opt, 
+                                          config, 
+                                          val_dataloader, 
+                                          device, 
+                                          epoch, 
+                                          n_iters_total=n_iters_total_val, 
+                                          is_train=False, 
+                                          master=master, 
+                                          experiment_dir=experiment_dir, 
+                                          writer=writer,
+                                          discriminator=discriminator,
+                                          opt_discr=opt_discr)
+            # saving    
+            if master and save_model:
+                print ('Saving model...')
+                save(experiment_dir, model, opt, epoch, discriminator, opt_discr, use_temporal_discriminator_loss)
+            print(f"{n_iters_total_train} iters done.")
+        # except BaseException:
+            # print('Exception:',sys.exc_info()[0])
+            # print ('Saving model...')
+            # save(experiment_dir, model, opt, epoch, discriminator, opt_discr, use_temporal_discriminator_loss)
                     
     else:
         if args.eval_dataset == 'train':

@@ -1,17 +1,13 @@
 import os
 from collections import defaultdict
 import pickle
-
 import numpy as np
 import cv2
-
 import torch
 from torch.utils.data import Dataset
-
 from mvn.utils.multiview import Camera
 from mvn.utils.img import get_square_bbox, resize_image, crop_image, normalize_image, scale_bbox
 from mvn.utils import volumetric
-
 from IPython.core.debugger import set_trace
 
 

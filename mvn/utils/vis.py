@@ -269,16 +269,16 @@ def visualize_features(images_batch,
     for row in range(n_rows):
         for col in range(n_cols):
             if row == 0:
-                axes[row, col].set_ylabel(str(row), size='large')
+                axes[row, col].set_ylabel(str(col), size='large')
                 indx = np.clip(col,0,images.shape[0]-1)
                 axes[row, col].imshow(images[indx])
             else:
                 axes[row, col].imshow(features[col, row-1], alpha=0.5)
 
                 if col == n_cols-1:
-                    axes[row-1,col].set_title('predicted heatmap')
+                    axes[row-1,col].set_title('real heatmap')
                 if col == n_cols-2:
-                    axes[row-1,col].set_title('real heatmap')    
+                    axes[row-1,col].set_title('predicted heatmap')    
                     
     fig.tight_layout()
 

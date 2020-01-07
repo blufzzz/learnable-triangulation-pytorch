@@ -206,9 +206,10 @@ def unproject_heatmaps(heatmaps, proj_matricies, coord_volumes, volume_aggregati
             heatmap = heatmaps[batch_i, view_i]
             heatmap = heatmap.unsqueeze(0)
 
-            grid_coord_proj = multiview.project_3d_points_to_image_plane_without_distortion(
-                proj_matricies[batch_i, view_i], grid_coord, convert_back_to_euclidean=False
-            )
+            grid_coord_proj = multiview.project_3d_points_to_image_plane_without_distortion(proj_matricies[batch_i, view_i],
+                                                                                            grid_coord, 
+                                                                                            convert_back_to_euclidean=False
+                                                                                            )
 
             invalid_mask = grid_coord_proj[:, 2] <= 0.0  # depth must be larger than 0.0
 
