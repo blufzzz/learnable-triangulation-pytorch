@@ -25,7 +25,7 @@ from mvn.models.temporal import Seq2VecRNN,\
 from IPython.core.debugger import set_trace
 from mvn.utils.op import get_coord_volumes
 
-CHANNELS_LIST = [16, 32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 64, 64, 64, 64, 128, 128, 128, 128, 128,\
+CHANNELS_LIST = [32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 64, 64, 64, 64, 128, 128, 128, 128, 128,\
                                   128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128,\
                                   128, 128, 128, 128, 128, 64, 64, 64, 32, 32, 32, 32, 32]
 
@@ -220,6 +220,8 @@ class VolumetricLSTMAdaINNet(nn.Module):
         self.pretrained_encoder = config.model.pretrained_encoder
         self.encoded_feature_space = config.model.encoded_feature_space
         self.normalization_type = config.model.normalization_type if hasattr(config.model, 'normalization_type') else 'batch_norm'
+        if self.adain_type == 'all':
+            assert self.normalization_type=='adain'
 
         # modules
         self.backbone = pose_resnet.get_pose_net(config.model.backbone)  #, device=device
@@ -234,22 +236,20 @@ class VolumetricLSTMAdaINNet(nn.Module):
 
         else:
             raise RuntimeError('Wrong encoder_type!')    
-            
-        self.volume_net = {
-            "all":V2VModel(32, self.num_joints, normalization_type='adain'),
-            "middle":V2VModelAdaIN_MiddleVector(32, self.num_joints, normalization_type=self.normalization_type)
-        }[self.adain_type]
+        
+        if self.adain_type == 'all':    
+            self.volume_net = V2VModel(32, self.num_joints, normalization_type='adain')
+            self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*C) for C in CHANNELS_LIST]) # 51
+        elif self.adain_type == 'middle': 
+            self.volume_net =V2VModelAdaIN_MiddleVector(32, self.num_joints, normalization_type=self.normalization_type)
+            self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*128) for _ in range(2)])
+        else:
+            raise RuntimeError('Wrong adain_type')
+        
 
         self.features_sequence_to_vector = Seq2VecRNN(self.encoded_feature_space,
                                                       self.style_vector_dim)
 
-        if self.adain_type == 'all':
-            self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*C) for C in CHANNELS_LIST]) # 51
-        elif self.adain_type =='middle':
-            self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*128) for _ in range(2)])
-        else:
-            raise RuntimeError('Wrong adain_type') 
-                
         self.process_features = nn.Sequential(
             nn.Conv2d(256, 32, 1)
         )
@@ -341,7 +341,7 @@ class VolumetricLSTMAdaINNet(nn.Module):
         # inference
         adain_params = [affine_map(style_vector) for affine_map in self.affine_mappings]
 
-        volumes = self.volume_net(volumes, adain_params=adain_params)
+        volumes = self.volume_net(volumes, params=adain_params)
         # integral 3d
         vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
 

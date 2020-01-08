@@ -32,8 +32,11 @@ def calc_gradient_norm(named_parameters):
     total_norm = 0.0
     for name, p in named_parameters:
         # print(name)
-        param_norm = p.grad.data.norm(2)
-        total_norm += param_norm.item() ** 2
+        if p.grad is not None:
+            param_norm = p.grad.data.norm(2)
+            total_norm += param_norm.item() ** 2
+        else:
+            print (name, 'grad is None')    
 
     total_norm = total_norm ** (1. / 2)
 
@@ -44,8 +47,11 @@ def calc_gradient_magnitude(named_parameters):
     total_amplitude = []
     for name, p in named_parameters:
         # print(name)
-        param_amplitude = p.grad.data.abs().max()
-        total_amplitude += [param_amplitude.item()]
+        if p.grad is not None:
+            param_amplitude = p.grad.data.abs().max()
+            total_amplitude += [param_amplitude.item()]
+        else:
+            print (name, 'grad is None')    
 
     total_amplitude = max(total_amplitude)
 

@@ -48,11 +48,11 @@ class AdaIN(nn.Module):
 
 def get_normalization(normalization_type, out_planes, n_groups):
     if normalization_type == 'adain':
-        return AdaIN(),
+        return AdaIN()
     elif normalization_type ==  'batch_norm':
-        return nn.BatchNorm2D(out_planes),
+        return nn.BatchNorm3d(out_planes)
     elif normalization_type == 'group_norm':
-        return nn.GroupNorm(n_groups,out_planes)    
+        return nn.GroupNorm(n_groups, out_planes)    
     else:
         raise RuntimeError('Unknown normalization_type')          
 
@@ -82,10 +82,13 @@ class Res3DBlock(nn.Module):
         super(Res3DBlock, self).__init__()
 
         self.normalization_type = normalization_type
+        
         self.res_norm1 = get_normalization(normalization_type, out_planes, n_groups)
-        self.res_norm2 = get_normalization(normalization_type, out_planes, n_groups)                           
+        self.res_norm2 = get_normalization(normalization_type, out_planes, n_groups)
+
         self.res_conv1 = nn.Conv3d(in_planes, out_planes, kernel_size=3, stride=1, padding=1)
         self.res_conv2 = nn.Conv3d(out_planes, out_planes, kernel_size=3, stride=1, padding=1)
+        
         self.activation = nn.ReLU(True)
 
         self.use_skip_con = ( in_planes != out_planes)
@@ -96,7 +99,7 @@ class Res3DBlock(nn.Module):
     def forward(self, x, params=[None,None,None]):
         if self.use_skip_con:
             skip = self.skip_con_conv(x)
-            skip = self.skip_con_norm(skip, params[2]) if self.normalization_type == 'adain' else self.skip_con_norm(x)
+            skip = self.skip_con_norm(skip, params[2]) if self.normalization_type == 'adain' else self.skip_con_norm(skip)
         else:
             skip = x
 
@@ -162,15 +165,15 @@ class EncoderDecorder(nn.Module):
         self.mid_res = Res3DBlock(128, 128, normalization_type)
 
         self.decoder_res5 = Res3DBlock(128, 128, normalization_type)
-        self.decoder_upsample5 = Upsample3DBlock(128, 128, 2, 2)
+        self.decoder_upsample5 = Upsample3DBlock(128, 128, 2, 2, normalization_type)
         self.decoder_res4 = Res3DBlock(128, 128, normalization_type)
-        self.decoder_upsample4 = Upsample3DBlock(128, 128, 2, 2)
+        self.decoder_upsample4 = Upsample3DBlock(128, 128, 2, 2, normalization_type)
         self.decoder_res3 = Res3DBlock(128, 128, normalization_type)
-        self.decoder_upsample3 = Upsample3DBlock(128, 128, 2, 2)
+        self.decoder_upsample3 = Upsample3DBlock(128, 128, 2, 2, normalization_type)
         self.decoder_res2 = Res3DBlock(128, 128, normalization_type)
-        self.decoder_upsample2 = Upsample3DBlock(128, 64, 2, 2)
+        self.decoder_upsample2 = Upsample3DBlock(128, 64, 2, 2, normalization_type)
         self.decoder_res1 = Res3DBlock(64, 64, normalization_type)
-        self.decoder_upsample1 = Upsample3DBlock(64, 32, 2, 2)
+        self.decoder_upsample1 = Upsample3DBlock(64, 32, 2, 2, normalization_type)
 
         self.skip_res1 = Res3DBlock(32, 32, normalization_type)
         self.skip_res2 = Res3DBlock(64, 64, normalization_type)
@@ -178,7 +181,7 @@ class EncoderDecorder(nn.Module):
         self.skip_res4 = Res3DBlock(128, 128, normalization_type)
         self.skip_res5 = Res3DBlock(128, 128, normalization_type)
 
-    def forward(self, x, params=[None]*39):
+    def forward(self, x, params):
         skip_x1 = self.skip_res1(x, params[:2])
         x = self.encoder_pool1(x)
         x = self.encoder_res1(x, params[2:5])
@@ -221,11 +224,11 @@ class V2VModel(nn.Module):
     def __init__(self, input_channels, output_channels, normalization_type='batch_norm'):
             super().__init__()
             self.normalization_type=normalization_type
-            self.front_layer1 = Basic3DBlock(input_channels, 16, 7, normalization_type)
-            self.front_layer2 = Res3DBlock(16, 32, normalization_type)
+            self.front_layer1 = Basic3DBlock(input_channels, 32, 7, normalization_type)
+            self.front_layer2 = Res3DBlock(32, 32, normalization_type)
             self.front_layer3 = Res3DBlock(32, 32, normalization_type)
             self.front_layer4 = Res3DBlock(32, 32, normalization_type)
-            # [16, 32,32,32, 32,32, 32,32]
+            # [32, 32,32, 32,32, 32,32]
 
             self.encoder_decoder = EncoderDecorder(normalization_type)
             # [32,32, 64,64,64, 64,64, 128,128,128, 128,128, 128,128,
@@ -241,15 +244,15 @@ class V2VModel(nn.Module):
 
             self._initialize_weights()
 
-    def forward(self, x, params=[None]*51):
+    def forward(self, x, params=[None]*50):
         x = self.front_layer1(x, params[0])
-        x = self.front_layer2(x, params[1:4])
-        x = self.front_layer3(x, params[4:6])
-        x = self.front_layer4(x, params[6:8])
-        x = self.encoder_decoder(x, params[8:47]) 
-        x = self.back_layer1(x, params[47:49])
-        x = self.back_layer2(x, params[49])
-        x = self.back_layer3(x, params[50])
+        x = self.front_layer2(x, params[1:3])
+        x = self.front_layer3(x, params[3:5])
+        x = self.front_layer4(x, params[5:7])
+        x = self.encoder_decoder(x, params[7:46]) 
+        x = self.back_layer1(x, params[46:48])
+        x = self.back_layer2(x, params[48])
+        x = self.back_layer3(x, params[49])
         x = self.output_layer(x)
         return x
 

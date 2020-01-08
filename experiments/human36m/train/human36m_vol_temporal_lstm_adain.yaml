@@ -11,7 +11,7 @@ opt:
   use_volumetric_ce_loss: true
   volumetric_ce_loss_weight: 0.01
 
-  n_objects_per_epoch: 15000
+  n_objects_per_epoch: 10000
   n_epochs: 9999
   dump_weights: False
 
@@ -30,13 +30,13 @@ model:
   name: "vol_temporal_lstm_adain"
   kind: "mpii"
   volume_aggregation_method: "no_aggregation"
-  adain_type: "all"
+  adain_type: 'all' # if 'all' then normalization_type: 'adain'
   encoder_type: "backbone"
   pretrained_encoder: false
   encoded_feature_space: 1024
   encoder_capacity_multiplier: 2
   style_grad_for_backbone: false
-  normalization_type: 'group_norm'
+  normalization_type: 'adain'
 
   init_weights: false
   checkpoint: ""
@@ -71,9 +71,8 @@ model:
 
 dataset:
   kind: "human36m"
-  dt: 8
+  dt: 12
   dilation: 3
-#  dilation_type: 'square'
   singleview: true
   pivot_type: 'first'
 
