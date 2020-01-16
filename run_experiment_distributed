@@ -1,0 +1,16 @@
+#!/bin/bash
+srun -p TitanX --gres=gpu:4 --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w hpc2 \
+python3.6 -m torch.distributed.launch --nproc_per_node=4 --master_port=2345 train.py \
+--logdir=../logs/adain_lstm \
+--config=./experiments/human36m/train/human36m_vol_temporal_lstm_adain.yaml \
+--experiment_comment="h36_sv64_dist_adain-lstm-middle-groupnorm_distrib-4_f2v-backbone-C2-1024_dt-8_dil-3_bs-1-1_lr-1e-4"
+
+#--experiment_comment="h36_sv64_dist_voltemporal-channel-stack-norot_C-32_vm-111_dt-4_dil-3_bs-1-1_lr-1e-4"
+#--experiment_comment="h36_sv64_dist_adain-fr-middle_dt-4_dil-3_bs-1-1_vcew-0.01_frw_0.01_C-2_lr-1e-4"
+# --experiment_comment="h36_sv64_dist_no-adain-fr_dt-4_dil-3_bs-1-1_vcew-0.01_frw_0.01_C-2_lr-1e-4"
+#--experiment_comment="h36_sv64_dist_adain-fr-middle_dt-4_dil-3_bs-1-1_vcew-0.01_frw_0.01_C-2_lr-1e-4"
+#--experiment_comment="h36_sv64_dist_baseline_bs-1-1_rotation_softmax"
+#--experiment_comment="h36_sv64_dist_adain-fr-middle_dt-4_dil-3_bs-1-1_vcew-0.01_frw_0.01_C-2_lr-1e-4_no-backbn-grad-fr"
+#--experiment_comment="h36_sv64_dist_baseline_bs-1-1_norot"
+#--experiment_comment="h36_sv64_dist_voltemporal-channel-stack-norot_C-32_vm-001_dt-3_dil-3_bs-2-2_lr-1e-4"
+#--experiment_comment="h36_sv64_dist_adain-lstm-middle_f2v-densenet-pretr-1024_dt-8_dil-3_bs-1-1_lr-1e-4"

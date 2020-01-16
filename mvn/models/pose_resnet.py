@@ -337,7 +337,9 @@ def get_pose_net(config, device='cuda:0'):
         block_class = Bottleneck_CAFFE
 
     model = PoseResNet(
-        block_class, layers, config.num_joints,
+        block_class,
+        layers,
+        config.num_joints,
         num_input_channels=3,
         deconv_with_bias=False,
         num_deconv_layers=3,

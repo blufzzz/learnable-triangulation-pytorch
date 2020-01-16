@@ -254,6 +254,9 @@ class VolumetricTriangulationNet(nn.Module):
         # forward backbone
         heatmaps, features, _, vol_confidences, _ = self.backbone(images)
 
+        current_memory = torch.cuda.memory_allocated()
+        print ('after bckbn', current_memory/(1024**2))
+        
         # reshape back
         images = images.view(batch_size, n_views, *images.shape[1:])
         heatmaps = heatmaps.view(batch_size, n_views, *heatmaps.shape[1:])

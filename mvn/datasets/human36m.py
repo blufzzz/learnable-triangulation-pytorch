@@ -369,7 +369,7 @@ class Human36MSingleViewDataset(Human36MMultiViewDataset):
         # Let's call an i-th element in the middle of the CONSECUTIVE sequence [i-dt//2, i, i+dt//2], with length `dt`, as pivot.
         # Initially, consider all frames as pivots
         pivot_mask = np.ones((n_frames,),dtype=np.bool)
-        # the whole time period covered with dilation
+        # the whole time period covered, with dilation
         if self.dilation_type == 'exponential':
             self._time_period = np.exp(self.dilation+self.dt-2) + 1
         elif self.dilation_type == 'constant':

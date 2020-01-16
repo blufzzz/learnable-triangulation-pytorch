@@ -224,7 +224,7 @@ class VolumetricLSTMAdaINNet(nn.Module):
             assert self.normalization_type=='adain'
 
         # modules
-        self.backbone = pose_resnet.get_pose_net(config.model.backbone)  #, device=device
+        self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
          
         if self.encoder_type == "densenet":
             self.encoder = FeaturesEncoder_DenseNet(256, 
@@ -262,9 +262,12 @@ class VolumetricLSTMAdaINNet(nn.Module):
 
         # reshape for backbone forward
         images_batch = images_batch.view(-1, 3, *image_shape)
+        # print ('Image', images_batch[0,0][:5,:5])
 
         # forward backbone
         heatmaps, features, alg_confidences, vol_confidences, bottleneck = self.backbone(images_batch)
+        current_memory = torch.cuda.memory_allocated()
+        print ('after bckbn', current_memory/(1024**2))
 
         # reshape back and take only last view (pivot)
         images_batch = images_batch.view(batch_size, dt, 3, *image_shape)[:,-1,...].unsqueeze(1)
@@ -292,13 +295,17 @@ class VolumetricLSTMAdaINNet(nn.Module):
         pivot_features = self.process_features(pivot_features).unsqueeze(1)
 
         if self.encoder_type == 'backbone':
+            
             bottleneck_shape = bottleneck.shape[-2:]
             bottleneck_channels = bottleneck.shape[1]
+
             bottleneck = bottleneck.view(batch_size, dt, bottleneck_channels, *bottleneck_shape)
             bottleneck = bottleneck[:,:-1,...].contiguous()
             bottleneck = bottleneck.view(batch_size*(dt-1), bottleneck_channels, *bottleneck_shape)
+            
             if not self.style_grad_for_backbone:
                 bottleneck = bottleneck.detach()
+            
             encoded_features = self.encoder(bottleneck)
         else:
             style_features = style_features.view(batch_size*(dt-1), features_channels, *features_shape)
@@ -338,6 +345,8 @@ class VolumetricLSTMAdaINNet(nn.Module):
         if self.volume_aggregation_method == 'no_aggregation':
             volumes = torch.cat(volumes, 0)
 
+        print ('increased by:', (torch.cuda.memory_allocated() - current_memory) / (1024**2))
+        current_memory = torch.cuda.memory_allocated()
         # inference
         adain_params = [affine_map(style_vector) for affine_map in self.affine_mappings]
 

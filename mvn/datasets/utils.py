@@ -55,7 +55,7 @@ def make_collate_fn(randomize_n_views=True, min_n_views=1, max_n_views=4):
 def worker_init_fn(worker_id):
     np.random.seed(np.random.get_state()[1][0] + worker_id)
 
-def prepare_batch(batch, device, is_train=True):
+def prepare_batch(batch, device):
     # images
     images_batch = []
     for image_batch in batch['images']:

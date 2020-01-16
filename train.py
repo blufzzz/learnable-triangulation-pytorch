@@ -248,7 +248,7 @@ def one_epoch(model,
                     print("Found None batch")
                     continue
 
-                images_batch, keypoints_3d_gt, keypoints_3d_validity_gt, proj_matricies_batch = dataset_utils.prepare_batch(batch, device, config)
+                images_batch, keypoints_3d_gt, keypoints_3d_validity_gt, proj_matricies_batch = dataset_utils.prepare_batch(batch, device)
 
                 heatmaps_pred, keypoints_2d_pred, cuboids_pred, base_points_pred = None, None, None, None
                 
@@ -531,20 +531,20 @@ def init_distributed(args):
 
 
 def main(args):
+    
     print("Number of available GPUs: {}".format(torch.cuda.device_count()))
-
+    
+    config = cfg.load_config(args.config)
     is_distributed = init_distributed(args) and config.distributed_train
+    print ('Distributed training' if is_distributed else 'No Distributed training')
     master = True
+
     if is_distributed and os.environ["RANK"]:
         master = int(os.environ["RANK"]) == 0
 
-    if is_distributed:
-        device = torch.device(args.local_rank)
-    else:
-        device = torch.device(0)
+    device = torch.device(args.local_rank) if is_distributed else torch.device(0)
 
-    # config
-    config = cfg.load_config(args.config)
+    # options
     config.opt.n_iters_per_epoch = config.opt.n_objects_per_epoch // config.opt.batch_size
     config.experiment_comment = args.experiment_comment
     use_temporal_discriminator_loss  = config.opt.use_temporal_discriminator_loss if hasattr(config.opt, "use_temporal_discriminator_loss") else False  
@@ -646,6 +646,7 @@ def main(args):
     # experiment
     experiment_dir, writer = None, None
     if master:
+        # pass
         experiment_dir, writer = setup_experiment(config, type(model).__name__, is_train=not args.eval)
 
     # multi-gpu

@@ -1,10 +1,10 @@
 #!/bin/bash
 # srun -p TitanBlack --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-03 \
-srun -p TitanBlack --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-03 \
+srun -p TitanBlack --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-05 \
 python3.6 train.py \
 --logdir=../logs/adain_lstm \
 --config=./experiments/human36m/train/human36m_vol_temporal_lstm_adain.yaml \
---experiment_comment="h36_sv64_dist_adain-lstm-all_f2v-backbone-C2-1024_dt-12_dil-3_bs-1-1_lr-1e-4"
+--experiment_comment="h36_sv64_dist_adain-lstm-all_f2v-backbone-C2-1024_dt-8_dil-1_square_bs-1-1_lr-1e-4"
 
 #--experiment_comment="h36_sv64_dist_voltemporal-channel-stack-norot_C-32_vm-111_dt-4_dil-3_bs-1-1_lr-1e-4"
 #--experiment_comment="h36_sv64_dist_adain-fr-middle_dt-4_dil-3_bs-1-1_vcew-0.01_frw_0.01_C-2_lr-1e-4"

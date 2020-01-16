@@ -2,7 +2,7 @@ title: "human36m_vol_temporal_lstm_adain_softmax"
 kind: "human36m"
 vis_freq: 1000
 vis_n_elements: 10
-
+distributed_train: true
 image_shape: [384, 384]
 
 opt:
@@ -30,13 +30,13 @@ model:
   name: "vol_temporal_lstm_adain"
   kind: "mpii"
   volume_aggregation_method: "no_aggregation"
-  adain_type: 'all' # if 'all' then normalization_type: 'adain'
+  adain_type: 'middle' # if 'all' then normalization_type: 'adain'
   encoder_type: "backbone"
   pretrained_encoder: false
   encoded_feature_space: 1024
   encoder_capacity_multiplier: 2
   style_grad_for_backbone: false
-  normalization_type: 'adain'
+  normalization_type: 'group_norm'
 
   init_weights: false
   checkpoint: ""
@@ -71,10 +71,11 @@ model:
 
 dataset:
   kind: "human36m"
-  dt: 12
+  dt: 8
   dilation: 3
   singleview: true
   pivot_type: 'first'
+  # dilation_type: 'square'
 
   train:
     h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"
