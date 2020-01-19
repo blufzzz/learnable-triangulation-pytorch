@@ -25,7 +25,7 @@ from tensorboardX import SummaryWriter
 
 from mvn.models.triangulation import RANSACTriangulationNet, AlgebraicTriangulationNet, VolumetricTriangulationNet
 from mvn.models.volumetric_temporal import VolumetricTemporalNet,\
-                                           VolumetricLSTMAdaINNet,\
+                                           VolumetricTemporalAdaINNet,\
                                            VolumetricFRAdaINNet
                                            
 from mvn.models.loss import KeypointsMSELoss, KeypointsMSESmoothLoss, KeypointsMAELoss, KeypointsL2Loss, VolumetricCELoss
@@ -555,7 +555,7 @@ def main(args):
         "alg": AlgebraicTriangulationNet,
         "vol": VolumetricTriangulationNet,
         "vol_temporal": VolumetricTemporalNet,
-        "vol_temporal_lstm_adain":VolumetricLSTMAdaINNet,
+        "vol_temporal_adain":VolumetricTemporalAdaINNet,
         "vol_temporal_fr_adain":VolumetricFRAdaINNet,
         "vol_temporal_lstm_v2v":VolumetricTemporalNet
     }[config.model.name](config, device=device).to(device)
@@ -592,7 +592,7 @@ def main(args):
                 ],
                 lr=config.opt.lr
             )
-        elif config.model.name == "vol_temporal_lstm_adain":
+        elif config.model.name == "vol_temporal_adain":
             opt = torch.optim.Adam(
                 [{'params': model.backbone.parameters()},
                  {'params': model.process_features.parameters(), 'lr': config.opt.process_features_lr if hasattr(config.opt, "process_features_lr") else config.opt.lr},

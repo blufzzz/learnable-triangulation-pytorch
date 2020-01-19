@@ -5,7 +5,6 @@ import torch.nn.functional as F
 import torch
  
 
-
 class AdaIN(nn.Module):
     def __init__(self):
         super(AdaIN, self).__init__()
@@ -44,7 +43,15 @@ class AdaIN(nn.Module):
             return torch.cat([((features - features_mean) / (features_std + eps)) * adain_std + adain_mean, style])
 
 
-
+class AdaGroupNorm(nn.Module):
+    def __init__(self, n_groups, out_planes):
+        super(AdaGroupNorm, self).__init__()
+        self.adain = AdaIN()
+        self.group_norm = nn.GroupNorm(n_groups, out_planes)
+    def forward(self, x, params, eps = 1e-4):
+        x = self.adain(x,params)
+        x = self.group_norm(x)
+        return x
 
 def get_normalization(normalization_type, out_planes, n_groups):
     if normalization_type == 'adain':
@@ -52,7 +59,9 @@ def get_normalization(normalization_type, out_planes, n_groups):
     elif normalization_type ==  'batch_norm':
         return nn.BatchNorm3d(out_planes)
     elif normalization_type == 'group_norm':
-        return nn.GroupNorm(n_groups, out_planes)    
+        return nn.GroupNorm(n_groups, out_planes)
+    elif normalization_type == 'ada-group_norm':
+        return AdaGroupNorm(n_groups, out_planes)          
     else:
         raise RuntimeError('Unknown normalization_type')          
 

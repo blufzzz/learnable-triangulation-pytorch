@@ -2,6 +2,7 @@ from copy import deepcopy
 import numpy as np
 import pickle
 import random
+from collections import defaultdict
 
 import torch
 from torch import nn
@@ -15,6 +16,7 @@ from mvn.utils import misc
 from mvn.utils import volumetric
 from mvn.models.v2v import V2VModel, V2VModelAdaIN_MiddleVector
 from mvn.models.temporal import Seq2VecRNN,\
+                                Seq2VecCNN, \
                                 FeaturesAR_RNN,\
                                 FeaturesAR_CNN1D,\
                                 FeaturesAR_CNN2D_UNet,\
@@ -175,8 +177,7 @@ class VolumetricTemporalNet(nn.Module):
                 )
 
 
-
-class VolumetricLSTMAdaINNet(nn.Module):
+class VolumetricTemporalAdaINNet(nn.Module):
 
     def __init__(self, config, device='cuda:0'):
         super().__init__()
@@ -211,17 +212,22 @@ class VolumetricLSTMAdaINNet(nn.Module):
         self.transfer_cmu_to_human36m = config.model.transfer_cmu_to_human36m if hasattr(config.model, "transfer_cmu_to_human36m") else False
 
         # modules params
-        self.features_dim = config.model.features_dim if hasattr(config.model, 'features_dim') else 256
-        self.style_vector_dim = config.model.style_vector_dim if hasattr(config.model, 'style_vector_dim') else 256
-        self.features_regressor_base_channels = config.model.features_regressor_base_channels if hasattr(config.model, 'features_regressor_base_channels') else 8
+        self.f2v_type = config.model.f2v_type
         self.adain_type = config.model.adain_type
         self.style_grad_for_backbone = config.model.style_grad_for_backbone
         self.encoder_type = config.model.encoder_type
         self.pretrained_encoder = config.model.pretrained_encoder
+        self.include_pivot = config.model.include_pivot
+
+        # modules dimensions
+        self.volume_features_dim = config.model.volume_features_dim if hasattr(config.model, 'volume_features_dim') else 32
+        self.style_vector_dim = config.model.style_vector_dim if hasattr(config.model, 'style_vector_dim') else 256
+        self.intermediate_channels = config.model.intermediate_channels if hasattr(config.model, 'intermediate_channels') else 512
         self.encoded_feature_space = config.model.encoded_feature_space
+        
         self.normalization_type = config.model.normalization_type if hasattr(config.model, 'normalization_type') else 'batch_norm'
         if self.adain_type == 'all':
-            assert self.normalization_type=='adain'
+            assert self.normalization_type=='adain' or self.normalization_type=='ada-group_norm' 
 
         # modules
         self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
@@ -247,27 +253,35 @@ class VolumetricLSTMAdaINNet(nn.Module):
             raise RuntimeError('Wrong adain_type')
         
 
-        self.features_sequence_to_vector = Seq2VecRNN(self.encoded_feature_space,
-                                                      self.style_vector_dim)
+        if self.f2v_type == 'rnn':    
+            self.features_sequence_to_vector = Seq2VecRNN(self.encoded_feature_space,
+                                                          self.style_vector_dim,
+                                                          self.intermediate_channels)
+        elif self.f2v_type == 'cnn':
+            self.dt  = config.dataset.dt if self.include_pivot else config.dataset.dt - 1
+            self.kernel_size = config.model.kernel_size
+            self.features_sequence_to_vector =Seq2VecCNN(self.encoded_feature_space,
+                                                          self.style_vector_dim,
+                                                          self.intermediate_channels,
+                                                          dt=self.dt,
+                                                          kernel_size = self.kernel_size)
+        else:
+            raise RuntimeError('Wrong features_sequence_to_vector type')    
 
-        self.process_features = nn.Sequential(
-            nn.Conv2d(256, 32, 1)
-        )
+        if self.volume_features_dim != 256:    
+            self.process_features = nn.Sequential(
+                nn.Conv2d(256, self.volume_features_dim, 1)
+            )
 
     def forward(self, images_batch, batch, root_keypoints=None):
 
         device = images_batch.device
         batch_size, dt = images_batch.shape[:2]
         image_shape = images_batch.shape[-2:]
-
-        # reshape for backbone forward
         images_batch = images_batch.view(-1, 3, *image_shape)
-        # print ('Image', images_batch[0,0][:5,:5])
 
         # forward backbone
         heatmaps, features, alg_confidences, vol_confidences, bottleneck = self.backbone(images_batch)
-        current_memory = torch.cuda.memory_allocated()
-        print ('after bckbn', current_memory/(1024**2))
 
         # reshape back and take only last view (pivot)
         images_batch = images_batch.view(batch_size, dt, 3, *image_shape)[:,-1,...].unsqueeze(1)
@@ -291,7 +305,7 @@ class VolumetricLSTMAdaINNet(nn.Module):
 
         features = features.view(batch_size, dt, features_channels, *features_shape)
         pivot_features = features[:,-1,...]
-        style_features = features[:,:-1,...].contiguous()
+        style_features = features if self.include_pivot else features[:,:-1,...].contiguous() 
         pivot_features = self.process_features(pivot_features).unsqueeze(1)
 
         if self.encoder_type == 'backbone':
@@ -300,20 +314,28 @@ class VolumetricLSTMAdaINNet(nn.Module):
             bottleneck_channels = bottleneck.shape[1]
 
             bottleneck = bottleneck.view(batch_size, dt, bottleneck_channels, *bottleneck_shape)
-            bottleneck = bottleneck[:,:-1,...].contiguous()
-            bottleneck = bottleneck.view(batch_size*(dt-1), bottleneck_channels, *bottleneck_shape)
+            if not self.include_pivot:
+                bottleneck = bottleneck[:,:-1,...].contiguous()
+            bottleneck = bottleneck.view(-1, # batch_size*(dt-1)
+                                         bottleneck_channels,
+                                        *bottleneck_shape)
             
             if not self.style_grad_for_backbone:
                 bottleneck = bottleneck.detach()
             
             encoded_features = self.encoder(bottleneck)
         else:
-            style_features = style_features.view(batch_size*(dt-1), features_channels, *features_shape)
+            style_features = style_features.view(-1, # batch_size*(dt-1)
+                                                 features_channels,
+                                                *features_shape)
             if self.style_grad_for_backbone:
                 style_features = style_features.detach()
             encoded_features = self.encoder(style_features)
 
-        encoded_features = encoded_features.view(batch_size, (dt-1), self.encoded_feature_space)
+        encoded_features = encoded_features.view(batch_size,
+                                                 -1, # (dt-1) 
+                                                 self.encoded_feature_space)
+
         style_vector = self.features_sequence_to_vector(encoded_features, device=device) # [batch_size, 512]
         
         if self.use_precalculated_pelvis:
@@ -345,8 +367,8 @@ class VolumetricLSTMAdaINNet(nn.Module):
         if self.volume_aggregation_method == 'no_aggregation':
             volumes = torch.cat(volumes, 0)
 
-        print ('increased by:', (torch.cuda.memory_allocated() - current_memory) / (1024**2))
-        current_memory = torch.cuda.memory_allocated()
+        # print ('increased by:', (torch.cuda.memory_allocated() - current_memory) / (1024**2))
+        # current_memory = torch.cuda.memory_allocated()
         # inference
         adain_params = [affine_map(style_vector) for affine_map in self.affine_mappings]
 
@@ -362,6 +384,7 @@ class VolumetricLSTMAdaINNet(nn.Module):
                 coord_volumes,
                 base_points
                 )
+
 
 
 class VolumetricFRAdaINNet(nn.Module):

@@ -4,6 +4,43 @@ import torch
 from IPython.core.debugger import set_trace
 from torchvision import models
 
+
+class Slice(nn.Module):
+    def __init__(self, shift):
+        super(Slice, self).__init__()
+        self.shift = shift
+    def forward(self,x):
+        return x[:, :, self.shift : x.shape[2] - self.shift]
+
+class Res1DBlock(nn.Module):
+    def __init__(self, in_planes, out_planes, n_groups = 32, kernel_size=3):
+        
+        super(Res1DBlock, self).__init__()
+        pad = kernel_size // 2 if kernel_size > 1 else 0
+        self.res_branch = nn.Sequential(
+            nn.Conv1d(in_planes, out_planes, kernel_size=kernel_size, padding=pad),
+            nn.GroupNorm(n_groups, out_planes),
+            nn.ReLU(True),
+            nn.Conv1d(out_planes, out_planes, kernel_size=kernel_size),
+            nn.GroupNorm(n_groups, out_planes)
+        )
+
+        if in_planes == out_planes:
+            self.skip_con = Slice(kernel_size // 2)
+        else:
+            self.skip_con = nn.Sequential(
+                Slice(kernel_size // 2),
+                nn.Conv1d(in_planes, out_planes, kernel_size=1),
+                nn.GroupNorm(n_groups, out_planes)
+            )
+
+    def forward(self, x):
+        res = self.res_branch(x)
+        skip = self.skip_con(x)
+        
+        return F.relu(res + skip, True)
+
+
 class Basic2DBlock(nn.Module):
     def __init__(self, in_planes, out_planes, kernel_size):
         super(Basic2DBlock, self).__init__()
@@ -90,6 +127,50 @@ class TemporalDiscriminator(nn.Module):
         return self.softmax(self.linear(x.squeeze(-1)))
 
 
+class Seq2VecCNN(nn.Module):
+    """docstring for Seq2VecCNN"""
+    def __init__(self, 
+                 input_features_dim, 
+                 output_features_dim=1024, 
+                 intermediate_channels=512, 
+                 dt = 8,
+                 kernel_size = 3):
+        
+        super(Seq2VecCNN, self).__init__()
+        self.input_features_dim = input_features_dim
+        self.output_features_dim = output_features_dim
+        self.intermediate_channels = intermediate_channels
+        
+        self.first_block = Res1DBlock(input_features_dim, 
+                                      intermediate_channels,
+                                      kernel_size=1)
+        
+        
+        l = dt
+        blocks =  []
+        while l >= kernel_size:
+            l = l - kernel_size + 1
+            blocks.append(Res1DBlock(intermediate_channels, 
+                                     intermediate_channels, 
+                                     kernel_size = kernel_size))
+        
+        self.blocks = nn.Sequential(*blocks)    
+        self.final_block = nn.Conv1d(intermediate_channels, 
+                                      output_features_dim,
+                                      kernel_size=l)
+        
+    def forward(self, x, device='cuda:0'):
+        # [batch_size, dt, feature_shape]
+        x = x.transpose(1,2) # [batch_size, dt, feature_shape] -> [batch_size, feature_shape, dt]
+        x  = self.first_block(x)
+        x  = self.blocks(x)
+        # set_trace()
+        x  = self.final_block(x)
+        
+        return x[...,0]
+
+
+
 class Seq2VecRNN(nn.Module):
     """docstring for Seq2VecRNN"""
     def __init__(self, input_features_dim, output_features_dim=1024, hidden_dim = 1024):
@@ -111,7 +192,7 @@ class Seq2VecRNN(nn.Module):
                    torch.randn(1, batch_size, self.hidden_dim, device=device)*eps
         output, (hn, cn) = self.lstm(features, (h0, c0))
         output = output[:,-1,...]
-        if self.output_features_dim is not None:
+        if self.output_features_dim != self.hidden_dim:
             output = self.activation(self.output_layer(output))
         return output
         
@@ -128,7 +209,7 @@ class FeaturesDecoder(nn.Module):
 
 class FeaturesEncoder_DenseNet(nn.Module):
     """docstring for FeaturesEncoder_DenseNet"""
-    def __init__(self, input_features_dim, output_features_dim, pretrained=False):
+    def __init__(self, input_features_dim, output_features_dim, pretrained=False, normalization_type='batch_norm'):
         super().__init__()
         self.input_features_dim = input_features_dim
         self.output_features_dim = output_features_dim
@@ -150,7 +231,6 @@ class FeaturesEncoder_DenseNet(nn.Module):
         x = self.output(x)
         x = self.activation(x)
         return x   
-
 
 
 

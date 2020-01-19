@@ -27,16 +27,22 @@ opt:
   scale_keypoints_3d: 0.1
 
 model:
-  name: "vol_temporal_lstm_adain"
+  name: "vol_temporal_adain"
   kind: "mpii"
   volume_aggregation_method: "no_aggregation"
-  adain_type: 'middle' # if 'all' then normalization_type: 'adain'
+  f2v_type: 'cnn'
+  adain_type: 'all' # if 'all' then normalization_type: 'adain' or 'ada-group_norm'
   encoder_type: "backbone"
   pretrained_encoder: false
+  volume_features_dim: 32
+  intermediate_channels: 512
   encoded_feature_space: 1024
+  style_vector_dim: 1024 #256
   encoder_capacity_multiplier: 2
+  kernel_size: 3
+  include_pivot: false
   style_grad_for_backbone: false
-  normalization_type: 'group_norm'
+  normalization_type: 'ada-group_norm'
 
   init_weights: false
   checkpoint: ""
@@ -55,14 +61,14 @@ model:
   heatmap_multiplier: 100.0
 
   backbone:
-    name: "resnet152"
+    name: "resnet152"  #"resnet50" #"resnet152"
     style: "simple"
 
     init_weights: true
     checkpoint: "./data/pose_resnet_4.5_pixels_human36m.pth"
 
     num_joints: 17
-    num_layers: 152
+    num_layers: 152 #50 #152
 
     alg_confidences: false
     vol_confidences: false
