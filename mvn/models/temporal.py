@@ -164,7 +164,6 @@ class Seq2VecCNN(nn.Module):
         x = x.transpose(1,2) # [batch_size, dt, feature_shape] -> [batch_size, feature_shape, dt]
         x  = self.first_block(x)
         x  = self.blocks(x)
-        # set_trace()
         x  = self.final_block(x)
         
         return x[...,0]

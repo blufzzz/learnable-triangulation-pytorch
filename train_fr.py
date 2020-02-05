@@ -38,7 +38,7 @@ from mvn.models.temporal import Seq2VecRNN,\
 from mvn.models.loss import KeypointsMSELoss, KeypointsMSESmoothLoss, KeypointsMAELoss, KeypointsL2Loss, VolumetricCELoss
 from mvn.utils import img, multiview, op, vis, misc, cfg
 from mvn.models import pose_resnet
-from mvn.datasets.human36m import Human36MSingleViewDataset, Human36MMultiViewDataset
+from mvn.datasets.human36m import Human36MTemporalDataset, Human36MMultiViewDataset
 from mvn.datasets import utils as dataset_utils
 
 from IPython.core.debugger import set_trace
@@ -52,7 +52,7 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
     singleview_dataset = config.dataset.singleview if hasattr(config.dataset, 'singleview') else False    
     pivot_type = config.dataset.pivot_type if hasattr(config.dataset, "pivot_type") else 'first'
     dt = config.dataset.dt if hasattr(config.dataset, "dt") else 1
-    dataset_type = Human36MSingleViewDataset if singleview_dataset else Human36MMultiViewDataset
+    dataset_type = Human36MTemporalDataset if singleview_dataset else Human36MMultiViewDataset
     dilation = config.dataset.dilation if hasattr(config.dataset, 'dilation') else 0
     keypoints_per_frame=config.dataset.keypoints_per_frame if hasattr(config.dataset, 'keypoints_per_frame') else False
     dilation_type = config.dataset.dilation_type if hasattr(config.dataset, 'dilation_type') else 'constant'

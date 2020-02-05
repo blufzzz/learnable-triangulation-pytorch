@@ -65,6 +65,7 @@ class Human36MMultiViewDataset(Dataset):
         self.undistort_images = undistort_images
         self.ignore_cameras = ignore_cameras
         self.crop = crop
+        self.retain_every_n_frames_in_test = retain_every_n_frames_in_test
 
         self.labels = np.load(labels_path, allow_pickle=True).item()
 
@@ -298,7 +299,7 @@ class Human36MMultiViewDataset(Dataset):
 
 
 
-class Human36MSingleViewDataset(Human36MMultiViewDataset):
+class Human36MTemporalDataset(Human36MMultiViewDataset):
     """
         Human3.6M setup for singleview tasks (kawrgs['dt'] = 1) and other ones that exploits temporal information (kawrgs['dt'] > 1)
     """
@@ -322,7 +323,7 @@ class Human36MSingleViewDataset(Human36MMultiViewDataset):
                  **kwargs
                  ):
 
-        # Human36MSingleViewDataset, self
+        # Human36MTemporalDataset, self
         super().__init__(h36m_root=h36m_root,
                          labels_path=labels_path,
                          pred_results_path=None,
@@ -346,7 +347,6 @@ class Human36MSingleViewDataset(Human36MMultiViewDataset):
         # time dilation betweem frames
         self.dilation = kwargs['dilation']
         self.dilation_type = kwargs['dilation_type']
-        
         self.keypoints_per_frame=kwargs['keypoints_per_frame']
         self.pivot_type = kwargs['pivot_type']
 
@@ -501,7 +501,7 @@ class Human36MSingleViewDataset(Human36MMultiViewDataset):
             # to ensure proper evaluation in super().evaluate() below
             self.labels['table'] = original_labels[self.pivot_indxs][shot_indexes_for_camera]
 
-            result = super(Human36MSingleViewDataset, self).evaluate(keypoints_3d_predicted[camera_mask],
+            result = super(Human36MTemporalDataset, self).evaluate(keypoints_3d_predicted[camera_mask],
                                                                     mask = mask,
                                                                     split_by_subject=split_by_subject,
                                                                     transfer_cmu_to_human36m=transfer_cmu_to_human36m,

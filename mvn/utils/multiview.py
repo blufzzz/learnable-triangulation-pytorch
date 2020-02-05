@@ -96,7 +96,7 @@ def project_3d_points_to_image_plane_without_distortion(proj_matrix, points_3d, 
         if convert_back_to_euclidean:
             result = homogeneous_to_euclidean(result)
         return result
-    elif torch.is_tensor(proj_matrix) and torch.is_tensor(points_3d):
+    elif torch.is_tensor(proj_matrix) and torch.is_tensor(points_3d): 
         result = euclidean_to_homogeneous(points_3d) @ proj_matrix.t()
         if convert_back_to_euclidean:
             result = homogeneous_to_euclidean(result)

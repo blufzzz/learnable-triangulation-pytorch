@@ -1,0 +1,178 @@
+title: "human36m_vol_temporal_lstm_adain_softmax"
+kind: "human36m"
+vis_freq: 1000
+vis_n_elements: 10
+distributed_train: true
+image_shape: [384, 384]
+
+opt:
+  criterion: "MAE"
+
+  use_volumetric_ce_loss: true
+  volumetric_ce_loss_weight: 0.01
+
+  n_objects_per_epoch: 10000
+  n_epochs: 9999
+  dump_weights: False
+
+  batch_size: 1
+  val_batch_size: 1
+
+  lr: 0.0001
+  process_features_lr: 0.001
+  volume_net_lr: 0.001
+  affine_mappings_lr: 0.001
+  features_sequence_to_vector_lr: 0.001
+  encoder_lr: 0.001
+  scale_keypoints_3d: 0.1
+
+model:
+  name: "vol_temporal_adain"
+  kind: "mpii"
+  volume_aggregation_method: "no_aggregation"
+  f2v_type: 'lstm'
+  adain_type: 'all' # if 'all' then normalization_type: 'adain' or 'ada-group_norm'
+  encoder_type: "backbone"
+  pretrained_encoder: false
+  volume_features_dim: 32 #32
+  intermediate_channels: 512
+  encoded_feature_space: 1024
+  style_vector_dim: 256 #256
+  encoder_capacity_multiplier: 2
+  kernel_size: 3 #3
+  include_pivot: false # including pivot getting thigs worse
+  style_grad_for_backbone: false
+  normalization_type: 'group-ada_norm' #'ada-group_norm'
+
+  init_weights: false
+  checkpoint: ""
+
+  use_gt_pelvis: true
+  use_precalculated_pelvis: false
+  use_volumetric_pelvis: false
+
+  cuboid_side: 2500 #1000 #2500.0
+
+  volume_size: 64
+  volume_multiplier: 1.0
+  volume_softmax: true
+
+  heatmap_softmax: true
+  heatmap_multiplier: 100.0
+
+  backbone:
+    name: "hrnet32"  
+
+    init_weights: true
+    checkpoint: "./data/pose_hrnet_w32_384x288.pth"
+
+    alg_confidences: false
+    vol_confidences: false
+    return_heatmaps: false
+    return_bottleneck: true  
+
+    NUM_JOINTS: 17
+    IMAGE_SIZE:
+    - 288
+    - 384
+    HEATMAP_SIZE:
+    - 72
+    - 96
+    SIGMA: 3
+    EXTRA:
+      PRETRAINED_LAYERS:
+      - 'conv1'
+      - 'bn1'
+      - 'conv2'
+      - 'bn2'
+      - 'layer1'
+      - 'transition1'
+      - 'stage2'
+      - 'transition2'
+      - 'stage3'
+      - 'transition3'
+      - 'stage4'
+      FINAL_CONV_KERNEL: 1
+      STAGE2:
+        NUM_MODULES: 1
+        NUM_BRANCHES: 2
+        BLOCK: BASIC
+        NUM_BLOCKS:
+        - 4
+        - 4
+        NUM_CHANNELS:
+        - 32
+        - 64
+        FUSE_METHOD: SUM
+      STAGE3:
+        NUM_MODULES: 4
+        NUM_BRANCHES: 3
+        BLOCK: BASIC
+        NUM_BLOCKS:
+        - 4
+        - 4
+        - 4
+        NUM_CHANNELS:
+        - 32
+        - 64
+        - 128
+        FUSE_METHOD: SUM
+      STAGE4:
+        NUM_MODULES: 3
+        NUM_BRANCHES: 4
+        BLOCK: BASIC
+        NUM_BLOCKS:
+        - 4
+        - 4
+        - 4
+        - 4
+        NUM_CHANNELS:
+        - 32
+        - 64
+        - 128
+        - 256
+        FUSE_METHOD: SUM   
+
+
+
+dataset:
+  kind: "human36m"
+  dt: 8
+  dilation: 3
+  singleview: true
+  pivot_type: 'first'
+  # dilation_type: 'square'
+
+  train:
+    h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"
+    labels_path: "/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy"
+    pred_results_path:
+
+    with_damaged_actions: true
+    undistort_images: false
+
+    scale_bbox: 1.0
+
+    shuffle: true
+    randomize_n_views: false
+    min_n_views: null
+    max_n_views: null
+    num_workers: 8
+
+  val:
+    h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"
+    labels_path: "/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy"
+    pred_results_path: 
+
+    with_damaged_actions: true
+    undistort_images: false
+
+    scale_bbox: 1.0
+
+    shuffle: false
+    randomize_n_views: false
+    min_n_views: null
+    max_n_views: null
+    num_workers: 8
+
+    retain_every_n_frames_in_test: 30

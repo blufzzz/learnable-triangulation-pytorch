@@ -7,14 +7,14 @@ from collections import defaultdict
 import torch
 from torch import nn
 
-from mvn.models import pose_resnet
+from mvn.models import pose_resnet, pose_hrnet
 from time import time
 from mvn.utils import op
 from mvn.utils import multiview
 from mvn.utils import img
 from mvn.utils import misc
 from mvn.utils import volumetric
-from mvn.models.v2v import V2VModel, V2VModelAdaIN_MiddleVector
+from mvn.models.v2v import V2VModel, V2VModelAdaIN_MiddleVector, V2VModel_v2
 from mvn.models.temporal import Seq2VecRNN,\
                                 Seq2VecCNN, \
                                 FeaturesAR_RNN,\
@@ -27,9 +27,48 @@ from mvn.models.temporal import Seq2VecRNN,\
 from IPython.core.debugger import set_trace
 from mvn.utils.op import get_coord_volumes
 
+
 CHANNELS_LIST = [32, 32, 32, 32, 32, 32, 32, 32, 32, 64, 64, 64, 64, 64, 128, 128, 128, 128, 128,\
                                   128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128, 128,\
                                   128, 128, 128, 128, 128, 64, 64, 64, 32, 32, 32, 32, 32]
+
+
+CHANNELS_LIST_v2 = [128,128,  128,128,\
+                    32,32,32,  128,128,  32,32,32, 128,128,  64,64,64,  128,128,\
+                    128,128,  128,128,  128,128,  256,256,256,  256,256,\
+                    128,128,128,  128,  128,128,  128,  64,64,64,  64,  32,32,32,  32,  32,32,  32,\
+                    32,32] # 32,32
+
+
+STYLE_VEC = [[0.0000, 0.0000, 0.0066, 0.0000, 0.0548, 0.0314, 0.0312, 0.0201, 0.0098,
+        0.0376, 0.0000, 0.0256, 0.0000, 0.0212, 0.0000, 0.0360, 0.0000, 0.0301,
+        0.0000, 0.0097, 0.0542, 0.0045, 0.0420, 0.0010, 0.0231, 0.0642, 0.0089,
+        0.0479, 0.0000, 0.0136, 0.0000, 0.0219, 0.0000, 0.0340, 0.0000, 0.0596,
+        0.0148, 0.0000, 0.0521, 0.0037, 0.0134, 0.0000, 0.0574, 0.0000, 0.0103,
+        0.0048, 0.0364, 0.0000, 0.0000, 0.0000, 0.0019, 0.0000, 0.0117, 0.0132,
+        0.0212, 0.0368, 0.0000, 0.0211, 0.0072, 0.0583, 0.0326, 0.0000, 0.0000,
+        0.0135, 0.0294, 0.0197, 0.0000, 0.0371, 0.0000, 0.0000, 0.0212, 0.0096,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0352, 0.0000, 0.0266, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0246, 0.0000, 0.0000, 0.0280, 0.0000,
+        0.0073, 0.0000, 0.0000, 0.0000, 0.0000, 0.0252, 0.0000, 0.0000, 0.0094,
+        0.0000, 0.0800, 0.0000, 0.0279, 0.0000, 0.0419, 0.0000, 0.0084, 0.0307,
+        0.0671, 0.0323, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0086, 0.0000,
+        0.0515, 0.0082, 0.0175, 0.0000, 0.0238, 0.0000, 0.0000, 0.0120, 0.0000,
+        0.0000, 0.0000, 0.0000, 0.0097, 0.0000, 0.0000, 0.0000, 0.0220, 0.0000,
+        0.0000, 0.0000, 0.0670, 0.0123, 0.0000, 0.0000, 0.0000, 0.0000, 0.0559,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0159, 0.0000, 0.0110, 0.0000, 0.0105,
+        0.0026, 0.0000, 0.0032, 0.0000, 0.0399, 0.0089, 0.0000, 0.0069, 0.0000,
+        0.0000, 0.0225, 0.0000, 0.0351, 0.0000, 0.0000, 0.0000, 0.0000, 0.0343,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0211, 0.0660,
+        0.0000, 0.0038, 0.0000, 0.0209, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
+        0.0198, 0.0485, 0.0066, 0.0236, 0.0000, 0.0000, 0.0154, 0.0000, 0.0000,
+        0.0000, 0.0122, 0.0000, 0.0675, 0.0019, 0.0000, 0.0011, 0.0000, 0.0297,
+        0.0000, 0.0000, 0.0000, 0.0071, 0.0342, 0.0099, 0.0000, 0.0074, 0.0221,
+        0.0000, 0.0000, 0.0188, 0.0085, 0.0000, 0.0000, 0.0000, 0.0380, 0.0198,
+        0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0017, 0.0000, 0.0000, 0.0379,
+        0.0000, 0.0009, 0.0000, 0.0069, 0.0024, 0.0475, 0.0202, 0.0144, 0.0297,
+        0.0089, 0.0254, 0.0000, 0.0000, 0.0000, 0.0371, 0.0467, 0.0000, 0.0000,
+        0.0000, 0.0289, 0.0405, 0.0000]]
 
 
 class VolumetricTemporalNet(nn.Module):
@@ -56,7 +95,7 @@ class VolumetricTemporalNet(nn.Module):
 
         self.process_frames_independently = config.model.process_frames_independently if hasattr(config.model, 'process_frames_independently') else False
 
-        self.kind = config.model.kind
+        self.kind = config.model.kind 
 
         self.use_precalculated_pelvis = config.model.use_precalculated_pelvis if hasattr(config.model, "use_precalculated_pelvis") else False
         self.use_gt_pelvis = config.model.use_gt_pelvis if hasattr(config.model, "use_gt_pelvis") else False
@@ -218,6 +257,7 @@ class VolumetricTemporalAdaINNet(nn.Module):
         self.encoder_type = config.model.encoder_type
         self.pretrained_encoder = config.model.pretrained_encoder
         self.include_pivot = config.model.include_pivot
+        self.use_auxilary_backbone = hasattr(config.model, 'auxilary_backbone')
 
         # modules dimensions
         self.volume_features_dim = config.model.volume_features_dim if hasattr(config.model, 'volume_features_dim') else 32
@@ -226,12 +266,17 @@ class VolumetricTemporalAdaINNet(nn.Module):
         self.encoded_feature_space = config.model.encoded_feature_space
         
         self.normalization_type = config.model.normalization_type if hasattr(config.model, 'normalization_type') else 'batch_norm'
-        if self.adain_type == 'all':
-            assert self.normalization_type=='adain' or self.normalization_type=='ada-group_norm' 
+        if self.adain_type in ['all', 'all_v2']:
+            assert self.normalization_type in ['adain','ada-group_norm','group-ada_norm']
 
         # modules
         self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
-         
+        
+        if self.use_auxilary_backbone:
+            print ('Using auxilary backbone')
+            self.auxilary_backbone = pose_resnet.get_pose_net(config.model.auxilary_backbone, device=device)
+
+
         if self.encoder_type == "densenet":
             self.encoder = FeaturesEncoder_DenseNet(256, 
                                                     self.encoded_feature_space, 
@@ -244,16 +289,29 @@ class VolumetricTemporalAdaINNet(nn.Module):
             raise RuntimeError('Wrong encoder_type!')    
         
         if self.adain_type == 'all':    
-            self.volume_net = V2VModel(32, self.num_joints, normalization_type='adain')
-            self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*C) for C in CHANNELS_LIST]) # 51
+            self.volume_net = V2VModel(self.volume_features_dim,
+                                       self.num_joints,
+                                       normalization_type=self.normalization_type)
+            self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*C) for C in CHANNELS_LIST]) #51
+
         elif self.adain_type == 'middle': 
-            self.volume_net =V2VModelAdaIN_MiddleVector(32, self.num_joints, normalization_type=self.normalization_type)
+            self.volume_net =V2VModelAdaIN_MiddleVector(self.volume_features_dim, 
+                                                        self.num_joints, 
+                                                        normalization_type=self.normalization_type)
             self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*128) for _ in range(2)])
+
+        elif self.adain_type == 'all_v2': 
+            self.volume_net =V2VModel_v2(self.volume_features_dim, 
+                                        self.num_joints, 
+                                        normalization_type=self.normalization_type)
+
+            self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*C) for C in CHANNELS_LIST_v2]) 
+
         else:
             raise RuntimeError('Wrong adain_type')
         
 
-        if self.f2v_type == 'rnn':    
+        if self.f2v_type == 'lstm':    
             self.features_sequence_to_vector = Seq2VecRNN(self.encoded_feature_space,
                                                           self.style_vector_dim,
                                                           self.intermediate_channels)
@@ -268,27 +326,49 @@ class VolumetricTemporalAdaINNet(nn.Module):
         else:
             raise RuntimeError('Wrong features_sequence_to_vector type')    
 
-        if self.volume_features_dim != 256:    
-            self.process_features = nn.Sequential(
-                nn.Conv2d(256, self.volume_features_dim, 1)
-            )
+        self.process_features = nn.Conv2d(256, self.volume_features_dim, 1) if self.volume_features_dim != 256 else nn.Sequential()
 
-    def forward(self, images_batch, batch, root_keypoints=None):
+    def forward(self, images_batch, batch, root_keypoints=None, random=False):
 
         device = images_batch.device
         batch_size, dt = images_batch.shape[:2]
         image_shape = images_batch.shape[-2:]
-        images_batch = images_batch.view(-1, 3, *image_shape)
 
-        # forward backbone
-        heatmaps, features, alg_confidences, vol_confidences, bottleneck = self.backbone(images_batch)
+        if self.use_auxilary_backbone:
 
-        # reshape back and take only last view (pivot)
-        images_batch = images_batch.view(batch_size, dt, 3, *image_shape)[:,-1,...].unsqueeze(1)
+            pivot_images_batch = images_batch[:,-1,...]
+
+            aux_images_batch = images_batch if self.include_pivot else images_batch[:,:-1,...]
+            aux_images_batch = aux_images_batch.view(-1, 3, *image_shape)
+
+            aux_heatmaps, aux_features, _, aux_vol_confidences, aux_bottleneck = self.auxilary_backbone(aux_images_batch)
+            pivot_heatmaps, pivot_features, pivot_alg_confidences, vol_confidences, pivot_bottleneck = self.backbone(pivot_images_batch)
+            pivot_features = self.process_features(pivot_features).unsqueeze(1)
+            features_shape = pivot_features.shape[-2:]
+            features_channels = pivot_features.shape[1]
+            bottleneck_shape = aux_bottleneck.shape[-2:]
+            bottleneck_channels = aux_bottleneck.shape[1]
+        else:    
+            # forward backbone
+            heatmaps, features, _, vol_confidences, bottleneck = self.backbone(images_batch.view(-1, 3, *image_shape))
+            
+            # extract aux_features
+            features_shape = features.shape[-2:]
+            features_channels = features.shape[1]
+            features = features.view(batch_size, dt, features_channels, *features_shape)
+            
+            pivot_features = features[:,-1,...]
+            pivot_features = self.process_features(pivot_features).unsqueeze(1)
+            aux_features = features if self.include_pivot else features[:,:-1,...].contiguous()
+            aux_features = aux_features.view(-1, features_channels, *features_shape)
+
+            # extract aux_bottleneck
+            bottleneck_shape = bottleneck.shape[-2:]
+            bottleneck_channels = bottleneck.shape[1]
+            bottleneck = bottleneck.view(batch_size, -1, bottleneck_channels, *bottleneck_shape)
+            aux_bottleneck = bottleneck if self.include_pivot else bottleneck[:,:-1,...].contiguous()
+            aux_bottleneck = aux_bottleneck.view(-1, bottleneck_channels, *bottleneck_shape)
         
-        # calcualte shapes
-        features_shape = features.shape[-2:]
-        features_channels = features.shape[1]
 
         # change camera intrinsics
         new_cameras = deepcopy(batch['cameras'])
@@ -303,40 +383,23 @@ class VolumetricTemporalAdaINNet(nn.Module):
         proj_matricies_batch = proj_matricies_batch.float().to(device)
         proj_matricies_batch = proj_matricies_batch[:,-1,...].unsqueeze(1) 
 
-        features = features.view(batch_size, dt, features_channels, *features_shape)
-        pivot_features = features[:,-1,...]
-        style_features = features if self.include_pivot else features[:,:-1,...].contiguous() 
-        pivot_features = self.process_features(pivot_features).unsqueeze(1)
-
         if self.encoder_type == 'backbone':
-            
-            bottleneck_shape = bottleneck.shape[-2:]
-            bottleneck_channels = bottleneck.shape[1]
-
-            bottleneck = bottleneck.view(batch_size, dt, bottleneck_channels, *bottleneck_shape)
-            if not self.include_pivot:
-                bottleneck = bottleneck[:,:-1,...].contiguous()
-            bottleneck = bottleneck.view(-1, # batch_size*(dt-1)
-                                         bottleneck_channels,
-                                        *bottleneck_shape)
-            
             if not self.style_grad_for_backbone:
-                bottleneck = bottleneck.detach()
-            
-            encoded_features = self.encoder(bottleneck)
+                aux_bottleneck = aux_bottleneck.detach()
+            encoded_features = self.encoder(aux_bottleneck)
         else:
-            style_features = style_features.view(-1, # batch_size*(dt-1)
-                                                 features_channels,
-                                                *features_shape)
             if self.style_grad_for_backbone:
-                style_features = style_features.detach()
-            encoded_features = self.encoder(style_features)
+                aux_features = aux_features.detach()
+            encoded_features = self.encoder(aux_features)
 
         encoded_features = encoded_features.view(batch_size,
                                                  -1, # (dt-1) 
                                                  self.encoded_feature_space)
 
-        style_vector = self.features_sequence_to_vector(encoded_features, device=device) # [batch_size, 512]
+        if random:
+            style_vector = torch.tensor(STYLE_VEC, requires_grad=True).to(device)
+        else:    
+            style_vector = self.features_sequence_to_vector(encoded_features, device=device) # [batch_size, 512]
         
         if self.use_precalculated_pelvis:
             tri_keypoints_3d = torch.from_numpy(np.array(batch['pred_keypoints_3d'])).type(torch.float).to(device)
@@ -377,13 +440,33 @@ class VolumetricTemporalAdaINNet(nn.Module):
         vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
 
         return (vol_keypoints_3d,
-                features,
+                None if self.use_auxilary_backbone else features,
                 volumes,
                 vol_confidences,
                 cuboids,
                 coord_volumes,
-                base_points
+                base_points,
+                style_vector
                 )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

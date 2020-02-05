@@ -32,7 +32,7 @@ from mvn.models.loss import KeypointsMSELoss, KeypointsMSESmoothLoss, KeypointsM
 
 from mvn.utils import img, multiview, op, vis, misc, cfg
 
-from mvn.datasets.human36m import Human36MSingleViewDataset, Human36MMultiViewDataset
+from mvn.datasets.human36m import Human36MTemporalDataset, Human36MMultiViewDataset
 from mvn.datasets import utils as dataset_utils
 
 from IPython.core.debugger import set_trace
@@ -61,10 +61,11 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
     singleview_dataset = config.dataset.singleview if hasattr(config.dataset, 'singleview') else False    
     pivot_type = config.dataset.pivot_type if hasattr(config.dataset, "pivot_type") else 'first'
     dt = config.dataset.dt if hasattr(config.dataset, "dt") else 1
-    dataset_type = Human36MSingleViewDataset if singleview_dataset else Human36MMultiViewDataset
+    dataset_type = Human36MTemporalDataset if singleview_dataset else Human36MMultiViewDataset
     dilation = config.dataset.dilation if hasattr(config.dataset, 'dilation') else 0
     dilation_type = config.dataset.dilation_type if hasattr(config.dataset, 'dilation_type') else 'constant'
     keypoints_per_frame=config.dataset.keypoints_per_frame if hasattr(config.dataset, 'keypoints_per_frame') else False
+
 
     if is_train:
         # train
@@ -83,7 +84,7 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
             crop=config.dataset.train.crop if hasattr(config.dataset.train, "crop") else True,
             dt = dt,
             dilation = dilation,
-            evaluate_cameras = config.dataset.train.evaluate_cameras if hasattr(config.dataset.train, "evaluate_cameras") else [0,1,2,3],
+            evaluate_cameras = [0,1,2,3],
             keypoints_per_frame=keypoints_per_frame,
             pivot_type = pivot_type,
             dilation_type = dilation_type
@@ -119,10 +120,10 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
         crop=config.dataset.val.crop if hasattr(config.dataset.val, "crop") else True,
         dt = dt,
         dilation = dilation,
-        evaluate_cameras = config.dataset.train.evaluate_cameras if hasattr(config.dataset.train, "evaluate_cameras") else [0,1,2,3],
+        evaluate_cameras = [0,1,2,3],
         keypoints_per_frame=keypoints_per_frame,
         pivot_type = pivot_type,
-        dilation_type = dilation_type
+        dilation_type = dilation_type,
         )
 
     val_dataloader = DataLoader(
@@ -269,6 +270,19 @@ def one_epoch(model,
                      cuboids_pred, 
                      coord_volumes_pred, 
                      base_points_pred) = model(images_batch, batch)
+
+                elif model_type == "vol_temporal_adain":
+                    (keypoints_3d_pred, 
+                     keypoints_3d_pred_fr, 
+                     features_pred, 
+                     features_pred_fr, 
+                     volumes_pred, 
+                     volumes_pred_fr, 
+                     confidences_pred, 
+                     cuboids_pred, 
+                     coord_volumes_pred, 
+                     base_points_pred,
+                     style_vector) = model(images_batch, batch)    
 
                 else:
                     (keypoints_3d_pred, 
@@ -599,8 +613,8 @@ def main(args):
                  {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr},
                  {'params': model.encoder.parameters(), 'lr': config.opt.encoder_lr if hasattr(config.opt, "encoder_lr") else config.opt.lr},
                  {'params': model.features_sequence_to_vector.parameters(), 'lr': config.opt.features_sequence_to_vector_lr if hasattr(config.opt, "features_sequence_to_vector_lr") else config.opt.lr},
-                 {'params': model.affine_mappings.parameters(), 'lr': config.opt.affine_mappings_lr if hasattr(config.opt, "affine_mappings_lr") else config.opt.lr}
-                ],
+                 {'params': model.affine_mappings.parameters(), 'lr': config.opt.affine_mappings_lr if hasattr(config.opt, "affine_mappings_lr") else config.opt.lr},
+                ] + [{'params':model.auxilary_backbone.parameters(), 'lr': config.opt.auxilary_backbone_lr if hasattr(config.opt, "auxilary_backbone_lr") else config.opt.lr}] if model.use_auxilary_backbone else [],
                 lr=config.opt.lr
             )
         elif config.model.name == "vol_temporal_fr_adain":

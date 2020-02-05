@@ -195,7 +195,8 @@ class PoseResNet(nn.Module):
                  alg_confidences=False,
                  vol_confidences=False,
                  return_heatmaps = False,
-                 return_bottleneck = False
+                 return_bottleneck = False,
+                 return_features = True
                  ):
         super().__init__()
 
@@ -225,11 +226,12 @@ class PoseResNet(nn.Module):
             self.vol_confidences = GlobalAveragePoolingHead(512 * block.expansion, 32)
 
         # used for deconv layers
-        self.deconv_layers = self._make_deconv_layer(
-            self.num_deconv_layers,
-            self.num_deconv_filters,
-            self.num_deconv_kernels,
-        )
+        if return_features:
+            self.deconv_layers = self._make_deconv_layer(
+                self.num_deconv_layers,
+                self.num_deconv_filters,
+                self.num_deconv_kernels,
+            )
 
         if return_heatmaps:
             self.final_layer = nn.Conv2d(
@@ -320,8 +322,10 @@ class PoseResNet(nn.Module):
         if self.return_bottleneck:
             bottleneck = x 
 
-        x = self.deconv_layers(x)
-        features = x
+        features = None
+        if hasattr(self, "deconv_layers"):    
+            x = self.deconv_layers(x)
+            features = x
 
         heatmaps = None
         if hasattr(self, "final_layer"):
@@ -349,7 +353,8 @@ def get_pose_net(config, device='cuda:0'):
         alg_confidences=config.alg_confidences if hasattr(config, "alg_confidences") else False,
         vol_confidences=config.vol_confidences if hasattr(config, "vol_confidences") else False,
         return_heatmaps=config.return_heatmaps if hasattr(config, "return_heatmaps") else False,
-        return_bottleneck =config.return_bottleneck  if hasattr(config, "return_bottleneck") else False
+        return_bottleneck =config.return_bottleneck  if hasattr(config, "return_bottleneck") else False,
+        return_features =config.return_features  if hasattr(config, "return_features") else True
     )
 
     if config.init_weights:

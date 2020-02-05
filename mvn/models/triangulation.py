@@ -10,7 +10,7 @@ from torch import nn
 
 from mvn.utils import op, multiview, img, misc, volumetric
 
-from mvn.models import pose_resnet
+from mvn.models import pose_resnet, pose_hrnet
 from mvn.models.v2v import V2VModel
 
 
@@ -221,6 +221,8 @@ class VolumetricTriangulationNet(nn.Module):
         # heatmap
         self.heatmap_softmax = config.model.heatmap_softmax
         self.heatmap_multiplier = config.model.heatmap_multiplier
+        self.volume_features_dim = config.model.volume_features_dim if hasattr(config.model, 'volume_features_dim') else 32
+        self.backbone_features_dim = config.model.backbone.backbone_features_dim if hasattr(config.model.backbone, 'backbone_features_dim') else 256
 
         # transfer
         self.transfer_cmu_to_human36m = config.model.transfer_cmu_to_human36m if hasattr(config.model, "transfer_cmu_to_human36m") else False
@@ -231,14 +233,21 @@ class VolumetricTriangulationNet(nn.Module):
         if self.volume_aggregation_method.startswith('conf'):
             config.model.backbone.vol_confidences = True
 
-        self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
+        if config.model.backbone.name in ['hrnet32', 'hrnet48']:
+            self.backbone = pose_hrnet.get_pose_net(config.model.backbone, device=device)
+        elif config.model.backbone.name in ['resnet152', 'resnet50']:    
+            self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
 
-        if config.model.backbone.return_heatmaps:
+        if not config.model.backbone.return_heatmaps:
             for p in self.backbone.final_layer.parameters():
                 p.requires_grad = False
 
+        # if config.model.backbone.return_heatmaps:
+        #     for p in self.backbone.final_layer.parameters():
+        #         p.requires_grad = False
+
         self.process_features = nn.Sequential(
-            nn.Conv2d(256, 32, 1)
+            nn.Conv2d(self.backbone_features_dim, self.volume_features_dim, 1)
         )
 
         self.volume_net = V2VModel(32, self.num_joints)
@@ -252,22 +261,19 @@ class VolumetricTriangulationNet(nn.Module):
         images = images.view(-1, *images.shape[2:])
 
         # forward backbone
-        heatmaps, features, _, vol_confidences, _ = self.backbone(images)
+        _, features, _, vol_confidences, _ = self.backbone(images)
 
         current_memory = torch.cuda.memory_allocated()
-        print ('after bckbn', current_memory/(1024**2))
         
         # reshape back
         images = images.view(batch_size, n_views, *images.shape[1:])
-        heatmaps = heatmaps.view(batch_size, n_views, *heatmaps.shape[1:])
         features = features.view(batch_size, n_views, *features.shape[1:])
 
         if vol_confidences is not None:
             vol_confidences = vol_confidences.view(batch_size, n_views, *vol_confidences.shape[1:])
 
         # calcualte shapes
-        image_shape, heatmap_shape = tuple(images.shape[3:]), tuple(heatmaps.shape[3:])
-        n_joints = heatmaps.shape[2]
+        image_shape, features_shape = tuple(images.shape[3:]), tuple(features.shape[3:])
 
         # norm vol confidences
         if self.volume_aggregation_method == 'conf_norm':
@@ -277,7 +283,7 @@ class VolumetricTriangulationNet(nn.Module):
         new_cameras = deepcopy(batch['cameras'])
         for view_i in range(n_views):
             for batch_i in range(batch_size):
-                new_cameras[view_i][batch_i].update_after_resize(image_shape, heatmap_shape)
+                new_cameras[view_i][batch_i].update_after_resize(image_shape, features_shape)
 
         proj_matricies = torch.stack([torch.stack([torch.from_numpy(camera.projection) for camera in camera_batch], dim=0) for camera_batch in new_cameras], dim=0).transpose(1, 0)  # shape (batch_size, n_views, 3, 4)
         proj_matricies = proj_matricies.float().to(device)

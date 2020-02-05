@@ -108,3 +108,7 @@ data/
 
 # data
 videos
+*.npy
+
+# other repos
+pytorch_convolutional_rnn

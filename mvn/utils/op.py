@@ -6,6 +6,8 @@ import torch.nn.functional as F
 
 from mvn.utils.img import to_numpy, to_torch
 from mvn.utils import multiview, volumetric
+from IPython.core.debugger import set_trace
+
 
 
 def get_coord_volumes(kind, 
@@ -220,8 +222,7 @@ def unproject_heatmaps(heatmaps, proj_matricies, coord_volumes, volume_aggregati
             grid_coord_proj_transformed = torch.zeros_like(grid_coord_proj)
             grid_coord_proj_transformed[:, 0] = 2 * (grid_coord_proj[:, 0] / heatmap_shape[0] - 0.5)
             grid_coord_proj_transformed[:, 1] = 2 * (grid_coord_proj[:, 1] / heatmap_shape[1] - 0.5)
-            grid_coord_proj = grid_coord_proj_transformed
-
+            grid_coord_proj = grid_coord_proj_transformed # [N,2]
             # prepare to F.grid_sample
             grid_coord_proj = grid_coord_proj.unsqueeze(1).unsqueeze(0)
             current_volume = F.grid_sample(heatmap, grid_coord_proj)
