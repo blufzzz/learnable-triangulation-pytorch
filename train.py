@@ -273,16 +273,12 @@ def one_epoch(model,
 
                 elif model_type == "vol_temporal_adain":
                     (keypoints_3d_pred, 
-                     keypoints_3d_pred_fr, 
-                     features_pred, 
-                     features_pred_fr, 
-                     volumes_pred, 
-                     volumes_pred_fr, 
-                     confidences_pred, 
-                     cuboids_pred, 
-                     coord_volumes_pred, 
-                     base_points_pred,
-                     style_vector) = model(images_batch, batch)    
+                    features_pred, 
+                    volumes_pred, 
+                    confidences_pred, 
+                    cuboids_pred, 
+                    coord_volumes_pred, 
+                    base_points_pred) = model(images_batch, batch)  
 
                 else:
                     (keypoints_3d_pred, 
@@ -611,12 +607,13 @@ def main(args):
                 [{'params': model.backbone.parameters()},
                  {'params': model.process_features.parameters(), 'lr': config.opt.process_features_lr if hasattr(config.opt, "process_features_lr") else config.opt.lr},
                  {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr},
-                 {'params': model.encoder.parameters(), 'lr': config.opt.encoder_lr if hasattr(config.opt, "encoder_lr") else config.opt.lr},
                  {'params': model.features_sequence_to_vector.parameters(), 'lr': config.opt.features_sequence_to_vector_lr if hasattr(config.opt, "features_sequence_to_vector_lr") else config.opt.lr},
-                 {'params': model.affine_mappings.parameters(), 'lr': config.opt.affine_mappings_lr if hasattr(config.opt, "affine_mappings_lr") else config.opt.lr},
-                ] + [{'params':model.auxilary_backbone.parameters(), 'lr': config.opt.auxilary_backbone_lr if hasattr(config.opt, "auxilary_backbone_lr") else config.opt.lr}] if model.use_auxilary_backbone else [],
-                lr=config.opt.lr
-            )
+                ] + \
+                ([{'params':model.auxilary_backbone.parameters(), 'lr': config.opt.auxilary_backbone_lr if hasattr(config.opt, "auxilary_backbone_lr") else config.opt.lr}] if model.use_auxilary_backbone else []) + \
+                ([{'params': model.encoder.parameters(), 'lr': config.opt.encoder_lr if hasattr(config.opt, "encoder_lr") else config.opt.lr}] if hasattr(model, 'encoder') else []) + \
+                ([{'params': model.affine_mappings.parameters(), 'lr': config.opt.affine_mappings_lr if hasattr(config.opt, "affine_mappings_lr") else config.opt.lr}] if hasattr(model, 'affine_mappings') else []),
+                lr=config.opt.lr) 
+                
         elif config.model.name == "vol_temporal_fr_adain":
             opt = torch.optim.Adam(
                 [{'params': model.backbone.parameters()},

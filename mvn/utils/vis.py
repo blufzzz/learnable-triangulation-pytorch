@@ -199,6 +199,8 @@ def visualize_batch(images_batch,
     return fig_image
 
 
+
+
 def visualize_heatmaps(images_batch, 
                        heatmaps_batch,
                        kind="cmu",

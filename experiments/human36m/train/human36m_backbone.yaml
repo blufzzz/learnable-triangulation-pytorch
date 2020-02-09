@@ -1,0 +1,121 @@
+title: "human36m_vol_temporal_fr_adain_softmax"
+kind: "human36m"
+vis_freq: 100
+vis_n_elements: 10
+
+opt:
+  n_objects_per_epoch: 15000
+  n_epochs: 9999
+
+  batch_size: 5
+  val_batch_size: 5
+
+  lr: 0.0001
+
+backbone:
+  name: "hrnet32"  
+
+  init_weights: true
+  checkpoint: "./data/pose_hrnet_w32_384x288.pth"
+
+  NUM_JOINTS: 17
+  IMAGE_SIZE:
+  - 384
+  - 384
+  HEATMAP_SIZE:
+  - 96
+  - 96
+  SIGMA: 3
+  EXTRA:
+    PRETRAINED_LAYERS:
+    - 'conv1'
+    - 'bn1'
+    - 'conv2'
+    - 'bn2'
+    - 'layer1'
+    - 'transition1'
+    - 'stage2'
+    - 'transition2'
+    - 'stage3'
+    - 'transition3'
+    - 'stage4'
+    FINAL_CONV_KERNEL: 1
+    STAGE2:
+      NUM_MODULES: 1
+      NUM_BRANCHES: 2
+      BLOCK: BASIC
+      NUM_BLOCKS:
+      - 4
+      - 4
+      NUM_CHANNELS:
+      - 32
+      - 64
+      FUSE_METHOD: SUM
+    STAGE3:
+      NUM_MODULES: 4
+      NUM_BRANCHES: 3
+      BLOCK: BASIC
+      NUM_BLOCKS:
+      - 4
+      - 4
+      - 4
+      NUM_CHANNELS:
+      - 32
+      - 64
+      - 128
+      FUSE_METHOD: SUM
+    STAGE4:
+      NUM_MODULES: 3
+      NUM_BRANCHES: 4
+      BLOCK: BASIC
+      NUM_BLOCKS:
+      - 4
+      - 4
+      - 4
+      - 4
+      NUM_CHANNELS:
+      - 32
+      - 64
+      - 128
+      - 256
+      FUSE_METHOD: SUM   
+
+
+dataset:
+  kind: "human36m"
+  singleview: false
+
+  train:
+    h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"
+    labels_path: "/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy"
+    pred_results_path: 
+
+    with_damaged_actions: false
+    undistort_images: false
+
+    scale_bbox: 1.0
+
+    shuffle: true
+    randomize_n_views: false
+    min_n_views: 4
+    max_n_views: 4
+    num_workers: 8
+
+  val:
+    pivot_type: 'first'
+    h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"
+    labels_path: "/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy"
+    pred_results_path: 
+
+    with_damaged_actions: false
+    undistort_images: false
+
+    scale_bbox: 1.0
+
+    shuffle: false
+    randomize_n_views: false
+    min_n_views: 4
+    max_n_views: 4
+    num_workers: 8
+
+    retain_every_n_frames_in_test: 30

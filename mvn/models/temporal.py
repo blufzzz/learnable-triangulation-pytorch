@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import torch
 from IPython.core.debugger import set_trace
 from torchvision import models
-
+from pytorch_convolutional_rnn.convolutional_rnn import Conv2dLSTM, Conv2dPeepholeLSTM
 
 class Slice(nn.Module):
     def __init__(self, shift):
@@ -127,6 +127,39 @@ class TemporalDiscriminator(nn.Module):
         return self.softmax(self.linear(x.squeeze(-1)))
 
 
+class Seq2VecRNN2D(nn.Module):
+    """docstring for Seq2VecRNN"""
+    def __init__(self, input_features_dim, output_features_dim=64, hidden_dim = 64):
+        super(Seq2VecRNN2D, self).__init__()
+        self.input_features_dim = input_features_dim
+        self.output_features_dim = output_features_dim
+        self.hidden_dim = hidden_dim
+        self.bidirectional = True
+        
+        self.lstm = Conv2dLSTM(in_channels=input_features_dim,  # Corresponds to input size
+                                   out_channels=hidden_dim,  # Corresponds to hidden size
+                                   kernel_size=3,  # Int or List[int]
+                                   num_layers=2,
+                                   bidirectional=self.bidirectional,
+                                   dilation=1, 
+                                   stride=1,
+                                   dropout=0.2,
+                                   batch_first=True)
+
+        self.output_layer = nn.Conv2d(2*self.hidden_dim if self.bidirectional else self.hidden_dim,
+                                      self.output_features_dim, kernel_size=1)
+        self.activation = nn.ReLU()
+        
+    def forward(self, features, eps = 1e-3, device='cuda:0'):
+        # [bathc_size, dt, feature_shape]
+        batch_size = features.shape[0]
+        output, _ = self.lstm(features, None)
+        output = output[:,-1,...]
+        output = self.activation(self.output_layer(output))
+        return output
+
+
+
 class Seq2VecCNN(nn.Module):
     """docstring for Seq2VecCNN"""
     def __init__(self, 
@@ -167,7 +200,6 @@ class Seq2VecCNN(nn.Module):
         x  = self.final_block(x)
         
         return x[...,0]
-
 
 
 class Seq2VecRNN(nn.Module):

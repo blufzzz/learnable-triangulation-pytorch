@@ -1,9 +1,12 @@
 #!/bin/bash
-# srun -p TitanBlack --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-03 \
-srun -p TitanBlack --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-04 \
-python3.6 train.py \
---logdir=../logs/adain_aux \
---config=./experiments/human36m/train/human36m_vol_temporal_adain_aux_backbone.yaml \
---experiment_comment="h36_sv64_dist_adain-lstm-all-group-ada_s256_f2v-backbone-aux50-152-C2-1024_dt-8_dil-3-1-1_lr-1e-4"
+srun -p TitanBlack --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-05 \
+python3.6 train_backbone.py \
+--logdir=../logs/backbone \
+--config=./experiments/human36m/train/human36m_backbone.yaml \
+--experiment_comment="h36_sv64_dist_hrnet32_pretr-coco_S-3_10-10_lr-1e-4"
 
-#--experiment_comment="h36_sv64_dist_adain-lstm-middle_f2v-densenet-pretr-1024_dt-8_dil-3_bs-1-1_lr-1e-4"
+
+# python3.6 train.py \
+# --logdir=../logs/adain_2d_encoder \
+# --config=./experiments/human36m/train/human36m_vol_temporal_adain_2d.yaml \
+# --experiment_comment="h36_sv64_dist_adain-lstm2d-sum32-group-ada_resnet50-152_dt-8_dil-3-1-1_lr-1e-4"

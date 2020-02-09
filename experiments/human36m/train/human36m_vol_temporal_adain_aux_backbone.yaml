@@ -31,16 +31,16 @@ model:
   kind: "mpii"
   volume_aggregation_method: "no_aggregation"
   f2v_type: 'lstm'
-  adain_type: 'all' # if 'all' then normalization_type: 'adain' or 'ada-group_norm'
+  adain_type: 'all_v2' # if 'all' then normalization_type: 'adain' or 'ada-group_norm'
   encoder_type: "backbone"
   pretrained_encoder: false
-  volume_features_dim: 32 #32
-  intermediate_channels: 512
+  volume_features_dim: 128 #32
+  intermediate_channels: 1024
   encoded_feature_space: 1024
   style_vector_dim: 256 #256
   encoder_capacity_multiplier: 2
   kernel_size: 3 #3
-  include_pivot: false # including pivot getting thigs worse
+  include_pivot: false # including pivot getting things worse
   style_grad_for_backbone: true
   normalization_type: 'group-ada_norm' #'ada-group_norm'
 

@@ -137,11 +137,7 @@ model:
 
 dataset:
   kind: "human36m"
-  dt: 8
-  dilation: 3
-  singleview: true
-  pivot_type: 'first'
-  # dilation_type: 'square'
+  singleview: false
 
   train:
     h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"

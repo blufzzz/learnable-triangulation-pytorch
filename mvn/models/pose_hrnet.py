@@ -270,7 +270,7 @@ blocks_dict = {
 
 class PoseHighResolutionNet(nn.Module):
 
-    def __init__(self, cfg, device):
+    def __init__(self, cfg, device='cuda:0'):
         self.inplanes = 64
         extra = cfg.EXTRA
         super(PoseHighResolutionNet, self).__init__()
@@ -492,7 +492,7 @@ class PoseHighResolutionNet(nn.Module):
 
 
 def get_pose_net(cfg, device):
-    model = PoseHighResolutionNet(cfg, device)
+    model = PoseHighResolutionNet(cfg)
 
     if cfg.init_weights:
         model.init_weights(cfg.checkpoint, device)
