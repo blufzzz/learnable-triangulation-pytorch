@@ -474,7 +474,16 @@ def main(args):
         if train_sampler is not None:
             train_sampler.set_epoch(epoch)
 
-        print ('EPOCH', epoch)    
+        print ('EPOCH', epoch)
+
+        if master:
+            checkpoint_path = os.path.join(experiment_dir, "latest_checkpoint.pth")
+            dict_to_save = {'model_state': backbone.state_dict(),
+                            'opt_state' : opt.state_dict(),
+                            "epoch": epoch}
+            torch.save(dict_to_save, checkpoint_path)
+
+
         n_iters_total_train = one_epoch(backbone,
                                         opt, 
                                         config, 
@@ -499,14 +508,7 @@ def main(args):
                                       experiment_dir=experiment_dir, 
                                       writer=writer)
 
-        if master:
-            checkpoint_dir = os.path.join(experiment_dir, "latest_checkpoint.pth")
-            os.makedirs(checkpoint_dir, exist_ok=True)
-            dict_to_save = {'model_state': backbone.state_dict(),
-                            'opt_state' : opt.state_dict(),
-                            "epoch": epoch}
-                            
-            torch.save(dict_to_save, checkpoint_dir)
+
 
         print(f"{n_iters_total_train} iters done, Epoch: {epoch}.")
 

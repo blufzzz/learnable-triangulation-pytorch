@@ -62,7 +62,7 @@ class GroupAdaNorm(nn.Module):
         return x        
 
 
-def get_normalization(normalization_type, out_planes, n_groups):
+def get_normalization(normalization_type, out_planes, n_groups=32):
     if normalization_type == 'adain':
         return AdaIN()
     elif normalization_type ==  'batch_norm':
@@ -98,7 +98,7 @@ class Basic3DBlock(nn.Module):
 
 
 class Res3DBlock(nn.Module):
-    def __init__(self, in_planes, out_planes, normalization_type, n_groups=32):
+    def __init__(self, in_planes, out_planes, normalization_type, kernel_size=3, n_groups=32, padding=1):
         super(Res3DBlock, self).__init__()
 
         self.normalization_type = normalization_type
@@ -106,8 +106,8 @@ class Res3DBlock(nn.Module):
         self.res_norm1 = get_normalization(normalization_type, out_planes, n_groups)
         self.res_norm2 = get_normalization(normalization_type, out_planes, n_groups)
 
-        self.res_conv1 = nn.Conv3d(in_planes, out_planes, kernel_size=3, stride=1, padding=1)
-        self.res_conv2 = nn.Conv3d(out_planes, out_planes, kernel_size=3, stride=1, padding=1)
+        self.res_conv1 = nn.Conv3d(in_planes, out_planes, kernel_size=kernel_size, stride=1, padding=padding)
+        self.res_conv2 = nn.Conv3d(out_planes, out_planes, kernel_size=kernel_size, stride=1, padding=padding)
         
         self.activation = nn.ReLU(True)
 
@@ -145,7 +145,7 @@ class Pool3DBlock(nn.Module):
 
 class Upsample3DBlock(nn.Module):
     def __init__(self, in_planes, out_planes, kernel_size, stride, normalization_type, n_groups=32):
-        super(Upsample3DBlock, self).__init__()
+        super().__init__()
         assert(kernel_size == 2)
         assert(stride == 2)
         self.normalization_type = normalization_type
@@ -178,13 +178,13 @@ class EncoderDecorder(nn.Module):
         self.encoder_res3 = Res3DBlock(128, 128, normalization_type)
         self.encoder_pool4 = Pool3DBlock(2)
         self.encoder_res4 = Res3DBlock(128, 128, normalization_type)
-        self.encoder_pool5 = Pool3DBlock(2)
+        # self.encoder_pool5 = Pool3DBlock(2)
         self.encoder_res5 = Res3DBlock(128, 128, normalization_type)
 
         self.mid_res = Res3DBlock(128, 128, normalization_type)
 
         self.decoder_res5 = Res3DBlock(128, 128, normalization_type)
-        self.decoder_upsample5 = Upsample3DBlock(128, 128, 2, 2, normalization_type)
+        # self.decoder_upsample5 = Upsample3DBlock(128, 128, 2, 2, normalization_type)
         self.decoder_res4 = Res3DBlock(128, 128, normalization_type)
         self.decoder_upsample4 = Upsample3DBlock(128, 128, 2, 2, normalization_type)
         self.decoder_res3 = Res3DBlock(128, 128, normalization_type)
@@ -214,13 +214,13 @@ class EncoderDecorder(nn.Module):
         x = self.encoder_pool4(x)
         x = self.encoder_res4(x, params[16:18])
         skip_x5 = self.skip_res5(x, params[18:20])
-        x = self.encoder_pool5(x)
+        # x = self.encoder_pool5(x)
         x = self.encoder_res5(x, params[20:22]) 
 
         x = self.mid_res(x, params[22:24])
 
         x = self.decoder_res5(x, params[24:26])
-        x = self.decoder_upsample5(x, params[26])
+        # x = self.decoder_upsample5(x, params[26])
         x = x + skip_x5
         x = self.decoder_res4(x, params[27:29])
         x = self.decoder_upsample4(x, params[29])
@@ -426,7 +426,6 @@ class EncoderDecorder_v2(nn.Module):
         x = x + skip_x1
 
         return x
-
 
 
 class V2VModel_v2(nn.Module):

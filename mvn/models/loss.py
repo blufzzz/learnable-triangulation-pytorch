@@ -101,7 +101,7 @@ class VolumetricCELoss(nn.Module):
 
             for joint_i, index in enumerate(min_indexes):
                 validity = keypoints_binary_validity[batch_i, joint_i]
-                loss += validity[0] * (-torch.log(volumes_batch_pred[batch_i, joint_i, index[0], index[1], index[2]] + 1e-6))
+                loss += validity[0] * (-torch.log(volumes_batch_pred[batch_i, joint_i, index[0], index[1], index[2]] + 1e-5))
                 n_losses += 1
 
 

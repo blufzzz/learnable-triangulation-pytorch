@@ -22,7 +22,7 @@ opt:
   volume_net_lr: 0.001
 
   scale_keypoints_3d: 0.1
-
+  
 model:
   name: "vol"
   kind: "mpii"
@@ -49,13 +49,13 @@ model:
     name: "hrnet32"  
 
     init_weights: true
-    checkpoint: "./data/pose_hrnet_w32_384x288.pth"
+    checkpoint: '../logs/backbone/h36_sv64_dist_hrnet32_pretr-coco_S-2_5-5_lr-1e-5@09.02.2020-15:38:51/latest_checkpoint.pth'  #"./data/pose_hrnet_w32_384x288.pth"
 
     backbone_features_dim: 32
 
     alg_confidences: false
     vol_confidences: false
-    return_heatmaps: false
+    return_heatmaps: true
     return_bottleneck: false  
 
     NUM_JOINTS: 17

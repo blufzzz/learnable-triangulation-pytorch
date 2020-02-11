@@ -238,13 +238,9 @@ class VolumetricTriangulationNet(nn.Module):
         elif config.model.backbone.name in ['resnet152', 'resnet50']:    
             self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
 
-        if not config.model.backbone.return_heatmaps:
+        if config.model.backbone.return_heatmaps:
             for p in self.backbone.final_layer.parameters():
                 p.requires_grad = False
-
-        # if config.model.backbone.return_heatmaps:
-        #     for p in self.backbone.final_layer.parameters():
-        #         p.requires_grad = False
 
         self.process_features = nn.Sequential(
             nn.Conv2d(self.backbone_features_dim, self.volume_features_dim, 1)

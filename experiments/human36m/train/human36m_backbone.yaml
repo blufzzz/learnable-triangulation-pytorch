@@ -10,7 +10,7 @@ opt:
   batch_size: 5
   val_batch_size: 5
 
-  lr: 0.0001
+  lr: 0.00001
 
 backbone:
   name: "hrnet32"  
@@ -25,7 +25,7 @@ backbone:
   HEATMAP_SIZE:
   - 96
   - 96
-  SIGMA: 3
+  SIGMA: 2
   EXTRA:
     PRETRAINED_LAYERS:
     - 'conv1'

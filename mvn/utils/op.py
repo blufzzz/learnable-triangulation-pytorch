@@ -178,7 +178,7 @@ def integrate_tensor_3d(volumes, softmax=True):
 def integrate_tensor_3d_with_coordinates(volumes, coord_volumes, softmax=True):
     batch_size, n_volumes, x_size, y_size, z_size = volumes.shape
 
-    volumes = volumes.reshape((batch_size, n_volumes, -1))
+    volumes = volumes.reshape((batch_size, n_volumes, -1)) + 1e-5
     if softmax:
         volumes = nn.functional.softmax(volumes, dim=2)
     else:

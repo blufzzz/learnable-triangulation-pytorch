@@ -25,13 +25,17 @@ def conv3x3(in_planes, out_planes, stride=1):
 class BasicBlock(nn.Module):
     expansion = 1
 
-    def __init__(self, inplanes, planes, stride=1, downsample=None):
+    def __init__(self, inplanes, planes, stride=1, downsample=None, group_norm=False, n_groups=32):
+        self.group_norm = group_norm
+        self.n_groups = n_groups
         super(BasicBlock, self).__init__()
         self.conv1 = conv3x3(inplanes, planes, stride)
-        self.bn1 = nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
+        self.bn1 = nn.GroupNorm(self.n_groups, planes) if self.group_norm else \
+                   nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = conv3x3(planes, planes)
-        self.bn2 = nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
+        self.bn2 = nn.GroupNorm(self.n_groups, planes) if self.group_norm else \
+                   nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
         self.downsample = downsample
         self.stride = stride
 
@@ -57,17 +61,24 @@ class BasicBlock(nn.Module):
 class Bottleneck(nn.Module):
     expansion = 4
 
-    def __init__(self, inplanes, planes, stride=1, downsample=None):
+    def __init__(self, inplanes, planes, stride=1, downsample=None, group_norm=False, n_groups=32):
         super(Bottleneck, self).__init__()
+        self.group_norm = group_norm
+        self.n_groups = n_groups
         self.conv1 = nn.Conv2d(inplanes, planes, kernel_size=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
-        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride,
-                               padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
-        self.conv3 = nn.Conv2d(planes, planes * self.expansion, kernel_size=1,
-                               bias=False)
-        self.bn3 = nn.BatchNorm2d(planes * self.expansion,
-                                  momentum=BN_MOMENTUM)
+        self.bn1 = nn.GroupNorm(self.n_groups, planes) if self.group_norm else \
+                   nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
+
+        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride,padding=1, bias=False)
+
+        self.bn2 = nn.GroupNorm(self.n_groups, planes) if self.group_norm else \
+                   nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
+
+        self.conv3 = nn.Conv2d(planes, planes * self.expansion, kernel_size=1,bias=False)
+
+        self.bn3 = nn.GroupNorm(self.n_groups, planes * self.expansion) if self.group_norm else \
+                   nn.BatchNorm2d(planes * self.expansion, momentum=BN_MOMENTUM)
+
         self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
         self.stride = stride
@@ -97,8 +108,12 @@ class Bottleneck(nn.Module):
 
 class HighResolutionModule(nn.Module):
     def __init__(self, num_branches, blocks, num_blocks, num_inchannels,
-                 num_channels, fuse_method, multi_scale_output=True):
+                 num_channels, fuse_method, multi_scale_output=True,
+                 group_norm=False, n_groups=32):
+
         super(HighResolutionModule, self).__init__()
+        self.group_norm = group_norm
+        self.n_groups = n_groups
         self._check_branches(
             num_branches, blocks, num_blocks, num_inchannels, num_channels)
 
@@ -144,6 +159,7 @@ class HighResolutionModule(nn.Module):
                     num_channels[branch_index] * block.expansion,
                     kernel_size=1, stride=stride, bias=False
                 ),
+                nn.GroupNorm(self.n_groups, num_channels[branch_index] * block.expansion) if self.group_norm else \
                 nn.BatchNorm2d(
                     num_channels[branch_index] * block.expansion,
                     momentum=BN_MOMENTUM
@@ -156,7 +172,8 @@ class HighResolutionModule(nn.Module):
                 self.num_inchannels[branch_index],
                 num_channels[branch_index],
                 stride,
-                downsample
+                downsample,
+                group_norm=self.group_norm
             )
         )
         self.num_inchannels[branch_index] = \
@@ -165,7 +182,8 @@ class HighResolutionModule(nn.Module):
             layers.append(
                 block(
                     self.num_inchannels[branch_index],
-                    num_channels[branch_index]
+                    num_channels[branch_index],
+                    group_norm=self.group_norm
                 )
             )
 
@@ -199,6 +217,7 @@ class HighResolutionModule(nn.Module):
                                 num_inchannels[i],
                                 1, 1, 0, bias=False
                             ),
+                            nn.GroupNorm(self.n_groups, num_inchannels[i]) if self.group_norm else \
                             nn.BatchNorm2d(num_inchannels[i]),
                             nn.Upsample(scale_factor=2**(j-i), mode='nearest')
                         )
@@ -217,6 +236,7 @@ class HighResolutionModule(nn.Module):
                                         num_outchannels_conv3x3,
                                         3, 2, 1, bias=False
                                     ),
+                                    nn.GroupNorm(self.n_groups, num_outchannels_conv3x3) if self.group_norm else \
                                     nn.BatchNorm2d(num_outchannels_conv3x3)
                                 )
                             )
@@ -229,6 +249,7 @@ class HighResolutionModule(nn.Module):
                                         num_outchannels_conv3x3,
                                         3, 2, 1, bias=False
                                     ),
+                                    nn.GroupNorm(self.n_groups, num_outchannels_conv3x3) if self.group_norm else \
                                     nn.BatchNorm2d(num_outchannels_conv3x3),
                                     nn.ReLU(True)
                                 )
@@ -270,18 +291,21 @@ blocks_dict = {
 
 class PoseHighResolutionNet(nn.Module):
 
-    def __init__(self, cfg, device='cuda:0'):
+    def __init__(self, cfg, device='cuda:0', group_norm=False, n_groups=32):
         self.inplanes = 64
         extra = cfg.EXTRA
         super(PoseHighResolutionNet, self).__init__()
 
+        self.n_groups = n_groups
+        self.group_norm = group_norm
+
         # stem net
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1,
                                bias=False)
-        self.bn1 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
+        self.bn1 = nn.GroupNorm(self.n_groups, 64) if self.group_norm else nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
         self.conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1,
                                bias=False)
-        self.bn2 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
+        self.bn2 = nn.GroupNorm(self.n_groups, 64) if self.group_norm else nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
         self.relu = nn.ReLU(inplace=True)
         self.layer1 = self._make_layer(Bottleneck, 64, 4)
 
@@ -317,13 +341,14 @@ class PoseHighResolutionNet(nn.Module):
         self.stage4, pre_stage_channels = self._make_stage(
             self.stage4_cfg, num_channels, multi_scale_output=False)
 
-        self.final_layer = nn.Conv2d(
-            in_channels=pre_stage_channels[0],
-            out_channels=cfg.NUM_JOINTS,
-            kernel_size=extra.FINAL_CONV_KERNEL,
-            stride=1,
-            padding=1 if extra.FINAL_CONV_KERNEL == 3 else 0
-        )
+        if cfg.return_heatmaps:
+            self.final_layer = nn.Conv2d(
+                in_channels=pre_stage_channels[0],
+                out_channels=cfg.NUM_JOINTS,
+                kernel_size=extra.FINAL_CONV_KERNEL,
+                stride=1,
+                padding=1 if extra.FINAL_CONV_KERNEL == 3 else 0
+            )
 
         self.pretrained_layers = cfg['EXTRA']['PRETRAINED_LAYERS']
 
@@ -343,6 +368,7 @@ class PoseHighResolutionNet(nn.Module):
                                 num_channels_cur_layer[i],
                                 3, 1, 1, bias=False
                             ),
+                            nn.GroupNorm(self.n_groups, num_channels_cur_layer[i]) if self.group_norm else \
                             nn.BatchNorm2d(num_channels_cur_layer[i]),
                             nn.ReLU(inplace=True)
                         )
@@ -360,6 +386,7 @@ class PoseHighResolutionNet(nn.Module):
                             nn.Conv2d(
                                 inchannels, outchannels, 3, 2, 1, bias=False
                             ),
+                            nn.GroupNorm(self.n_groups, outchannels) if self.group_norm else \
                             nn.BatchNorm2d(outchannels),
                             nn.ReLU(inplace=True)
                         )
@@ -376,14 +403,15 @@ class PoseHighResolutionNet(nn.Module):
                     self.inplanes, planes * block.expansion,
                     kernel_size=1, stride=stride, bias=False
                 ),
+                nn.GroupNorm(self.n_groups, planes * block.expansion) if self.group_norm else \
                 nn.BatchNorm2d(planes * block.expansion, momentum=BN_MOMENTUM),
             )
 
         layers = []
-        layers.append(block(self.inplanes, planes, stride, downsample))
+        layers.append(block(self.inplanes, planes, stride, downsample, group_norm=self.group_norm))
         self.inplanes = planes * block.expansion
         for i in range(1, blocks):
-            layers.append(block(self.inplanes, planes))
+            layers.append(block(self.inplanes, planes, group_norm=self.group_norm))
 
         return nn.Sequential(*layers)
 
@@ -412,7 +440,8 @@ class PoseHighResolutionNet(nn.Module):
                     num_inchannels,
                     num_channels,
                     fuse_method,
-                    reset_multi_scale_output
+                    reset_multi_scale_output,
+                    group_norm=self.group_norm
                 )
             )
             num_inchannels = modules[-1].get_num_inchannels()
@@ -452,48 +481,48 @@ class PoseHighResolutionNet(nn.Module):
                 x_list.append(y_list[i])
         y_list = self.stage4(x_list)
 
-        x = self.final_layer(y_list[0])
+        x = None
+        if hasattr(self, 'final_layer'):
+            x = self.final_layer(y_list[0])
 
         # heatmaps, features, alg_confidences, vol_confidences, bottleneck
         return x, y_list[0],  None, None, None
 
-    def init_weights(self, pretrained, device):
-        print('=> init weights from normal distribution')
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                # nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                nn.init.normal_(m.weight, std=0.001)
-                for name, _ in m.named_parameters():
-                    if name in ['bias']:
-                        nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.ConvTranspose2d):
-                nn.init.normal_(m.weight, std=0.001)
-                for name, _ in m.named_parameters():
-                    if name in ['bias']:
-                        nn.init.constant_(m.bias, 0)
+    def init_weights(self, checkpoint, device):
 
-        if os.path.isfile(pretrained):
-            pretrained_state_dict = torch.load(pretrained, map_location=device)
-            print('=> loading pretrained model {}'.format(pretrained))
-
-            need_init_state_dict = {}
-            for name, m in pretrained_state_dict.items():
-                if name.split('.')[0] in self.pretrained_layers \
-                   or self.pretrained_layers[0] is '*':
-                    need_init_state_dict[name] = m
-            self.load_state_dict(need_init_state_dict, strict=False)
+        if os.path.isfile(checkpoint):
+            pretrained_state_dict = torch.load(checkpoint, map_location=device)
+            print('=> loading pretrained model {}'.format(checkpoint))
+            pretrained_state_dict = pretrained_state_dict['model_state']            
+            # need_init_state_dict = {}
+            # for name, m in pretrained_state_dict.items():
+            #     if name.split('.')[0] in self.pretrained_layers \
+            #        or self.pretrained_layers[0] is '*':
+            #         need_init_state_dict[name] = m
+            self.load_state_dict(pretrained_state_dict, strict=True)
 
         else:
-            print('=> please download pre-trained models first!')
-            raise ValueError('{} is not exist!'.format(pretrained))
+            print('=> init weights from normal distribution')
+            for m in self.modules():
+                if isinstance(m, nn.Conv2d):
+                    # nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                    nn.init.normal_(m.weight, std=0.001)
+                    for name, _ in m.named_parameters():
+                        if name in ['bias']:
+                            nn.init.constant_(m.bias, 0)
+                elif isinstance(m, nn.BatchNorm2d):
+                    nn.init.constant_(m.weight, 1)
+                    nn.init.constant_(m.bias, 0)
+                elif isinstance(m, nn.ConvTranspose2d):
+                    nn.init.normal_(m.weight, std=0.001)
+                    for name, _ in m.named_parameters():
+                        if name in ['bias']:
+                            nn.init.constant_(m.bias, 0)
 
+        
 
-def get_pose_net(cfg, device):
-    model = PoseHighResolutionNet(cfg)
-
+def get_pose_net(cfg, device, group_norm=True):
+    model = PoseHighResolutionNet(cfg, group_norm=group_norm)
     if cfg.init_weights:
         model.init_weights(cfg.checkpoint, device)
 

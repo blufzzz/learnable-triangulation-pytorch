@@ -109,6 +109,9 @@ data/
 # data
 videos
 *.npy
+error_log.txt
 
 # other repos
 pytorch_convolutional_rnn
+backup
+

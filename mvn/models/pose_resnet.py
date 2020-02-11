@@ -25,13 +25,13 @@ def conv3x3(in_planes, out_planes, stride=1):
 class BasicBlock(nn.Module):
     expansion = 1
 
-    def __init__(self, inplanes, planes, stride=1, downsample=None):
+    def __init__(self, inplanes, planes, stride=1, downsample=None, group_norm=False, n_groups=32):
         super(BasicBlock, self).__init__()
         self.conv1 = conv3x3(inplanes, planes, stride)
-        self.bn1 = nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
+        self.bn1 = nn.GroupNorm(n_groups, planes) if group_norm else nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = conv3x3(planes, planes)
-        self.bn2 = nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
+        self.bn2 = nn.GroupNorm(n_groups, planes) if group_norm else nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
         self.downsample = downsample
         self.stride = stride
 
@@ -57,17 +57,16 @@ class BasicBlock(nn.Module):
 class Bottleneck(nn.Module):
     expansion = 4
 
-    def __init__(self, inplanes, planes, stride=1, downsample=None):
+    def __init__(self, inplanes, planes, stride=1, downsample=None, group_norm=False, n_groups=32):
         super(Bottleneck, self).__init__()
         self.conv1 = nn.Conv2d(inplanes, planes, kernel_size=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
+        self.bn1 = nn.GroupNorm(n_groups, planes) if group_norm else nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
         self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride,
                                padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
+        self.bn2 = nn.GroupNorm(n_groups, planes) if group_norm else nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
         self.conv3 = nn.Conv2d(planes, planes * self.expansion, kernel_size=1,
                                bias=False)
-        self.bn3 = nn.BatchNorm2d(planes * self.expansion,
-                                  momentum=BN_MOMENTUM)
+        self.bn3 = nn.GroupNorm(n_groups, planes*self.expansion) if group_norm else nn.BatchNorm2d(planes * self.expansion, momentum=BN_MOMENTUM)
         self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
         self.stride = stride
@@ -98,17 +97,17 @@ class Bottleneck(nn.Module):
 class Bottleneck_CAFFE(nn.Module):
     expansion = 4
 
-    def __init__(self, inplanes, planes, stride=1, downsample=None):
+    def __init__(self, inplanes, planes, stride=1, downsample=None, group_norm=False, n_groups=32):
         super(Bottleneck_CAFFE, self).__init__()
         # add stride to conv1x1
         self.conv1 = nn.Conv2d(inplanes, planes, kernel_size=1, stride=stride, bias=False)
-        self.bn1 = nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
+        self.bn1 = nn.GroupNorm(n_groups, planes) if group_norm else  nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
         self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1,
                                padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
+        self.bn2 = nn.GroupNorm(n_groups, planes) if group_norm else  nn.BatchNorm2d(planes, momentum=BN_MOMENTUM)
         self.conv3 = nn.Conv2d(planes, planes * self.expansion, kernel_size=1,
                                bias=False)
-        self.bn3 = nn.BatchNorm2d(planes * self.expansion,
+        self.bn3 = nn.GroupNorm(n_groups, planes*self.expansion) if group_norm else  nn.BatchNorm2d(planes * self.expansion,
                                   momentum=BN_MOMENTUM)
         self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
@@ -138,17 +137,17 @@ class Bottleneck_CAFFE(nn.Module):
 
 
 class GlobalAveragePoolingHead(nn.Module):
-    def __init__(self, in_channels, n_classes):
+    def __init__(self, in_channels, n_classes, group_norm=False, n_groups=32):
         super().__init__()
 
         self.features = nn.Sequential(
             nn.Conv2d(in_channels, 512, 3, stride=1, padding=1),
-            nn.BatchNorm2d(512, momentum=BN_MOMENTUM),
+            nn.GroupNorm(n_groups, 512) if group_norm else  nn.BatchNorm2d(512, momentum=BN_MOMENTUM),
             nn.MaxPool2d(2),
             nn.ReLU(inplace=True),
 
             nn.Conv2d(512, 256, 3, stride=1, padding=1),
-            nn.BatchNorm2d(256, momentum=BN_MOMENTUM),
+            nn.GroupNorm(n_groups, 256) if group_norm else  nn.BatchNorm2d(256, momentum=BN_MOMENTUM),
             nn.MaxPool2d(2),
             nn.ReLU(inplace=True),
         )
@@ -188,6 +187,8 @@ class PoseResNet(nn.Module):
                  num_joints,
                  num_input_channels=3,
                  deconv_with_bias=False,
+                 group_norm = False,
+                 n_groups = 32,
                  num_deconv_layers=3,
                  num_deconv_filters=(256, 256, 256),
                  num_deconv_kernels=(4, 4, 4),
@@ -203,15 +204,19 @@ class PoseResNet(nn.Module):
         self.num_joints = num_joints
         self.num_input_channels = num_input_channels
         self.inplanes = 64
+        self.group_norm = group_norm
+        self.n_groups = n_groups
 
         self.deconv_with_bias = deconv_with_bias
-        self.num_deconv_layers, self.num_deconv_filters, self.num_deconv_kernels = num_deconv_layers, num_deconv_filters, num_deconv_kernels
+        (self.num_deconv_layers,
+        self.num_deconv_filters,
+        self.num_deconv_kernels) = num_deconv_layers, num_deconv_filters, num_deconv_kernels
         self.final_conv_kernel = final_conv_kernel
         self.return_bottleneck = return_bottleneck
 
         self.conv1 = nn.Conv2d(num_input_channels, 64, kernel_size=7, stride=2, padding=3,
                                bias=False)
-        self.bn1 = nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
+        self.bn1 = nn.GroupNorm(32, 64) if group_norm else nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(block, 64, layers[0])
@@ -220,10 +225,10 @@ class PoseResNet(nn.Module):
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
 
         if alg_confidences:
-            self.alg_confidences = GlobalAveragePoolingHead(512 * block.expansion, num_joints)
+            self.alg_confidences = GlobalAveragePoolingHead(512 * block.expansion, num_joints, group_norm=self.group_norm)
 
         if vol_confidences:
-            self.vol_confidences = GlobalAveragePoolingHead(512 * block.expansion, 32)
+            self.vol_confidences = GlobalAveragePoolingHead(512 * block.expansion, 32, group_norm=self.group_norm)
 
         # used for deconv layers
         if return_features:
@@ -248,14 +253,15 @@ class PoseResNet(nn.Module):
             downsample = nn.Sequential(
                 nn.Conv2d(self.inplanes, planes * block.expansion,
                           kernel_size=1, stride=stride, bias=False),
-                nn.BatchNorm2d(planes * block.expansion, momentum=BN_MOMENTUM),
+                nn.GroupNorm(self.n_groups, planes * block.expansion) if self.group_norm else \
+                 nn.BatchNorm2d(planes * block.expansion, momentum=BN_MOMENTUM),
             )
 
         layers = []
-        layers.append(block(self.inplanes, planes, stride, downsample))
+        layers.append(block(self.inplanes, planes, stride, downsample, group_norm=self.group_norm))
         self.inplanes = planes * block.expansion
         for i in range(1, blocks):
-            layers.append(block(self.inplanes, planes))
+            layers.append(block(self.inplanes, planes, group_norm=self.group_norm))
 
         return nn.Sequential(*layers)
 
@@ -293,7 +299,8 @@ class PoseResNet(nn.Module):
                     padding=padding,
                     output_padding=output_padding,
                     bias=self.deconv_with_bias))
-            layers.append(nn.BatchNorm2d(planes, momentum=BN_MOMENTUM))
+            layers.append(nn.GroupNorm(self.n_groups, planes) if self.group_norm else \
+                                       nn.BatchNorm2d(planes, momentum=BN_MOMENTUM))
             layers.append(nn.ReLU(inplace=True))
             self.inplanes = planes
 
@@ -335,7 +342,7 @@ class PoseResNet(nn.Module):
         return heatmaps, features, alg_confidences, vol_confidences, bottleneck
 
 
-def get_pose_net(config, device='cuda:0'):
+def get_pose_net(config, group_norm=False, strict=False, device='cuda:0'):
     block_class, layers = resnet_spec[config.num_layers]
     if config.style == 'caffe':
         block_class = Bottleneck_CAFFE
@@ -345,6 +352,7 @@ def get_pose_net(config, device='cuda:0'):
         layers,
         config.num_joints,
         num_input_channels=3,
+        group_norm = group_norm,
         deconv_with_bias=False,
         num_deconv_layers=3,
         num_deconv_filters=(256, 256, 256),
@@ -366,12 +374,16 @@ def get_pose_net(config, device='cuda:0'):
             pretrained_state_dict = pretrained_state_dict['state_dict']
 
         prefix = "module."
+        count_skipped_bn = 0
 
         new_pretrained_state_dict = {}
         for k, v in pretrained_state_dict.items():
             if k.replace(prefix, "") in model_state_dict and v.shape == model_state_dict[k.replace(prefix, "")].shape:
                 new_pretrained_state_dict[k.replace(prefix, "")] = v
             
+            # if k.replace(prefix, "").split('.')[2][:2] == 'bn' and group_norm:
+            #     count_skipped_bn += 1
+
             if config.return_heatmaps:
                 if k.replace(prefix, "") == "final_layer.weight":
                     print("Reiniting final layer filters:", k)
@@ -391,11 +403,12 @@ def get_pose_net(config, device='cuda:0'):
 
                     new_pretrained_state_dict[k.replace(prefix, "")] = o
 
-        not_inited_params = set(map(lambda x: x.replace(prefix, ""), pretrained_state_dict.keys())) - set(new_pretrained_state_dict.keys())
-        if len(not_inited_params) > 0:
-            print("Parameters [{}] were not inited".format(not_inited_params))
+        # not_inited_params = set(map(lambda x: x.replace(prefix, ""), pretrained_state_dict.keys())) - set(new_pretrained_state_dict.keys())
+        # if len(not_inited_params) > 0:
+        #     print("Parameters [{}] were not inited".format(not_inited_params))
 
-        model.load_state_dict(new_pretrained_state_dict, strict=False)
+        model.load_state_dict(new_pretrained_state_dict, strict=strict)
         print("Successfully loaded pretrained weights for backbone")
+        # print ("BatchNorm2d skipped:", count_skipped_bn)
 
     return model

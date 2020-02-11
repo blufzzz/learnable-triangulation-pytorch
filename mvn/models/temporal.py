@@ -4,6 +4,7 @@ import torch
 from IPython.core.debugger import set_trace
 from torchvision import models
 from pytorch_convolutional_rnn.convolutional_rnn import Conv2dLSTM, Conv2dPeepholeLSTM
+from mvn.models.v2v import Res3DBlock
 
 class Slice(nn.Module):
     def __init__(self, shift):
@@ -101,31 +102,6 @@ class Upsample2DBlock(nn.Module):
     def forward(self, x):
         return self.block(x)
 
-        
-class TemporalDiscriminator(nn.Module):
-    def __init__(self, n_blocks=10, in_features=187, out_features=256):
-        super().__init__()
-        
-        self.features=nn.Sequential(
-            nn.Conv1d(in_features, 256, 3, padding=1),
-            nn.BatchNorm1d(256),
-            nn.ReLU(True),
-            nn.Conv1d(256,256,3, padding=1),
-            nn.BatchNorm1d(256),
-            nn.ReLU(True),
-            nn.Conv1d(256,out_features,3),
-            nn.BatchNorm1d(256),
-            nn.ReLU(True))
-        self.linear=nn.Linear(out_features, 2)
-        self.softmax=nn.Softmax()
-        
-    def forward(self, x):
-        '''
-        x - input with shape [1,dt,3*J]
-        '''
-        x=self.features(x)
-        return self.softmax(self.linear(x.squeeze(-1)))
-
 
 class Seq2VecRNN2D(nn.Module):
     """docstring for Seq2VecRNN"""
@@ -157,6 +133,58 @@ class Seq2VecRNN2D(nn.Module):
         output = output[:,-1,...]
         output = self.activation(self.output_layer(output))
         return output
+
+
+class Seq2VecCNN2D(nn.Module):
+    """docstring for Seq2VecCNN2D"""
+    def __init__(self, 
+                 input_features_dim, 
+                 output_features_dim=32, 
+                 intermediate_channel = 128,
+                 normalization_type='group_norm',
+                 kernel_size = 3,
+                 dt = 8):
+        
+        super(Seq2VecCNN2D, self).__init__()
+        self.input_features_dim = input_features_dim
+        self.output_features_dim = output_features_dim
+        self.normalization_type = normalization_type
+        self.dt = dt
+        
+        self.first_block = nn.Conv3d(input_features_dim, 
+                                      intermediate_channel,
+                                      kernel_size=(1,kernel_size,kernel_size))
+
+        l = dt
+        blocks =  []
+        while l >= kernel_size:
+            l = l - kernel_size + 1
+            
+            blocks.append(nn.Conv3d(intermediate_channel, 
+                                 intermediate_channel,
+                                 kernel_size = kernel_size,
+                                 padding = (0,1,1)))
+            blocks.append(nn.GroupNorm(32, intermediate_channel))
+            blocks.append(Res3DBlock(intermediate_channel, 
+                                     intermediate_channel,
+                                     normalization_type=normalization_type,
+                                     kernel_size = kernel_size,
+                                     padding = 1))
+            
+        self.blocks = nn.Sequential(*blocks)    
+        self.final_block = nn.Conv3d(intermediate_channel, 
+                                      output_features_dim,
+                                      kernel_size=(l,1,1),
+                                      padding=(0,1,1))
+        
+    def forward(self, x, device='cuda:0'):
+        # [batch_size, dt,channels dt,96.96]
+        x = x.transpose(1,2)
+        x  = self.first_block(x)
+        x  = self.blocks(x)
+        x  = self.final_block(x)
+        
+        return x[:,:,0,...]
 
 
 
@@ -228,19 +256,9 @@ class Seq2VecRNN(nn.Module):
         return output
         
 
-class FeaturesDecoder(nn.Module):
-    """docstring for FeaturesDecoder"""
-    def __init__(self, input_features_dim, output_features_dim):
-        super().__init__()
-        self.input_features_dim = input_features_dim
-        self.output_features_dim = output_features_dim
-    def forward(self, x):
-        return x    
-
-
 class FeaturesEncoder_DenseNet(nn.Module):
     """docstring for FeaturesEncoder_DenseNet"""
-    def __init__(self, input_features_dim, output_features_dim, pretrained=False, normalization_type='batch_norm'):
+    def __init__(self, input_features_dim, output_features_dim, pretrained=False):
         super().__init__()
         self.input_features_dim = input_features_dim
         self.output_features_dim = output_features_dim
@@ -267,7 +285,7 @@ class FeaturesEncoder_DenseNet(nn.Module):
 
 class FeaturesEncoder_Bottleneck(nn.Module):
     """docstring for FeaturesEncoder_Bottleneck"""
-    def __init__(self, output_features_dim, C = 4, multiplier=128):
+    def __init__(self, output_features_dim, C = 4, multiplier=128, n_groups=32):
         super().__init__()
         self.output_features_dim = output_features_dim
         self.C = C
@@ -276,23 +294,23 @@ class FeaturesEncoder_Bottleneck(nn.Module):
                                               self.C * self.multiplier, 
                                               kernel_size=3, 
                                               stride=2),
-                                      nn.BatchNorm2d(self.C * self.multiplier),
+                                      nn.GroupNorm(n_groups, self.C * self.multiplier),
                                       nn.ReLU(),
                                       nn.Conv2d(self.C * self.multiplier, 
                                                 self.C * self.multiplier//2, 
                                                 kernel_size=3, 
                                                 stride=1),
-                                      nn.BatchNorm2d(self.C * self.multiplier//2),
+                                      nn.GroupNorm(n_groups, self.C * self.multiplier//2),
                                       nn.ReLU(),
                                       nn.Conv2d(self.C * self.multiplier//2,
                                                 self.C * self.multiplier//4, 
                                                 kernel_size=3, 
                                                 stride=1),
-                                      nn.BatchNorm2d(self.C * self.multiplier//4),
+                                      nn.GroupNorm(n_groups, self.C * self.multiplier//4),
                                       nn.ReLU(),
                                       nn.Conv2d(self.C * self.multiplier//4,
                                                 self.C * self.multiplier//4, kernel_size=1),
-                                      nn.BatchNorm2d(self.C * self.multiplier//4),
+                                      nn.GroupNorm(n_groups, self.C * self.multiplier//4),
                                       nn.ReLU()
                                     )
         
@@ -306,158 +324,4 @@ class FeaturesEncoder_Bottleneck(nn.Module):
         x = self.linear(x)
         x = self.activation(x)
         return x          
-        
-class FeaturesAR_CNN1D(nn.Module):
-    """docstring for FeaturesAR_CNN1D"""
-    def __init__(self, input_features_dim, output_features_dim, intermediate_features=400):
-        super().__init__()
-        self.input_features_dim = input_features_dim
-        self.intermediate_features = intermediate_features
-        self.encoder = FeaturesEncoder(input_features_dim, output_features_dim=intermediate_features)
-        self.decoder = FeaturesDecoder(intermediate_features, output_features_dim=output_features_dim)
-
-        self.cnn1d = nn.Sequential(nn.Conv1d(400,128,2),
-                               nn.BatchNorm2d(128),
-                               nn.ReLU(),
-                               nn.MaxPool1d(2),
-                               nn.Conv1d(128,64,2),
-                               nn.BatchNorm1d(64),
-                               nn.ReLU(),
-                               nn.MaxPool1d(2),
-                               nn.Conv2d(64,32,1),
-                               nn.BatchNorm1d(32),
-                               nn.ReLU(),
-                               nn.MaxPool1d(2),
-                               nn.Conv1d(32,16,1),
-                               nn.BatchNorm1d(16),
-                               nn.ReLU(),
-                               nn.MaxPool1d(2))
-        
-    def forward(self, features, eps = 1e-3):
-        # [batch size, dt, 256, 96, 96]
-
-        device = torch.cuda.current_device()
-        features_shape = features.shape[2:]
-        batch_size, dt = features.shape[:2]
-        encoded_features = self.encoder(features.view(-1, *features_shape))
-        encoded_features = encoded_features.view(batch_size, dt, -1)
-        predicted_encoded_feature = self.cnn1d(encoded_features)
-        decoded_feature = self.decoder(predicted_encoded_feature)
-        return decoded_feature
-
-
-class FeaturesAR_CNN2D_UNet(nn.Module):
-    def __init__(self, input_features_dim, output_features_dim, C = 8):
-        super().__init__()
-
-        self.front_layer1 = Basic2DBlock(input_features_dim, C*2, 7)
-        self.front_layer2 = Res2DBlock(C*2, C*2)
-        self.front_layer3 = Res2DBlock(C*2, C*2)
-        self.front_layer4 = Res2DBlock(C*2, C*2)
-
-        self.encoder_pool1 = Pool2DBlock(2)
-        self.encoder_res1 = Res2DBlock(C*2, C*4)
-        self.encoder_pool2 = Pool2DBlock(2)
-        self.encoder_res2 = Res2DBlock(C*4, C*8)
-        self.encoder_pool3 = Pool2DBlock(2)
-        self.encoder_res3 = Res2DBlock(C*8, C*8)
-        self.encoder_pool4 = Pool2DBlock(2)
-        self.encoder_res4 = Res2DBlock(C*8, C*8)
-        self.encoder_pool5 = Pool2DBlock(2)
-        self.encoder_res5 = Res2DBlock(C*8, C*8)
-
-        self.mid_res = Res2DBlock(C*8, C*8)
-
-        self.decoder_res5 = Res2DBlock(C*8, C*8)
-        self.decoder_upsample5 = Upsample2DBlock(C*8, C*8, 2, 2)
-        self.decoder_res4 = Res2DBlock(C*8, C*8)
-        self.decoder_upsample4 = Upsample2DBlock(C*8, C*8, 2, 2)
-        self.decoder_res3 = Res2DBlock(C*8, C*8)
-        self.decoder_upsample3 = Upsample2DBlock(C*8, C*8, 2, 2)
-        self.decoder_res2 = Res2DBlock(C*8, C*8)
-        self.decoder_upsample2 = Upsample2DBlock(C*8, C*4, 2, 2)
-        self.decoder_res1 = Res2DBlock(C*4, C*4)
-        self.decoder_upsample1 = Upsample2DBlock(C*4, C*2, 2, 2)
-
-        self.skip_res1 = Res2DBlock(C*2, C*2)
-        self.skip_res2 = Res2DBlock(C*4, C*4)
-        self.skip_res3 = Res2DBlock(C*8, C*8)
-        self.skip_res4 = Res2DBlock(C*8, C*8)
-        self.skip_res5 = Res2DBlock(C*8, C*8)
-
-        self.back_layer1 = Res2DBlock(C*2, C*2)
-        self.back_layer2 = Basic2DBlock(C*2, C*2, 1)
-        self.back_layer3 = Basic2DBlock(C*2, C*2, 1)
-
-        self.output_layer = nn.Conv2d(C*2, output_features_dim, kernel_size=1, stride=1, padding=0)
-
-
-    def forward(self, x, params=None):
-        
-        x = self.front_layer1(x)
-        x = self.front_layer2(x)
-        x = self.front_layer3(x)
-        x = self.front_layer4(x)
-
-        skip_x1 = self.skip_res1(x)
-        x = self.encoder_pool1(x)
-        x = self.encoder_res1(x)
-        skip_x2 = self.skip_res2(x)
-        x = self.encoder_pool2(x)
-        x = self.encoder_res2(x)
-        skip_x3 = self.skip_res3(x)
-        x = self.encoder_pool3(x)
-        x = self.encoder_res3(x)
-        skip_x4 = self.skip_res4(x)
-        x = self.encoder_pool4(x)
-        x = self.encoder_res4(x)
-        skip_x5 = self.skip_res5(x)
-        x = self.encoder_pool5(x)
-        x = self.encoder_res5(x)
-
-        x = self.mid_res(x)
-
-        x = self.decoder_res5(x)
-        x = self.decoder_upsample5(x)
-        x = x + skip_x5
-        x = self.decoder_res4(x)
-        x = self.decoder_upsample4(x)
-        x = x + skip_x4
-        x = self.decoder_res3(x)
-        x = self.decoder_upsample3(x)
-        x = x + skip_x3
-        x = self.decoder_res2(x)
-        x = self.decoder_upsample2(x)
-        x = x + skip_x2
-        x = self.decoder_res1(x)
-        x = self.decoder_upsample1(x)
-        x = x + skip_x1
-
-        x = self.back_layer1(x)
-        x = self.back_layer2(x)
-        x = self.back_layer3(x)
-
-        x = self.output_layer(x)
-
-        return x
-       
-class FeaturesAR_RNN(object):
-  """docstring for FeaturesAR_RNN"""
-  def __init__(self, input_features_dim, output_features_dim=None, hidden_dim = 512):
-      super().__init__()
-      self.seq2vec = Seq2VecRNN(input_features_dim, output_features_dim, hidden_dim = hidden_dim)
-      self.decoder = FeaturesDecoder(input_features_dim=hidden_dim, output_features_dim = output_features_dim if output_features_dim is not None else hidden_dim)
-  def forward(self, features):
-      batch_size = features.shape[0]
-      last_hidden_state = self.seq2vec(features)
-      last_hidden_state = last_hidden_state.view(batch_size,-1,1,1)
-      result = self.decoder(last_hidden_state)
-      return result
-
-
-class FeaturesAR_CNN2D_ResNet(object):
-    """docstring for FeaturesAR_CNN2D_ResNet"""
-    def __init__(self, arg):
-        super(FeaturesAR_CNN2D_ResNet, self).__init__()
-        self.arg = arg
         

@@ -28,29 +28,29 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
-def calc_gradient_norm(named_parameters):
+def calc_gradient_norm(named_parameters, silence=False):
     total_norm = 0.0
     for name, p in named_parameters:
         # print(name)
         if p.grad is not None:
             param_norm = p.grad.data.norm(2)
             total_norm += param_norm.item() ** 2
-        else:
-            print (name, 'grad is None')    
+        elif not silence:
+            print (name, 'grad is None')
 
     total_norm = total_norm ** (1. / 2)
 
     return total_norm
 
 
-def calc_gradient_magnitude(named_parameters):
+def calc_gradient_magnitude(named_parameters, silence=False):
     total_amplitude = []
     for name, p in named_parameters:
         # print(name)
         if p.grad is not None:
             param_amplitude = p.grad.data.abs().max()
             total_amplitude += [param_amplitude.item()]
-        else:
+        elif not silence:
             print (name, 'grad is None')    
 
     total_amplitude = max(total_amplitude)

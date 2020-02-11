@@ -23,11 +23,8 @@ from torch.nn.parallel import DistributedDataParallel
 
 from tensorboardX import SummaryWriter
 
-from mvn.models.triangulation import RANSACTriangulationNet, AlgebraicTriangulationNet, VolumetricTriangulationNet
-from mvn.models.volumetric_temporal import VolumetricTemporalNet,\
-                                           VolumetricTemporalAdaINNet,\
-                                           VolumetricFRAdaINNet
-                                           
+from mvn.models.triangulation import VolumetricTriangulationNet
+from mvn.models.volumetric_temporal import VolumetricTemporalAdaINNet, VolumetricTemporalGridDeformation
 from mvn.models.loss import KeypointsMSELoss, KeypointsMSESmoothLoss, KeypointsMAELoss, KeypointsL2Loss, VolumetricCELoss
 
 from mvn.utils import img, multiview, op, vis, misc, cfg
@@ -36,6 +33,7 @@ from mvn.datasets.human36m import Human36MTemporalDataset, Human36MMultiViewData
 from mvn.datasets import utils as dataset_utils
 
 from IPython.core.debugger import set_trace
+import matplotlib.pyplot as plt
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -209,15 +207,14 @@ def one_epoch(model,
 
     name = "train" if is_train else "val"
     model_type = config.model.name
+    silence = config.opt.silence if hasattr(config.opt, 'silence') else False
 
     singleview_dataset = dataloader.dataset.singleview if hasattr(dataloader.dataset, 'singleview') else False
     visualize_volumes = config.visualize_volumes if hasattr(config, 'visualize_volumes') else False
     visualize_heatmaps = config.visualize_heatmaps if hasattr(config, 'visualize_heatmaps') else False
     use_heatmaps = config.model.backbone.return_heatmaps if hasattr(config.model.backbone, 'return_heatmaps') else False
-    use_temporal_discriminator_loss  = config.opt.use_temporal_discriminator_loss if hasattr(config.opt, "use_temporal_discriminator_loss") else False  
     dump_weights = config.opt.dump_weights if hasattr(config.opt, 'dump_weights') else False
     transfer_cmu_to_human36m = config.transfer_cmu_to_human36m if hasattr(config, "transfer_cmu_to_human36m") else False
-    use_intermediate_fr_loss = config.opt.use_intermediate_fr_loss if hasattr(config.opt, "use_intermediate_fr_loss") else False
 
     if is_train:
         model.train()
@@ -228,7 +225,6 @@ def one_epoch(model,
     data_time = misc.AverageMeter()
 
     metric_dict = defaultdict(list)
-
     results = defaultdict(list)
 
     # used to turn on/off gradients
@@ -249,38 +245,24 @@ def one_epoch(model,
                     print("Found None batch")
                     continue
 
-                images_batch, keypoints_3d_gt, keypoints_3d_validity_gt, proj_matricies_batch = dataset_utils.prepare_batch(batch, device)
+                (images_batch, 
+                keypoints_3d_gt, 
+                keypoints_3d_validity_gt, 
+                proj_matricies_batch) = dataset_utils.prepare_batch(batch, device)
 
                 heatmaps_pred, keypoints_2d_pred, cuboids_pred, base_points_pred = None, None, None, None
-                
-                if model_type == "alg" or model_type == "ransac":
-                    (keypoints_3d_pred, 
-                    keypoints_2d_pred, 
-                    heatmaps_pred, 
-                    confidences_pred) = model(images_batch, proj_matricies_batch, batch)
 
-                elif model_type == "vol_temporal_fr_adain":
-                    (keypoints_3d_pred, 
-                     keypoints_3d_pred_fr, 
-                     features_pred, 
-                     features_pred_fr, 
-                     volumes_pred, 
-                     volumes_pred_fr, 
-                     confidences_pred, 
-                     cuboids_pred, 
-                     coord_volumes_pred, 
-                     base_points_pred) = model(images_batch, batch)
-
-                elif model_type == "vol_temporal_adain":
+                if config.model.name == 'vol_temporal_grid':
                     (keypoints_3d_pred, 
                     features_pred, 
                     volumes_pred, 
                     confidences_pred, 
                     cuboids_pred, 
                     coord_volumes_pred, 
-                    base_points_pred) = model(images_batch, batch)  
+                    base_points_pred,
+                    coord_offsets) = model(images_batch, batch)    
 
-                else:
+                else:    
                     (keypoints_3d_pred, 
                     features_pred, 
                     volumes_pred, 
@@ -288,8 +270,8 @@ def one_epoch(model,
                     cuboids_pred, 
                     coord_volumes_pred, 
                     base_points_pred) = model(images_batch, batch)    
-                
-                batch_size, n_views, image_shape = images_batch.shape[0], images_batch.shape[1], tuple(images_batch.shape[3:])
+                    
+                batch_size, n_views, image_shape = images_batch.shape[0], images_batch.shape[1], tuple(images_batch.shape[-2:])
                 n_joints = keypoints_3d_pred[0].shape[1]
                 keypoints_3d_binary_validity_gt = (keypoints_3d_validity_gt > 0.0).type(torch.float32)
                 scale_keypoints_3d = config.opt.scale_keypoints_3d if hasattr(config.opt, "scale_keypoints_3d") else 1.0
@@ -300,44 +282,14 @@ def one_epoch(model,
                     coord_volumes_pred = coord_volumes_pred - base_points_pred.unsqueeze(1).unsqueeze(1).unsqueeze(1)
                     keypoints_3d_gt = op.root_centering(keypoints_3d_gt, config.kind)
                     keypoints_3d_pred = op.root_centering(keypoints_3d_pred, config.kind)
-                    if model_type == "vol_temporal_fr_adain" and keypoints_3d_pred_fr is not None:
-                        keypoints_3d_pred_fr = op.root_centering(keypoints_3d_pred_fr, config.kind)
 
                 # calculate loss
                 total_loss = 0.0
-                if model_type == "vol_temporal_fr_adain" and use_intermediate_fr_loss:
-                    intermediate_fr_loss_weight = config.opt.intermediate_fr_loss_weight if hasattr(config.opt, "intermediate_fr_loss_weight") else 1.
-                    features_shape = features_pred.shape[-2:]
-                    fr_loss = torch.sum(torch.abs(features_pred - features_pred_fr)**2) / (features_shape.numel() * batch_size)
-                    total_loss += fr_loss*intermediate_fr_loss_weight
-                    metric_dict['fr_loss'].append(fr_loss.item())
+        
+                loss = criterion(keypoints_3d_pred * scale_keypoints_3d, \
+                                 keypoints_3d_gt * scale_keypoints_3d, \
+                                 keypoints_3d_binary_validity_gt)
 
-                if use_temporal_discriminator_loss and is_train:
-                    pred_keypoints_features = keypoints_to_features(keypoints_3d_batch_pred_list[1]).transpose(1,0)
-                    gt_keypoints_features = keypoints_to_features(keypoints_3d_batch_gt).transpose(1,0)
-                    all_keypoints = torch.stack([pred_keypoints_features, gt_keypoints_features],0)
-                    target = torch.cat([torch.zeros(1), torch.ones(1)]).long().cuda()
-                    predicted = discriminator(all_keypoints)
-                    keypoints_ce_criterion = nn.CrossEntropyLoss()
-
-                    discriminator_loss = keypoints_ce_criterion(predicted,target)
-                    generator_loss = -torch.log(predicted[:batch_size]).sum()
-
-                    metric_dict['discriminator_loss'].append(discriminator_loss.item())
-                    metric_dict['generator_loss'].append(generator_loss.item())
-
-                    weight = config.opt.temporal_discriminator_loss_weight if hasattr(config.opt, "temporal_discriminator_loss_weight") else 1.0
-                    total_loss += weight * generator_loss
-
-                    discr_freq = config.opt.train_discriminator_freq if hasattr(config.opt, "train_discriminator_freq") else 1
-                    if iter_i%discr_freq==0:
-
-                        opt_discr.zero_grad()
-                        discriminator_loss.backward()
-                        opt_discr.step()
-                        continue
-
-                loss = criterion(keypoints_3d_pred * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d, keypoints_3d_binary_validity_gt)
                 total_loss += loss
                 metric_dict[f'{config.opt.criterion}'].append(loss.item())
 
@@ -361,19 +313,21 @@ def one_epoch(model,
                     if hasattr(config.opt, "grad_clip"):
                         torch.nn.utils.clip_grad_norm_(model.parameters(), config.opt.grad_clip / config.opt.lr)
 
-                    metric_dict['grad_norm_times_lr'].append(config.opt.lr * misc.calc_gradient_norm(filter(lambda x: x[1].requires_grad, model.named_parameters())))
-                    metric_dict['grad_amplitude_times_lr'].append(config.opt.lr * misc.calc_gradient_magnitude(filter(lambda x: x[1].requires_grad, model.named_parameters())))
+                    metric_dict['grad_norm_times_lr'].append(config.opt.lr * \
+                                                             misc.calc_gradient_norm(filter(lambda x: x[1].requires_grad, \
+                                                             model.named_parameters()), silence=silence))
+                    metric_dict['grad_amplitude_times_lr'].append(config.opt.lr * \
+                                                                  misc.calc_gradient_magnitude(filter(lambda x: x[1].requires_grad, \
+                                                                  model.named_parameters()), silence=silence))
 
                     opt.step()
 
                 # calculate metrics
-                l2 = KeypointsL2Loss()(keypoints_3d_pred * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d,\
-                                                                                    keypoints_3d_binary_validity_gt)
+                l2 = KeypointsL2Loss()(keypoints_3d_pred * scale_keypoints_3d, \
+                                       keypoints_3d_gt * scale_keypoints_3d, \
+                                       keypoints_3d_binary_validity_gt)
+
                 metric_dict['l2'].append(l2.item())
-                if model_type == "vol_temporal_fr_adain" and keypoints_3d_pred_fr is not None:
-                    l2_fr = KeypointsL2Loss()(keypoints_3d_pred_fr * scale_keypoints_3d, keypoints_3d_gt * scale_keypoints_3d,\
-                                                                                            keypoints_3d_binary_validity_gt)
-                    metric_dict['l2_fr'].append(l2_fr.item())
 
                 # base point l2
                 if base_points_pred is not None and not config.model.use_gt_pelvis:
@@ -444,6 +398,16 @@ def one_epoch(model,
                                 )
                                 writer.add_image(f"{name}/volumes/{batch_i}", volumes_vis.transpose(2, 0, 1), global_step=n_iters_total)
 
+                            if model_type == 'vol_temporal_grid':
+                                fig=plt.figure()
+                                diffs = coord_offsets[batch_i].abs().view(-1,3).mean(-1).detach().cpu().numpy()
+                                plt.hist(diffs, bins=50)
+                                fig.tight_layout()
+                                hist_image = vis.fig_to_array(fig)
+                                plt.close('all')    
+                                writer.add_image(f"{name}/diff_hist/{batch_i}", hist_image.transpose(2, 0, 1), global_step=n_iters_total)
+
+
                     # dump weights to tensoboard
                     if n_iters_total % config.vis_freq == 0 and dump_weights:
                         for p_name, p in model.named_parameters():
@@ -451,7 +415,7 @@ def one_epoch(model,
                                 writer.add_histogram(p_name, p.clone().cpu().data.numpy(), n_iters_total)
                             except ValueError as e:
                                 print(e)
-                                print(p_name, p)
+                                # print(p_name, p)
                                 exit()
 
                     # measure elapsed time
@@ -546,7 +510,7 @@ def main(args):
     
     config = cfg.load_config(args.config)
     is_distributed = init_distributed(args) and config.distributed_train
-    print ('Distributed training' if is_distributed else 'No Distributed training')
+    print ('DISTRIBUTER TRAINING' if is_distributed else 'No Distributed training')
     master = True
 
     if is_distributed and os.environ["RANK"]:
@@ -561,13 +525,9 @@ def main(args):
     save_model = config.opt.save_model if hasattr(config.opt, "save_model") else True
 
     model = {
-        "ransac": RANSACTriangulationNet,
-        "alg": AlgebraicTriangulationNet,
         "vol": VolumetricTriangulationNet,
-        "vol_temporal": VolumetricTemporalNet,
         "vol_temporal_adain":VolumetricTemporalAdaINNet,
-        "vol_temporal_fr_adain":VolumetricFRAdaINNet,
-        "vol_temporal_lstm_v2v":VolumetricTemporalNet
+        "vol_temporal_grid": VolumetricTemporalGridDeformation
     }[config.model.name](config, device=device).to(device)
 
     if config.model.init_weights:
