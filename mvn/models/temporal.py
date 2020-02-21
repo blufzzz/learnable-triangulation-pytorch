@@ -6,6 +6,16 @@ from torchvision import models
 from pytorch_convolutional_rnn.convolutional_rnn import Conv2dLSTM, Conv2dPeepholeLSTM
 from mvn.models.v2v import Res3DBlock
 
+
+def get_normalization(normalization_type, out_planes, n_groups=32):
+    if normalization_type ==  'batch_norm':
+        return nn.BatchNorm2d(out_planes)
+    elif normalization_type == 'group_norm':
+        return nn.GroupNorm(n_groups, out_planes)
+    else:
+        raise RuntimeError('{} is unknown normalization_type for this model'.format(normalization_type))   
+
+
 class Slice(nn.Module):
     def __init__(self, shift):
         super(Slice, self).__init__()
@@ -151,7 +161,7 @@ class Seq2VecCNN2D(nn.Module):
         self.normalization_type = normalization_type
         self.dt = dt
         
-        self.first_block = nn.Conv3d(input_features_dim, 
+        self.first_block = nn.Conv32(input_features_dim, 
                                       intermediate_channel,
                                       kernel_size=(1,kernel_size,kernel_size))
 
@@ -194,8 +204,10 @@ class Seq2VecCNN(nn.Module):
                  input_features_dim, 
                  output_features_dim=1024, 
                  intermediate_channels=512, 
+                 normalization_type='group_norm',
                  dt = 8,
-                 kernel_size = 3):
+                 kernel_size = 3,
+                 n_groups = 32):
         
         super(Seq2VecCNN, self).__init__()
         self.input_features_dim = input_features_dim
@@ -214,6 +226,14 @@ class Seq2VecCNN(nn.Module):
             blocks.append(Res1DBlock(intermediate_channels, 
                                      intermediate_channels, 
                                      kernel_size = kernel_size))
+
+            blocks.append(nn.Sequential(nn.Conv1d(intermediate_channels, intermediate_channels, kernel_size=3, padding=1),
+                                        nn.GroupNorm(n_groups, intermediate_channels),
+                                        nn.ReLU(True),
+                                        nn.Conv1d(intermediate_channels, intermediate_channels, kernel_size=3, padding=1),
+                                        nn.GroupNorm(n_groups, intermediate_channels),
+                                        nn.ReLU(True)
+                                        ))
         
         self.blocks = nn.Sequential(*blocks)    
         self.final_block = nn.Conv1d(intermediate_channels, 
@@ -285,7 +305,7 @@ class FeaturesEncoder_DenseNet(nn.Module):
 
 class FeaturesEncoder_Bottleneck(nn.Module):
     """docstring for FeaturesEncoder_Bottleneck"""
-    def __init__(self, output_features_dim, C = 4, multiplier=128, n_groups=32):
+    def __init__(self, output_features_dim, C = 2, multiplier=128, n_groups=32, normalization_type='batch_norm'):
         super().__init__()
         self.output_features_dim = output_features_dim
         self.C = C
@@ -294,23 +314,23 @@ class FeaturesEncoder_Bottleneck(nn.Module):
                                               self.C * self.multiplier, 
                                               kernel_size=3, 
                                               stride=2),
-                                      nn.GroupNorm(n_groups, self.C * self.multiplier),
+                                      get_normalization(normalization_type, self.C * self.multiplier, n_groups=32),
                                       nn.ReLU(),
                                       nn.Conv2d(self.C * self.multiplier, 
                                                 self.C * self.multiplier//2, 
                                                 kernel_size=3, 
                                                 stride=1),
-                                      nn.GroupNorm(n_groups, self.C * self.multiplier//2),
+                                      get_normalization(normalization_type, self.C * self.multiplier//2, n_groups=32),
                                       nn.ReLU(),
                                       nn.Conv2d(self.C * self.multiplier//2,
                                                 self.C * self.multiplier//4, 
                                                 kernel_size=3, 
                                                 stride=1),
-                                      nn.GroupNorm(n_groups, self.C * self.multiplier//4),
+                                      get_normalization(normalization_type, self.C * self.multiplier//4, n_groups=32),
                                       nn.ReLU(),
                                       nn.Conv2d(self.C * self.multiplier//4,
                                                 self.C * self.multiplier//4, kernel_size=1),
-                                      nn.GroupNorm(n_groups, self.C * self.multiplier//4),
+                                      get_normalization(normalization_type, self.C * self.multiplier//4, n_groups=32),
                                       nn.ReLU()
                                     )
         

@@ -9,7 +9,7 @@ def make_collate_fn(randomize_n_views=True, min_n_views=1, max_n_views=4):
         batch = dict()
 
         if len(items) == 0:
-            print("All items in batch are None")
+            # print("All items in batch are None")
             return None
 
         total_n_views = min(len(item['images']) for item in items)

@@ -2,7 +2,6 @@ title: "human36m_vol_temporal_lstm_adain_softmax"
 kind: "human36m"
 vis_freq: 1000
 vis_n_elements: 10
-distributed_train: true
 image_shape: [384, 384]
 
 opt:
@@ -21,9 +20,9 @@ opt:
   lr: 0.0001
   process_features_lr: 0.001
   volume_net_lr: 0.001
-  affine_mappings_lr: 0.001
-  features_sequence_to_vector_lr: 0.001
-  encoder_lr: 0.001
+  features_sequence_to_vector_lr: 0.0001
+  grid_deformator_lr: 0.0001
+
   scale_keypoints_3d: 0.1
 
 model:
@@ -35,7 +34,7 @@ model:
   intermediate_channels: 128
   volume_features_dim: 32 #32
   style_vector_dim: 64
-  style_grad_for_backbone: true
+  style_grad_for_backbone: false
 
   include_pivot: false # including pivot getting thigs worse
   normalization_type: 'group_norm' #'ada-group_norm'
@@ -61,11 +60,11 @@ model:
   backbone:
     name: "resnet152"
     style: "simple"
+    group_norm: false
 
     init_weights: true
     checkpoint: "./data/pose_resnet_4.5_pixels_human36m.pth"
 
-    group_norm: true
     num_joints: 17
     num_layers: 152 
 
@@ -74,82 +73,6 @@ model:
     return_heatmaps: false
     return_bottleneck: true
     return_features: true
-
-  hrnet32:
-
-    group_norm: true
-
-    name: "hrnet32"  
-
-    init_weights: true
-    checkpoint: "./data/pose_hrnet_w32_384x288.pth"
-
-    alg_confidences: false
-    vol_confidences: false
-    return_heatmaps: false
-    return_bottleneck: true  
-
-    NUM_JOINTS: 17
-    IMAGE_SIZE:
-    - 384
-    - 384
-    HEATMAP_SIZE:
-    - 96
-    - 96
-    SIGMA: 3
-    EXTRA:
-      PRETRAINED_LAYERS:
-      - 'conv1'
-      - 'bn1'
-      - 'conv2'
-      - 'bn2'
-      - 'layer1'
-      - 'transition1'
-      - 'stage2'
-      - 'transition2'
-      - 'stage3'
-      - 'transition3'
-      - 'stage4'
-      FINAL_CONV_KERNEL: 1
-      STAGE2:
-        NUM_MODULES: 1
-        NUM_BRANCHES: 2
-        BLOCK: BASIC
-        NUM_BLOCKS:
-        - 4
-        - 4
-        NUM_CHANNELS:
-        - 32
-        - 64
-        FUSE_METHOD: SUM
-      STAGE3:
-        NUM_MODULES: 4
-        NUM_BRANCHES: 3
-        BLOCK: BASIC
-        NUM_BLOCKS:
-        - 4
-        - 4
-        - 4
-        NUM_CHANNELS:
-        - 32
-        - 64
-        - 128
-        FUSE_METHOD: SUM
-      STAGE4:
-        NUM_MODULES: 3
-        NUM_BRANCHES: 4
-        BLOCK: BASIC
-        NUM_BLOCKS:
-        - 4
-        - 4
-        - 4
-        - 4
-        NUM_CHANNELS:
-        - 32
-        - 64
-        - 128
-        - 256
-        FUSE_METHOD: SUM        
   
 
 dataset:

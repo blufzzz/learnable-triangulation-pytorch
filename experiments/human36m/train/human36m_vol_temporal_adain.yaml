@@ -15,8 +15,8 @@ opt:
   n_epochs: 9999
   dump_weights: False
 
-  batch_size: 2
-  val_batch_size: 2
+  batch_size: 1
+  val_batch_size: 1
 
   lr: 0.0001
   process_features_lr: 0.001
@@ -26,24 +26,31 @@ opt:
   encoder_lr: 0.001
   scale_keypoints_3d: 0.1
 
+  save_model: false
+
+
 model:
   name: "vol_temporal_adain"
   kind: "mpii"
   volume_aggregation_method: "no_aggregation"
-  f2v_type: 'lstm'
-  adain_type: 'all_v2' # if 'all' then normalization_type: 'adain' or 'ada-group_norm'
-  encoder_type: "backbone"
-  pretrained_encoder: false
-  volume_features_dim: 128 #32
-  intermediate_channels: 512 #512
-  encoded_feature_space: 1024
+  adain_type: 'all' # if 'all' then normalization_type: 'adain' or 'ada-group_norm'
+  
+  volume_features_dim: 64 #32
   style_vector_dim: 256 #256 #256
+
+  encoder_type: "backbone"
   encoder_capacity_multiplier: 2
-  kernel_size: 3 #3
+  encoder_normalization_type: 'group_norm'
+  encoded_feature_space: 1024
+
+  f2v_type: 'lstm'
+  f2v_normalization_type: 'group_norm'
+  f2v_intermediate_channels: 512
+  kernel_size: 3 #3 # for cnn only 
   
   include_pivot: false # including pivot getting thigs worse
   style_grad_for_backbone: false
-  normalization_type: 'group-ada_norm' #'ada-group_norm'
+  v2v_normalization_type: 'group-ada_norm' #'ada-group_norm'
 
   init_weights: false
   checkpoint: ""
@@ -53,12 +60,15 @@ model:
   use_volumetric_pelvis: false
 
   cuboid_side: 2500 #1000 #2500.0
+  cuboid_multiplier: 1.0
+  rotation: false
 
-  volume_size: 32
+
+  volume_size: 16
   volume_multiplier: 1.0
   volume_softmax: true
-  heatmap_softmax: true
-  heatmap_multiplier: 100.0
+
+  transfer_cmu_to_human36m: false
 
   backbone:
     name: "resnet152"  #"resnet50" #"resnet152"
@@ -78,7 +88,7 @@ model:
 
 dataset:
   kind: "human36m"
-  dt: 6
+  dt: 8
   dilation: 3
   singleview: true
   pivot_type: 'first'

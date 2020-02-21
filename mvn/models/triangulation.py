@@ -11,193 +11,7 @@ from torch import nn
 from mvn.utils import op, multiview, img, misc, volumetric
 
 from mvn.models import pose_resnet, pose_hrnet
-from mvn.models.v2v import V2VModel
-
-
-class RANSACTriangulationNet(nn.Module):
-    def __init__(self, config, device='cuda:0'):
-        super().__init__()
-
-        config.model.backbone.alg_confidences = False
-        config.model.backbone.vol_confidences = False
-        self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
-        
-        self.direct_optimization = config.model.direct_optimization
-
-    def forward(self, images, proj_matricies, batch):
-        batch_size, n_views = images.shape[:2]
-
-        # reshape n_views dimension to batch dimension
-        images = images.view(-1, *images.shape[2:])
-
-        # forward backbone and integrate
-        heatmaps, _, _, _ = self.backbone(images)
-
-        # reshape back
-        images = images.view(batch_size, n_views, *images.shape[1:])
-        heatmaps = heatmaps.view(batch_size, n_views, *heatmaps.shape[1:])
-
-        # calcualte shapes
-        image_shape = tuple(images.shape[3:])
-        batch_size, n_views, n_joints, heatmap_shape = heatmaps.shape[0], heatmaps.shape[1], heatmaps.shape[2], tuple(heatmaps.shape[3:])
-
-        # keypoints 2d
-        _, max_indicies = torch.max(heatmaps.view(batch_size, n_views, n_joints, -1), dim=-1)
-        keypoints_2d = torch.stack([max_indicies % heatmap_shape[1], max_indicies // heatmap_shape[1]], dim=-1).to(images.device)
-
-        # upscale keypoints_2d, because image shape != heatmap shape
-        keypoints_2d_transformed = torch.zeros_like(keypoints_2d)
-        keypoints_2d_transformed[:, :, :, 0] = keypoints_2d[:, :, :, 0] * (image_shape[1] / heatmap_shape[1])
-        keypoints_2d_transformed[:, :, :, 1] = keypoints_2d[:, :, :, 1] * (image_shape[0] / heatmap_shape[0])
-        keypoints_2d = keypoints_2d_transformed
-
-        # triangulate (cpu)
-        keypoints_2d_np = keypoints_2d.detach().cpu().numpy()
-        proj_matricies_np = proj_matricies.detach().cpu().numpy()
-
-        keypoints_3d = np.zeros((batch_size, n_joints, 3))
-        confidences = np.zeros((batch_size, n_views, n_joints))  # plug
-        for batch_i in range(batch_size):
-            for joint_i in range(n_joints):
-                current_proj_matricies = proj_matricies_np[batch_i]
-                points = keypoints_2d_np[batch_i, :, joint_i]
-                keypoint_3d, _ = self.triangulate_ransac(current_proj_matricies, points, direct_optimization=self.direct_optimization)
-                keypoints_3d[batch_i, joint_i] = keypoint_3d
-
-        keypoints_3d = torch.from_numpy(keypoints_3d).type(torch.float).to(images.device)
-        confidences = torch.from_numpy(confidences).type(torch.float).to(images.device)
-
-        return keypoints_3d, keypoints_2d, heatmaps, confidences
-
-    def triangulate_ransac(self, proj_matricies, points, n_iters=10, reprojection_error_epsilon=15, direct_optimization=True):
-        assert len(proj_matricies) == len(points)
-        assert len(points) >= 2
-
-        proj_matricies = np.array(proj_matricies)
-        points = np.array(points)
-
-        n_views = len(points)
-
-        # determine inliers
-        view_set = set(range(n_views))
-        inlier_set = set()
-        for i in range(n_iters):
-            sampled_views = sorted(random.sample(view_set, 2))
-
-            keypoint_3d_in_base_camera = multiview.triangulate_point_from_multiple_views_linear(proj_matricies[sampled_views], points[sampled_views])
-            reprojection_error_vector = multiview.calc_reprojection_error_matrix(np.array([keypoint_3d_in_base_camera]), points, proj_matricies)[0]
-
-            new_inlier_set = set(sampled_views)
-            for view in view_set:
-                current_reprojection_error = reprojection_error_vector[view]
-                if current_reprojection_error < reprojection_error_epsilon:
-                    new_inlier_set.add(view)
-
-            if len(new_inlier_set) > len(inlier_set):
-                inlier_set = new_inlier_set
-
-        # triangulate using inlier_set
-        if len(inlier_set) == 0:
-            inlier_set = view_set.copy()
-
-        inlier_list = np.array(sorted(inlier_set))
-        inlier_proj_matricies = proj_matricies[inlier_list]
-        inlier_points = points[inlier_list]
-
-        keypoint_3d_in_base_camera = multiview.triangulate_point_from_multiple_views_linear(inlier_proj_matricies, inlier_points)
-        reprojection_error_vector = multiview.calc_reprojection_error_matrix(np.array([keypoint_3d_in_base_camera]), inlier_points, inlier_proj_matricies)[0]
-        reprojection_error_mean = np.mean(reprojection_error_vector)
-
-        keypoint_3d_in_base_camera_before_direct_optimization = keypoint_3d_in_base_camera
-        reprojection_error_before_direct_optimization = reprojection_error_mean
-
-        # direct reprojection error minimization
-        if direct_optimization:
-            def residual_function(x):
-                reprojection_error_vector = multiview.calc_reprojection_error_matrix(np.array([x]), inlier_points, inlier_proj_matricies)[0]
-                residuals = reprojection_error_vector
-                return residuals
-
-            x_0 = np.array(keypoint_3d_in_base_camera)
-            res = least_squares(residual_function, x_0, loss='huber', method='trf')
-
-            keypoint_3d_in_base_camera = res.x
-            reprojection_error_vector = multiview.calc_reprojection_error_matrix(np.array([keypoint_3d_in_base_camera]), inlier_points, inlier_proj_matricies)[0]
-            reprojection_error_mean = np.mean(reprojection_error_vector)
-
-        return keypoint_3d_in_base_camera, inlier_list
-
-
-class AlgebraicTriangulationNet(nn.Module):
-    def __init__(self, config, device='cuda:0'):
-        super().__init__()
-
-        self.use_confidences = config.model.use_confidences
-
-        config.model.backbone.alg_confidences = False
-        config.model.backbone.vol_confidences = False
-
-        if self.use_confidences:
-            config.model.backbone.alg_confidences = True
-
-        self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
-
-        self.heatmap_softmax = config.model.heatmap_softmax
-        self.heatmap_multiplier = config.model.heatmap_multiplier
-
-
-    def forward(self, images, proj_matricies, batch):
-        device = images.device
-        batch_size, n_views = images.shape[:2]
-
-        # reshape n_views dimension to batch dimension
-        images = images.view(-1, *images.shape[2:])
-
-        # forward backbone and integral
-        if self.use_confidences:
-            heatmaps, _, alg_confidences, _ = self.backbone(images)
-        else:
-            heatmaps, _, _, _ = self.backbone(images)
-            alg_confidences = torch.ones(batch_size * n_views, heatmaps.shape[1]).type(torch.float).to(device)
-
-        heatmaps_before_softmax = heatmaps.view(batch_size, n_views, *heatmaps.shape[1:])
-        keypoints_2d, heatmaps = op.integrate_tensor_2d(heatmaps * self.heatmap_multiplier, self.heatmap_softmax)
-
-        # reshape back
-        images = images.view(batch_size, n_views, *images.shape[1:])
-        heatmaps = heatmaps.view(batch_size, n_views, *heatmaps.shape[1:])
-        keypoints_2d = keypoints_2d.view(batch_size, n_views, *keypoints_2d.shape[1:])
-        alg_confidences = alg_confidences.view(batch_size, n_views, *alg_confidences.shape[1:])
-
-        # norm confidences
-        alg_confidences = alg_confidences / alg_confidences.sum(dim=1, keepdim=True)
-        alg_confidences = alg_confidences + 1e-5  # for numerical stability
-
-        # calcualte shapes
-        image_shape = tuple(images.shape[3:])
-        batch_size, n_views, n_joints, heatmap_shape = heatmaps.shape[0], heatmaps.shape[1], heatmaps.shape[2], tuple(heatmaps.shape[3:])
-
-        # upscale keypoints_2d, because image shape != heatmap shape
-        keypoints_2d_transformed = torch.zeros_like(keypoints_2d)
-        keypoints_2d_transformed[:, :, :, 0] = keypoints_2d[:, :, :, 0] * (image_shape[1] / heatmap_shape[1])
-        keypoints_2d_transformed[:, :, :, 1] = keypoints_2d[:, :, :, 1] * (image_shape[0] / heatmap_shape[0])
-        keypoints_2d = keypoints_2d_transformed
-
-        # triangulate
-        try:
-            keypoints_3d = multiview.triangulate_batch_of_points(
-                proj_matricies, keypoints_2d,
-                confidences_batch=alg_confidences
-            )
-        except RuntimeError as e:
-            print("Error: ", e)
-
-            print("confidences =", confidences_batch_pred)
-            print("proj_matricies = ", proj_matricies)
-            print("keypoints_2d_batch_pred =", keypoints_2d_batch_pred)
-            exit()
-
-        return keypoints_3d, keypoints_2d, heatmaps, alg_confidences
+from mvn.models.v2v import V2VModel, V2VModel_v2
 
 
 class VolumetricTriangulationNet(nn.Module):
@@ -221,8 +35,9 @@ class VolumetricTriangulationNet(nn.Module):
         # heatmap
         self.heatmap_softmax = config.model.heatmap_softmax
         self.heatmap_multiplier = config.model.heatmap_multiplier
-        self.volume_features_dim = config.model.volume_features_dim if hasattr(config.model, 'volume_features_dim') else 32
         self.backbone_features_dim = config.model.backbone.backbone_features_dim if hasattr(config.model.backbone, 'backbone_features_dim') else 256
+        self.volume_features_dim = config.model.volume_features_dim
+        self.v2v_type = config.model.v2v_type
 
         # transfer
         self.transfer_cmu_to_human36m = config.model.transfer_cmu_to_human36m if hasattr(config.model, "transfer_cmu_to_human36m") else False
@@ -230,6 +45,8 @@ class VolumetricTriangulationNet(nn.Module):
         # modules
         config.model.backbone.alg_confidences = False
         config.model.backbone.vol_confidences = False
+
+
         if self.volume_aggregation_method.startswith('conf'):
             config.model.backbone.vol_confidences = True
 
@@ -246,7 +63,11 @@ class VolumetricTriangulationNet(nn.Module):
             nn.Conv2d(self.backbone_features_dim, self.volume_features_dim, 1)
         )
 
-        self.volume_net = V2VModel(32, self.num_joints)
+        if self.v2v_type == 'v2':
+            self.volume_net = V2VModel_v2(self.volume_features_dim, self.num_joints, normalization_type = config.model.normalization_type)
+
+        else:    
+            self.volume_net = V2VModel(self.volume_features_dim, self.num_joints, normalization_type = config.model.normalization_type)
 
 
     def forward(self, images, batch):

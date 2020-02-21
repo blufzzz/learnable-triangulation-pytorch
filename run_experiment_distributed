@@ -1,6 +1,19 @@
 #!/bin/bash
-srun -p TitanX --gres=gpu:2 --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w hpc2 \
+srun -p TitanBlack --gres=gpu:2 --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-03 \
 python3.6 -m torch.distributed.launch --nproc_per_node=2 --master_port=2345 train.py \
 --logdir=../logs/adain_lstm_32 \
 --config=./experiments/human36m/train/human36m_vol_temporal_adain.yaml \
---experiment_comment="h36_sv32_dist_adain-lstm-1024-512-256-all_v2v-group-ada_distrib2_v2-vf128_s256_f2v-backbone-group-C2-1024_dt-6_dil-3-2-2_lr-1e-4"
+--experiment_comment="h36_sv32_dist_adain-lstm-1024-1024-s512-all_v2v-v2-group-ada_distrib2_vf128_f2v-backbone-gn-C4_resnet-152-bn_dt-8_dil-3_1-1_lr-1e-4"
+
+
+
+# #!/bin/bash
+# srun -p TitanX --gres=gpu:4 --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w hpc4 \
+# python3.6 -m torch.distributed.launch --nproc_per_node=4 --master_port=2345 train.py \
+# --logdir=../logs/adain_lstm_32 \
+# --config=./experiments/human36m/train/human36m_vol_temporal_adain.yaml \
+# --experiment_comment="h36_sv32_dist_adain-lstm-1024-512-s256-all_v2v-group-ada_distrib2_v1-vf32_f2v-backbone-group-C2-1024_dt-6_dil-3_2-2_lr-1e-4"
+
+# --logdir=../logs/adain_aux \
+# --config=./experiments/human36m/train/human36m_vol_temporal_adain_aux_backbone.yaml \
+# --experiment_comment="h36_sv32_dist_adain-lstm-1024-512-s256-all_v2v-group-ada_distrib4_vf32_f2v-aux-backbone_resnet-152-bn_resnet50-bn-1e-3_encoder-bckbn-C2_dt-8_dil-3_2-2_lr-1e-4"

@@ -381,7 +381,8 @@ def draw_2d_pose_cv2(keypoints, canvas, kind='cmu', keypoints_mask=None, point_s
     point_size = point_size * anti_aliasing_scale
     line_width = line_width * anti_aliasing_scale
 
-    connectivity = CONNECTIVITY_DICT[kind]
+    connectivity = CONNECTIVITY_DICT
+    [kind]
 
     color = 'blue' if color is None else color
 

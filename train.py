@@ -121,7 +121,7 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
         evaluate_cameras = [0,1,2,3],
         keypoints_per_frame=keypoints_per_frame,
         pivot_type = pivot_type,
-        dilation_type = dilation_type,
+        dilation_type = dilation_type
         )
 
     val_dataloader = DataLoader(
@@ -242,7 +242,7 @@ def one_epoch(model,
                 data_time.update(time.time() - end)
 
                 if batch is None:
-                    print("Found None batch")
+                    print("Found None batch at iter {}, continue...".format(iter_i))
                     continue
 
                 (images_batch, 
@@ -407,17 +407,6 @@ def one_epoch(model,
                                 plt.close('all')    
                                 writer.add_image(f"{name}/diff_hist/{batch_i}", hist_image.transpose(2, 0, 1), global_step=n_iters_total)
 
-
-                    # dump weights to tensoboard
-                    if n_iters_total % config.vis_freq == 0 and dump_weights:
-                        for p_name, p in model.named_parameters():
-                            try:
-                                writer.add_histogram(p_name, p.clone().cpu().data.numpy(), n_iters_total)
-                            except ValueError as e:
-                                print(e)
-                                # print(p_name, p)
-                                exit()
-
                     # measure elapsed time
                     batch_time.update(time.time() - end)
                     end = time.time()
@@ -440,47 +429,27 @@ def one_epoch(model,
 
     # calculate evaluation metrics
     if master:
+        # validation
         if not is_train:
             print ('Validation...')
             results['keypoints_3d'] = np.concatenate(results['keypoints_3d'], axis=0)
             results['indexes'] = np.concatenate(results['indexes'])
-            provide_dataset_metric_for_all_cameras = config.dataset.val.provide_dataset_metric_for_all_cameras if hasattr(config.dataset.val,\
-                                                                                        "provide_dataset_metric_for_all_cameras") else False
+
             try:
-                if singleview_dataset:
-                    # we need to consider all cameras
-                    cameras_results = dataloader.dataset.evaluate(results['keypoints_3d'], results['indexes'])
-                    # `dataset_metric` averaged by cameras 
-                    scalar_metric = []
+                scalar_metric = dataloader.dataset.evaluate(results['keypoints_3d'], result_indexes=results['indexes'])
+                metric_dict['dataset_metric'].append(scalar_metric)
+                print ('Dataset metric', scalar_metric)    
 
-                    for camera_index in cameras_results.keys():
-                        camera_scalar = cameras_results[camera_index][0]
-                        scalar_metric.append(camera_scalar)
-                        if provide_dataset_metric_for_all_cameras:
-                            metric_dict['dataset_metric_{}_camera'.format(camera_index)].append(camera_scalar)
-
-                    scalar_metric = np.mean(scalar_metric)
-                    full_metric = cameras_results
-
-                else:
-                    scalar_metric, full_metric = dataloader.dataset.evaluate(results['keypoints_3d'])
             except Exception as e:
                 print("Failed to evaluate. Reason: ", e)
-                scalar_metric, full_metric = 0.0, {}
-
-            metric_dict['dataset_metric'].append(scalar_metric)
-            print ('Dataset metric', scalar_metric)
-
+                scalar_metric = 0.0, {}
+            
             checkpoint_dir = os.path.join(experiment_dir, "checkpoints", "{:04}".format(epoch))
             os.makedirs(checkpoint_dir, exist_ok=True)
 
             # dump results
             with open(os.path.join(checkpoint_dir, "results.pkl"), 'wb') as fout:
                 pickle.dump(results, fout)
-
-            # dump full metric
-            with open(os.path.join(checkpoint_dir, "metric.json".format(epoch)), 'w') as fout:
-                json.dump(full_metric, fout, indent=4, sort_keys=True)
 
         # dump to tensorboard per-epoch stats
         for title, value in metric_dict.items():
@@ -569,39 +538,27 @@ def main(args):
                  {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr},
                  {'params': model.features_sequence_to_vector.parameters(), 'lr': config.opt.features_sequence_to_vector_lr if hasattr(config.opt, "features_sequence_to_vector_lr") else config.opt.lr},
                 ] + \
-                ([{'params':model.auxilary_backbone.parameters(), 'lr': config.opt.auxilary_backbone_lr if hasattr(config.opt, "auxilary_backbone_lr") else config.opt.lr}] if model.use_auxilary_backbone else []) + \
+                ([{'params':model.auxilary_backbone.parameters(), 'lr': config.opt.auxilary_backbone_lr if hasattr(config.opt, "auxilary_backbone_lr") else config.opt.lr}] if hasattr(model, 'auxilary_backbone') else []) + \
                 ([{'params': model.encoder.parameters(), 'lr': config.opt.encoder_lr if hasattr(config.opt, "encoder_lr") else config.opt.lr}] if hasattr(model, 'encoder') else []) + \
                 ([{'params': model.affine_mappings.parameters(), 'lr': config.opt.affine_mappings_lr if hasattr(config.opt, "affine_mappings_lr") else config.opt.lr}] if hasattr(model, 'affine_mappings') else []),
                 lr=config.opt.lr) 
-                
-        elif config.model.name == "vol_temporal_fr_adain":
+
+        elif config.model.name == "vol_temporal_grid":
             opt = torch.optim.Adam(
                 [{'params': model.backbone.parameters()},
                  {'params': model.process_features.parameters(), 'lr': config.opt.process_features_lr if hasattr(config.opt, "process_features_lr") else config.opt.lr},
-                 {'params': model.features_regressor.parameters(), 'lr': config.opt.features_regressor_lr if hasattr(config.opt, "features_regressor_lr") else config.opt.lr},
-                 {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr}
-                ],
-                lr=config.opt.lr
-            )
-        elif config.model.name == "vol_temporal_lstm_v2v":
-            opt = torch.optim.Adam(
-                [{'params': model.backbone.parameters()},
-                 {'params': model.process_features.parameters(), 'lr': config.opt.process_features_lr if hasattr(config.opt, "process_features_lr") else config.opt.lr},
-                 {'params': model.lstm_v2v.parameters(), 'lr': config.opt.lstm_v2v_lr if hasattr(config.opt, "lstm_v2v_lr") else config.opt.lr},
-                 {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr}
-                ],
-                lr=config.opt.lr
-            )
-        elif config.model.name == "vol_temporal":
-            opt = torch.optim.Adam(
-                [{'params': model.backbone.parameters()},
-                 {'params': model.process_features.parameters(), 'lr': config.opt.process_features_lr if hasattr(config.opt, "process_features_lr") else config.opt.lr},
-                 {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr}
-                ],
-                lr=config.opt.lr
-            )    
+                 {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr},
+                 {'params': model.features_sequence_to_vector.parameters(), 'lr': config.opt.features_sequence_to_vector_lr if hasattr(config.opt, "features_sequence_to_vector_lr") else config.opt.lr},
+                 {'params': model.grid_deformator.parameters(), 'lr': config.opt.grid_deformator_lr if hasattr(config.opt, "grid_deformator_lr") else config.opt.lr},
+                ] + \
+                ([{'params':model.auxilary_backbone.parameters(), 'lr': config.opt.auxilary_backbone_lr if hasattr(config.opt, "auxilary_backbone_lr") else config.opt.lr}] if model.use_auxilary_backbone else []),
+                lr=config.opt.lr)
+
+        elif config.model.name == "vol_temporal_eidetic":
+            raise NotImplementedError                            
+
         else:
-            opt = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=config.opt.lr)
+            raise RuntimeError('Unknown config.model.name')
 
     # use_temporal_discriminator_loss
     discriminator = None
@@ -617,9 +574,9 @@ def main(args):
     # experiment
     experiment_dir, writer = None, None
     if master:
-        # pass
         experiment_dir, writer = setup_experiment(config, type(model).__name__, is_train=not args.eval)
-
+    print ('Experiment in logdir:', args.logdir)    
+        
     # multi-gpu
     if is_distributed:
         model = DistributedDataParallel(model, device_ids=[device])
@@ -667,11 +624,7 @@ def main(args):
                 print ('Saving model...')
                 save(experiment_dir, model, opt, epoch, discriminator, opt_discr, use_temporal_discriminator_loss)
             print(f"{n_iters_total_train} iters done.")
-        # except BaseException:
-            # print('Exception:',sys.exc_info()[0])
-            # print ('Saving model...')
-            # save(experiment_dir, model, opt, epoch, discriminator, opt_discr, use_temporal_discriminator_loss)
-                    
+   
     else:
         if args.eval_dataset == 'train':
             one_epoch(model, 

@@ -493,13 +493,16 @@ class PoseHighResolutionNet(nn.Module):
         if os.path.isfile(checkpoint):
             pretrained_state_dict = torch.load(checkpoint, map_location=device)
             print('=> loading pretrained model {}'.format(checkpoint))
-            pretrained_state_dict = pretrained_state_dict['model_state']            
-            # need_init_state_dict = {}
-            # for name, m in pretrained_state_dict.items():
-            #     if name.split('.')[0] in self.pretrained_layers \
-            #        or self.pretrained_layers[0] is '*':
-            #         need_init_state_dict[name] = m
-            self.load_state_dict(pretrained_state_dict, strict=True)
+            if 'model_state' in pretrained_state_dict.keys():
+                pretrained_state_dict = pretrained_state_dict['model_state']  
+            model_state_dict = self.state_dict()
+
+            new_pretrained_state_dict = {}
+            for k, v in pretrained_state_dict.items():
+                if k in model_state_dict: #and v.shape == model_state_dict[k.replace(prefix, "")].shape:
+                    new_pretrained_state_dict[k] = v
+
+            self.load_state_dict(new_pretrained_state_dict, strict=True)
 
         else:
             print('=> init weights from normal distribution')
@@ -521,9 +524,11 @@ class PoseHighResolutionNet(nn.Module):
 
         
 
-def get_pose_net(cfg, device, group_norm=True):
-    model = PoseHighResolutionNet(cfg, group_norm=group_norm)
-    if cfg.init_weights:
-        model.init_weights(cfg.checkpoint, device)
+def get_pose_net(config, device):
+
+    group_norm = config.group_norm
+    model = PoseHighResolutionNet(config, group_norm=group_norm)
+    if config.init_weights:
+        model.init_weights(config.checkpoint, device)
 
     return model

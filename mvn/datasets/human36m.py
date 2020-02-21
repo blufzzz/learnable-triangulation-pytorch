@@ -277,7 +277,7 @@ class Human36MMultiViewDataset(Dataset):
             keypoints_3d_predicted = keypoints_3d_predicted[:, cmu_joints]
 
         # mean error per 16/17 joints in mm, for each pose
-        per_pose_error = np.sqrt(((keypoints_gt - keypoints_3d_predicted) ** 2).sum(2)).mean(1)
+        # per_pose_error = np.sqrt(((keypoints_gt - keypoints_3d_predicted) ** 2).sum(2)).mean(1)
 
         # relative mean error per 16/17 joints in mm, for each pose
         if not (transfer_cmu_to_human36m or transfer_human36m_to_human36m):
@@ -290,12 +290,12 @@ class Human36MMultiViewDataset(Dataset):
 
         per_pose_error_relative = np.sqrt(((keypoints_gt_relative - keypoints_3d_predicted_relative) ** 2).sum(2)).mean(1)
 
-        result = {
-            'per_pose_error': self.evaluate_using_per_pose_error(per_pose_error, split_by_subject, mask),
-            'per_pose_error_relative': self.evaluate_using_per_pose_error(per_pose_error_relative, split_by_subject, mask)
-        }
+        # result = {
+        #     'per_pose_error': self.evaluate_using_per_pose_error(per_pose_error, split_by_subject, mask),
+        #     'per_pose_error_relative': self.evaluate_using_per_pose_error(per_pose_error_relative, split_by_subject, mask)
+        # }
 
-        return result['per_pose_error_relative']['Average']['Average'], result
+        return per_pose_error_relative.mean()
 
 
 
@@ -487,7 +487,7 @@ class Human36MTemporalDataset(Human36MMultiViewDataset):
 
         original_labels = self.labels['table'].copy()
 
-        cameras_results  = {}
+        result  = 0
         # get indexes corrsesponding to cameras we've iterated over 
         # e.g. we've iterated over cameras [1,2], but in the `__getitem__` they've [0,1] `camera_idx` 
         evaluate_cameras_indexes = [self.iterate_cameras_names.index(self.labels['camera_names'][camera_idx]) for camera_idx in self.evaluate_cameras]
@@ -501,15 +501,13 @@ class Human36MTemporalDataset(Human36MMultiViewDataset):
             # to ensure proper evaluation in super().evaluate() below
             self.labels['table'] = original_labels[self.pivot_indxs][shot_indexes_for_camera]
 
-            result = super(Human36MTemporalDataset, self).evaluate(keypoints_3d_predicted[camera_mask],
+            result += super(Human36MTemporalDataset, self).evaluate(keypoints_3d_predicted[camera_mask],
                                                                     mask = mask,
                                                                     split_by_subject=split_by_subject,
                                                                     transfer_cmu_to_human36m=transfer_cmu_to_human36m,
                                                                     transfer_human36m_to_human36m=transfer_human36m_to_human36m)
 
-            cameras_results[camera_index] = result
-
         # to ensure furtfer __getitem__ iterations
         self.labels['table'] = original_labels
 
-        return cameras_results
+        return result / len(evaluate_cameras_indexes)

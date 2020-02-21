@@ -46,6 +46,8 @@ model:
   heatmap_multiplier: 100.0
 
   backbone:
+
+    group_norm: true
     name: "hrnet32"  
 
     init_weights: true

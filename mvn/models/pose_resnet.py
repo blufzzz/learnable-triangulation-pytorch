@@ -342,7 +342,8 @@ class PoseResNet(nn.Module):
         return heatmaps, features, alg_confidences, vol_confidences, bottleneck
 
 
-def get_pose_net(config, group_norm=False, strict=False, device='cuda:0'):
+def get_pose_net(config, strict=True, device='cuda:0'):
+    group_norm = config.group_norm
     block_class, layers = resnet_spec[config.num_layers]
     if config.style == 'caffe':
         block_class = Bottleneck_CAFFE

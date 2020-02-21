@@ -1,9 +1,26 @@
 #!/bin/bash
-srun -p TitanX --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w hpc2 \
+srun -p TitanBlack --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-06 \
 python3.6 train.py \
---logdir=../logs/grid \
---config=./experiments/human36m/train/human36m_vol_temporal_grid.yaml \
---experiment_comment="h36_sv32_dist_cnn2d-128_s32_v2v-groupnorm_f2v-backbone-groupnorm_dt-9_dil-3-1-1_lr-1e-4"
+--logdir=../logs/adain_lstm_32-16-8 \
+--config=./experiments/human36m/train/human36m_vol_temporal_adain.yaml \
+--experiment_comment="h36_sv16-vf64_dist_adain_lstm-1024-512-256-all_group-ada_f2v-backbone-groupnorm_encoder-C2-1024_dt-8_dil-3-1-1_lr-1e-4"
+
+
+# --logdir=../logs/adain_cnn \
+# --config=./experiments/human36m/train/human36m_vol_temporal_adain.yaml \
+# --experiment_comment="h36_sv32_dist_ada`in-all-group-ada_s2v-cnn-512-group_s256_vf32_f2v-backbone-C2-1024_resnet152-bn-nostylegrad_dt-9_dil-3-1-1_lr-1e-4"
+
+
+# --logdir=../logs/grid \
+# --config=./experiments/human36m/train/human36m_vol_temporal_grid.yaml \
+# --experiment_comment="h36_sv32_dist_cnn2d-128_s64-nostylegrad_v2v-groupnorm_resnet152-groupnorm_dt-9_dil-3-1-1_lr-1e-4"
+
+
+# python3.6 train.py \
+# --logdir=../logs/baseline \
+# --config=./experiments/human36m/train/human36m_vol_baseline_hrnet.yaml \
+# --experiment_comment="h36_sv64_dist_baseline_hrnet32coco-h36m-groupnorm_bs-1-1_norot"
+
 
 # python3.6 train.py \
 # --logdir=../logs/adain_lstm_32 \
@@ -11,14 +28,5 @@ python3.6 train.py \
 # --experiment_comment="h36_sv32_dist_adain-lstm-all-group-ada_s256_f2v-backbone-C2-1024_dt-8_dil-3-2-2_lr-1e-4"
 
 
-# python3.6 train.py \
-# --logdir=../logs/baseline \
-# --config=./experiments/human36m/train/human36m_vol_baseline.yaml \
-# --experiment_comment="h36_sv32_dist_baseline_bs-1-1_rotation"
 
 
-
-# python3.6 train.py \
-# --logdir=../logs/adain_lstm \
-# --config=./experiments/human36m/train/human36m_vol_temporal_adain.yaml \
-# --experiment_comment="h36_sv32_dist_adain-lstm-all-group-ada_s256_f2v-backbone-C2-1024_dt-8_dil-3-1-1_lr-1e-4"
