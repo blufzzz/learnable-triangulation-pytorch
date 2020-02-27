@@ -5,34 +5,23 @@ import torch.nn.functional as F
 import torch
  
 
+class SPADE(nn.Module):
+    pass 
+
 class AdaIN(nn.Module):
     def __init__(self):
         super(AdaIN, self).__init__()
     def forward(self, features, params, eps = 1e-4 ,debug=False):
         # features: [batch_size, C, D1, D2, D3]
-        # params: [batch_size, 2]
-        use_adain_params = params is not None
+        # params: [batch_size, 2*С]
+        assert params is not None
         size = features.size()
         batch_size, C = features.shape[:2]
         unbiased = features.view(batch_size, C, -1).shape[-1] == 1
 
-        if use_adain_params:
-            # if debug:
-            #     set_trace()
-            adain_mean = params[:,:C].view(batch_size, C,1,1,1)
-            adain_std = params[:,C:].view(batch_size, C,1,1,1)
-        else:
-            if batch_size % 2 != 0:
-                print ('batch should contain concatenated features and style batches')
-            batch_size = batch_size // 2
-           
-            # dont change the order!
-            style = features[batch_size:] 
-            features = features[:batch_size]
-
-            adain_mean = style.view(batch_size, C, -1).mean(-1).view(batch_size, C,1,1,1)
-            adain_std = style.view(batch_size, C, -1).std(-1).view(batch_size, C,1,1,1) 
-        
+        adain_mean = params[:,:C].view(batch_size, C,1,1,1)
+        adain_std = params[:,C:].view(batch_size, C,1,1,1)
+    
         features_mean = features.view(batch_size, C, -1).mean(-1).view(batch_size, C,1,1,1)
         features_std = features.view(batch_size, C, -1).std(-1, unbiased=unbiased).view(batch_size, C,1,1,1)
 
@@ -169,7 +158,7 @@ class Upsample3DBlock(nn.Module):
 
 
 class EncoderDecorder(nn.Module):
-    def __init__(self, normalization_type, volume_size=16):
+    def __init__(self, normalization_type, volume_size):
         super().__init__()
         self.normalization_type = normalization_type
         self.encoder_pool1 = Pool3DBlock(2)
@@ -263,7 +252,7 @@ class EncoderDecorder(nn.Module):
 
 
 class V2VModel(nn.Module):
-    def __init__(self, input_channels, output_channels, volume_size=16, normalization_type='batch_norm'):
+    def __init__(self, input_channels, output_channels, volume_size, normalization_type='batch_norm'):
             super().__init__()
             self.normalization_type=normalization_type
             self.front_layer1 = Basic3DBlock(input_channels, 32, 7, normalization_type)
@@ -379,8 +368,9 @@ class V2VModelAdaIN_MiddleVector(V2VModel):
 
 
 class EncoderDecorder_v2(nn.Module):
-    def __init__(self, normalization_type):
+    def __init__(self, normalization_type, n_poolings=4):
         super().__init__()
+        assert n_poolings <= 5
         self.normalization_type = normalization_type
         self.encoder_pool1 = Pool3DBlock(2)
         self.encoder_res1 = Res3DBlock(128, 128, normalization_type)
@@ -419,21 +409,30 @@ class EncoderDecorder_v2(nn.Module):
     def forward(self, x, params):
         skip_x1 = self.skip_res1(x, params[:3])
         x = self.encoder_pool1(x)
+        #print ('After pool1', x.shape)
+
         x = self.encoder_res1(x, params[3:5])
         skip_x2 = self.skip_res2(x, params[5:8])
         x = self.encoder_pool2(x)
+        #print ('After pool2', x.shape)
+
         x = self.encoder_res2(x, params[8:10])
         skip_x3 = self.skip_res3(x, params[10:13])
         x = self.encoder_pool3(x)
+        #print ('After pool3', x.shape)
+
         x = self.encoder_res3(x, params[13:15])
         skip_x4 = self.skip_res4(x, params[15:17])
         x = self.encoder_pool4(x)
+        #print ('After pool4', x.shape)
+
         x = self.encoder_res4(x, params[17:19])
         skip_x5 = self.skip_res5(x, params[19:21])
         # x = self.encoder_pool5(x)
         x = self.encoder_res5(x, params[21:24]) 
 
-        x = self.mid_res(x, params[24:26])
+        x = self.mid_res(x, params[24:26]) #([1, 256, 2, 2, 2]) for vs=32
+        #print ('Mid res', x.shape) 
 
         x = self.decoder_res5(x, params[26:29])
         # x = self.decoder_upsample5(x, params[29])
@@ -455,14 +454,14 @@ class EncoderDecorder_v2(nn.Module):
 
 
 class V2VModel_v2(nn.Module):
-    def __init__(self, input_channels, output_channels, normalization_type='batch_norm'):
+    def __init__(self, input_channels, output_channels, volume_size, n_poolings=4, normalization_type='batch_norm'):
             super().__init__()
             self.normalization_type=normalization_type
             self.front_layer1 = Res3DBlock(input_channels, 128, normalization_type)
             self.front_layer2 = Res3DBlock(128, 128, normalization_type)
             # [128,128  128,128]
 
-            self.encoder_decoder = EncoderDecorder_v2(normalization_type)
+            self.encoder_decoder = EncoderDecorder_v2(normalization_type, n_poolings)
             # [16,16,16  128,128,128,  32,32,32, 128,128,  64,64,64,  128,128,
             # 128,128,  128,128,  128,128  256,256,256,  256,256,
             # 128,128,128,  128,  128,128,  128,  64,64,64,  64,  32,32,32,  32,  32,32,  32]

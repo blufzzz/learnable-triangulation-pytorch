@@ -272,6 +272,9 @@ def unproject_heatmaps(heatmaps,
         else:
             raise ValueError("Unknown volume_aggregation_method: {}".format(volume_aggregation_method))
 
+    if volume_aggregation_method == 'no_aggregation':
+            volume_batch = torch.cat(volume_batch, 0)
+
     return volume_batch
 
 

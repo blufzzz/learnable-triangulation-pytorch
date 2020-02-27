@@ -32,25 +32,26 @@ opt:
 model:
   name: "vol_temporal_adain"
   kind: "mpii"
-  volume_aggregation_method: "no_aggregation"
-  adain_type: 'all' # if 'all' then normalization_type: 'adain' or 'ada-group_norm'
   
-  volume_features_dim: 64 #32
-  style_vector_dim: 256 #256 #256
-
   encoder_type: "backbone"
   encoder_capacity_multiplier: 2
   encoder_normalization_type: 'group_norm'
-  encoded_feature_space: 1024
+  encoded_feature_space: 256
+  upscale_bottleneck: true # True only with encoder_type='bottleneck'
 
-  f2v_type: 'lstm'
+  f2v_type: 'cnn2d'
   f2v_normalization_type: 'group_norm'
-  f2v_intermediate_channels: 512
-  kernel_size: 3 #3 # for cnn only 
-  
+  f2v_intermediate_channels: 256
+  style_vector_dim: 64 
+
+  v2v_type: 'v2'
+  v2v_normalization_type: 'group_norm' #'ada-group_norm'
+  volume_aggregation_method: "no_aggregation"
+  temporal_condition_type: 'stack' #'adain'
+  volume_features_dim: 64 
+
   include_pivot: false # including pivot getting thigs worse
   style_grad_for_backbone: false
-  v2v_normalization_type: 'group-ada_norm' #'ada-group_norm'
 
   init_weights: false
   checkpoint: ""
@@ -63,8 +64,7 @@ model:
   cuboid_multiplier: 1.0
   rotation: false
 
-
-  volume_size: 16
+  volume_size: 32
   volume_multiplier: 1.0
   volume_softmax: true
 

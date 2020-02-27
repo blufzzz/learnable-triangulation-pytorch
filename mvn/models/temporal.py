@@ -7,7 +7,7 @@ from pytorch_convolutional_rnn.convolutional_rnn import Conv2dLSTM, Conv2dPeepho
 from mvn.models.v2v import Res3DBlock
 
 
-def get_normalization(normalization_type, out_planes, n_groups=32):
+def get_normalization_2d(normalization_type, out_planes, n_groups):
     if normalization_type ==  'batch_norm':
         return nn.BatchNorm2d(out_planes)
     elif normalization_type == 'group_norm':
@@ -15,25 +15,25 @@ def get_normalization(normalization_type, out_planes, n_groups=32):
     else:
         raise RuntimeError('{} is unknown normalization_type for this model'.format(normalization_type))   
 
-
 class Slice(nn.Module):
     def __init__(self, shift):
         super(Slice, self).__init__()
         self.shift = shift
-    def forward(self,x):
+    def forward(self, x):
         return x[:, :, self.shift : x.shape[2] - self.shift]
 
 class Res1DBlock(nn.Module):
-    def __init__(self, in_planes, out_planes, n_groups = 32, kernel_size=3):
+    def __init__(self, in_planes, out_planes, n_groups = 32,
+                 kernel_size=3, normalization_type='group_norm'):
         
         super(Res1DBlock, self).__init__()
         pad = kernel_size // 2 if kernel_size > 1 else 0
         self.res_branch = nn.Sequential(
             nn.Conv1d(in_planes, out_planes, kernel_size=kernel_size, padding=pad),
-            nn.GroupNorm(n_groups, out_planes),
+            get_normalization_2d(normalization_type, out_planes, n_groups=n_groups),
             nn.ReLU(True),
             nn.Conv1d(out_planes, out_planes, kernel_size=kernel_size),
-            nn.GroupNorm(n_groups, out_planes)
+            get_normalization_2d(normalization_type, out_planes, n_groups=n_groups)
         )
 
         if in_planes == out_planes:
@@ -42,7 +42,7 @@ class Res1DBlock(nn.Module):
             self.skip_con = nn.Sequential(
                 Slice(kernel_size // 2),
                 nn.Conv1d(in_planes, out_planes, kernel_size=1),
-                nn.GroupNorm(n_groups, out_planes)
+                get_normalization_2d(normalization_type, out_planes, n_groups=n_groups)
             )
 
     def forward(self, x):
@@ -52,92 +52,30 @@ class Res1DBlock(nn.Module):
         return F.relu(res + skip, True)
 
 
-class Basic2DBlock(nn.Module):
-    def __init__(self, in_planes, out_planes, kernel_size):
-        super(Basic2DBlock, self).__init__()
-        self.block = nn.Sequential(
-            nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=1, padding=((kernel_size-1)//2)),
-            nn.BatchNorm2d(out_planes),
-            nn.ReLU(True)
-        )
-
-    def forward(self, x):
-        return self.block(x)
-
-
-class Pool2DBlock(nn.Module):
-    def __init__(self, pool_size):
-        super(Pool2DBlock, self).__init__()
-        self.pool_size = pool_size
-
-    def forward(self, x):
-        return F.max_pool2d(x, kernel_size=self.pool_size, stride=self.pool_size)
-
-class Res2DBlock(nn.Module):
-    def __init__(self, in_planes, out_planes):
-        super(Res2DBlock, self).__init__()
-        self.res_branch = nn.Sequential(
-            nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(out_planes),
-            nn.ReLU(True),
-            nn.Conv2d(out_planes, out_planes, kernel_size=3, stride=1, padding=1),
-            nn.BatchNorm2d(out_planes)
-        )
-
-        if in_planes == out_planes:
-            self.skip_con = nn.Sequential()
-        else:
-            self.skip_con = nn.Sequential(
-                nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=1, padding=0),
-                nn.BatchNorm2d(out_planes)
-            )
-
-    def forward(self, x):
-        res = self.res_branch(x)
-        skip = self.skip_con(x)
-        return F.relu(res + skip, True)
-
-
-class Upsample2DBlock(nn.Module):
-    def __init__(self, in_planes, out_planes, kernel_size, stride):
-        super(Upsample2DBlock, self).__init__()
-        assert(kernel_size == 2)
-        assert(stride == 2)
-        self.block = nn.Sequential(
-            nn.ConvTranspose2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride, padding=0, output_padding=0),
-            nn.BatchNorm2d(out_planes),
-            nn.ReLU(True)
-        )
-
-    def forward(self, x):
-        return self.block(x)
-
-
 class Seq2VecRNN2D(nn.Module):
-    """docstring for Seq2VecRNN"""
-    def __init__(self, input_features_dim, output_features_dim=64, hidden_dim = 64):
+    """Maps feature-map sequence [batch_size, dt, C1, H, W] 
+    to feature-map [batch_size, C2, H, W]"""
+    def __init__(self, input_features_dim, output_features_dim=64, hidden_dim=64):
         super(Seq2VecRNN2D, self).__init__()
         self.input_features_dim = input_features_dim
         self.output_features_dim = output_features_dim
         self.hidden_dim = hidden_dim
-        self.bidirectional = True
         
         self.lstm = Conv2dLSTM(in_channels=input_features_dim,  # Corresponds to input size
                                    out_channels=hidden_dim,  # Corresponds to hidden size
                                    kernel_size=3,  # Int or List[int]
                                    num_layers=2,
-                                   bidirectional=self.bidirectional,
+                                   bidirectional=True,
                                    dilation=1, 
                                    stride=1,
-                                   dropout=0.2,
+                                   dropout=0.0,
                                    batch_first=True)
 
-        self.output_layer = nn.Conv2d(2*self.hidden_dim if self.bidirectional else self.hidden_dim,
-                                      self.output_features_dim, kernel_size=1)
+        self.output_layer = nn.Conv2d(2*self.hidden_dim, self.output_features_dim, kernel_size=1)
         self.activation = nn.ReLU()
         
     def forward(self, features, eps = 1e-3, device='cuda:0'):
-        # [bathc_size, dt, feature_shape]
+        # [batch_size, dt, feature_shape]
         batch_size = features.shape[0]
         output, _ = self.lstm(features, None)
         output = output[:,-1,...]
@@ -146,11 +84,12 @@ class Seq2VecRNN2D(nn.Module):
 
 
 class Seq2VecCNN2D(nn.Module):
-    """docstring for Seq2VecCNN2D"""
+    """Maps feature-map sequence [batch_size, dt, C1, H, W] 
+    to feature-map [batch_size, C2, H, W]"""
     def __init__(self, 
                  input_features_dim, 
                  output_features_dim=32, 
-                 intermediate_channel = 128,
+                 intermediate_channels = 128,
                  normalization_type='group_norm',
                  kernel_size = 3,
                  dt = 8):
@@ -161,8 +100,8 @@ class Seq2VecCNN2D(nn.Module):
         self.normalization_type = normalization_type
         self.dt = dt
         
-        self.first_block = nn.Conv32(input_features_dim, 
-                                      intermediate_channel,
+        self.first_block = nn.Conv3d(input_features_dim, 
+                                      intermediate_channels,
                                       kernel_size=(1,kernel_size,kernel_size))
 
         l = dt
@@ -170,31 +109,32 @@ class Seq2VecCNN2D(nn.Module):
         while l >= kernel_size:
             l = l - kernel_size + 1
             
-            blocks.append(nn.Conv3d(intermediate_channel, 
-                                 intermediate_channel,
+            blocks.append(nn.Conv3d(intermediate_channels, 
+                                 intermediate_channels,
                                  kernel_size = kernel_size,
                                  padding = (0,1,1)))
-            blocks.append(nn.GroupNorm(32, intermediate_channel))
-            blocks.append(Res3DBlock(intermediate_channel, 
-                                     intermediate_channel,
+            blocks.append(nn.GroupNorm(32, intermediate_channels))
+            blocks.append(Res3DBlock(intermediate_channels, 
+                                     intermediate_channels,
                                      normalization_type=normalization_type,
                                      kernel_size = kernel_size,
                                      padding = 1))
             
         self.blocks = nn.Sequential(*blocks)    
-        self.final_block = nn.Conv3d(intermediate_channel, 
+        self.final_block = nn.Conv3d(intermediate_channels, 
                                       output_features_dim,
                                       kernel_size=(l,1,1),
                                       padding=(0,1,1))
         
     def forward(self, x, device='cuda:0'):
-        # [batch_size, dt,channels dt,96.96]
+        # [batch_size, dt, channels, 96, 96]
         x = x.transpose(1,2)
+        # [batch_size, channels, dt, 96, 96]
         x  = self.first_block(x)
         x  = self.blocks(x)
         x  = self.final_block(x)
         
-        return x[:,:,0,...]
+        return x[:,:,0,...] # squeeze time dimension
 
 
 
@@ -213,11 +153,11 @@ class Seq2VecCNN(nn.Module):
         self.input_features_dim = input_features_dim
         self.output_features_dim = output_features_dim
         self.intermediate_channels = intermediate_channels
+        self.normalization_type = normalization_type
         
         self.first_block = Res1DBlock(input_features_dim, 
                                       intermediate_channels,
                                       kernel_size=1)
-        
         
         l = dt
         blocks =  []
@@ -228,10 +168,10 @@ class Seq2VecCNN(nn.Module):
                                      kernel_size = kernel_size))
 
             blocks.append(nn.Sequential(nn.Conv1d(intermediate_channels, intermediate_channels, kernel_size=3, padding=1),
-                                        nn.GroupNorm(n_groups, intermediate_channels),
+                                        get_normalization_2d(normalization_type, intermediate_channels, n_groups=n_groups),
                                         nn.ReLU(True),
                                         nn.Conv1d(intermediate_channels, intermediate_channels, kernel_size=3, padding=1),
-                                        nn.GroupNorm(n_groups, intermediate_channels),
+                                        get_normalization_2d(normalization_type, intermediate_channels, n_groups=n_groups),
                                         nn.ReLU(True)
                                         ))
         
@@ -302,35 +242,205 @@ class FeaturesEncoder_DenseNet(nn.Module):
         return x   
 
 
+class FeaturesEncoder_Features2D(nn.Module):
+    """docstring for FeaturesEncoder_Features2D"""
+    def __init__(self, input_features_dim, output_features_dim, C = 2, multiplier=128, n_groups=32, normalization_type='batch_norm'):
+        super().__init__()
+        self.output_features_dim = output_features_dim
+        self.input_features_dim = input_features_dim
+        self.C = C
+        self.multiplier = multiplier
+        
+        if self.C == 0:
+            self.features = nn.Sequential()
+        else:    
+            self.features=nn.Sequential(nn.Conv2d(input_features_dim, 
+                                                  self.C * self.multiplier, 
+                                                  kernel_size=3, 
+                                                  padding=1),
+                                          get_normalization_2d(normalization_type,
+                                                               self.C * self.multiplier, n_groups=n_groups),
+                                          nn.ReLU(),
+                                          nn.Conv2d(self.C * self.multiplier, 
+                                                    self.C * self.multiplier//2, 
+                                                    kernel_size=3, 
+                                                    padding=1),
+                                          get_normalization_2d(normalization_type,
+                                                               self.C * self.multiplier//2, n_groups=n_groups),
+                                          nn.ReLU(),
+                                          nn.Conv2d(self.C * self.multiplier//2,
+                                                    self.C * self.multiplier//4, 
+                                                    kernel_size=3, 
+                                                    padding=1),
+                                          get_normalization_2d(normalization_type,
+                                                               self.C * self.multiplier//4, n_groups=n_groups),
+                                          nn.ReLU(),
+                                          nn.Conv2d(self.C * self.multiplier//4,
+                                                    self.C * self.multiplier//4, kernel_size=1),
+                                          get_normalization_2d(normalization_type,
+                                                               self.C * self.multiplier//4, n_groups=n_groups),
+                                          nn.ReLU(),
+                                          nn.Conv2d(self.C * self.multiplier//4, output_features_dim, kernel_size=1)
+                                        )
+        
+    def forward(self, x):
+        # [2048, 12, 12] x size for backbone
+        batch_size = x.shape[0]
+        x = self.features(x)
+        return x     
 
-class FeaturesEncoder_Bottleneck(nn.Module):
-    """docstring for FeaturesEncoder_Bottleneck"""
-    def __init__(self, output_features_dim, C = 2, multiplier=128, n_groups=32, normalization_type='batch_norm'):
+
+
+# class FeaturesEncoder_Bottleneck2D(nn.Module):
+#     """docstring for FeaturesEncoder_Bottleneck2D"""
+#     def __init__(self, output_features_dim, C = 2, multiplier=128, n_groups=32, normalization_type='batch_norm', upscale=False):
+#         super().__init__()
+#         self.output_features_dim = output_features_dim
+#         self.C = C
+#         self.multiplier = multiplier
+#         self.features=nn.Sequential(nn.Conv2d(2048, 
+#                                               self.C * self.multiplier, 
+#                                               kernel_size=3, 
+#                                               padding=1),
+#                                       get_normalization_2d(normalization_type,
+#                                                            self.C * self.multiplier, n_groups=n_groups),
+#                                       nn.ReLU(),
+
+
+#                                       nn.Conv2d(self.C * self.multiplier, 
+#                                                 self.C * self.multiplier//2, 
+#                                                 kernel_size=3, 
+#                                                 padding=1),
+#                                       get_normalization_2d(normalization_type,
+#                                                            self.C * self.multiplier//2, n_groups=n_groups),
+#                                       nn.ReLU(),
+
+
+#                                       nn.Conv2d(self.C * self.multiplier//2,
+#                                                 self.C * self.multiplier//4, 
+#                                                 kernel_size=3, 
+#                                                 padding=1),
+#                                       get_normalization_2d(normalization_type,
+#                                                            self.C * self.multiplier//4, n_groups=n_groups),
+#                                       nn.ReLU(),
+
+
+#                                       nn.Conv2d(self.C * self.multiplier//4,
+#                                                 self.C * self.multiplier//4, kernel_size=1),
+#                                       get_normalization_2d(normalization_type,
+#                                                            self.C * self.multiplier//4, n_groups=n_groups),
+#                                       nn.ReLU()
+
+
+#                                     )
+#         self.final_layer = nn.Conv2d(self.C * self.multiplier//4, output_features_dim, kernel_size=1)
+        
+#     def forward(self, x):
+#         # [2048, 12, 12]
+#         batch_size = x.shape[0]
+#         x = self.features(x)
+#         x = self.final_layer(x)
+#         return x          
+
+class FeaturesEncoder_Bottleneck2D(nn.Module):
+    """docstring for FeaturesEncoder_Bottleneck2D"""
+    def __init__(self,
+                 output_features_dim,
+                 input_channels,
+                 C=2, 
+                 multiplier=128, 
+                 n_groups=32, 
+                 normalization_type='batch_norm', 
+                 upscale=False, 
+                 input_size=None, 
+                 target_size=None,
+                 upscale_kernel_size=2):
+        
         super().__init__()
         self.output_features_dim = output_features_dim
         self.C = C
         self.multiplier = multiplier
-        self.features=nn.Sequential(nn.Conv2d(2048, 
+        self.upscale = upscale
+        self.upscale_kernel_size = upscale_kernel_size
+        self.normalization_type = normalization_type
+        self.n_groups = n_groups
+        modules=[]
+            
+        size = input_size 
+        in_channels = input_channels
+        out_channels = input_channels
+        i = 1
+        while True:
+            size *= upscale_kernel_size
+            if size > target_size:
+                break
+            out_channels = self.C * self.multiplier//i
+            modules.append(self._get_upscale_block(in_channels, out_channels))
+            if i < 4:
+                i*=2
+            in_channels = out_channels
+        
+        self.features = nn.Sequential(*modules)
+        self.final_upscale = nn.UpsamplingBilinear2d(size=target_size)
+        self.final_layer = nn.Conv2d(out_channels, output_features_dim, kernel_size=1)
+    
+    def _get_upscale_block(self, in_channels, out_channels):
+        
+        block = nn.Sequential(nn.Conv2d(in_channels, 
+                                        out_channels, 
+                                        kernel_size=3, 
+                                        padding=1),
+                                        get_normalization_2d(self.normalization_type, 
+                                                             out_channels, 
+                                                             n_groups=self.n_groups))
+        if self.upscale:
+            block.add_module('upscale',nn.ConvTranspose2d(out_channels, 
+                                                          out_channels, 
+                                                          kernel_size=self.upscale_kernel_size, 
+                                                          stride=self.upscale_kernel_size))
+        return block
+    
+    def forward(self, x):
+        # [2048, 12, 12]
+        batch_size = x.shape[0]
+        x = self.features(x)
+        x =  self.final_upscale(x)
+        x = self.final_layer(x)
+        return x          
+
+
+class FeaturesEncoder_Bottleneck(nn.Module):
+    """docstring for FeaturesEncoder_Bottleneck"""
+    def __init__(self, output_features_dim, input_channels, C = 2, multiplier=128, n_groups=32, normalization_type='batch_norm'):
+        super().__init__()
+        self.output_features_dim = output_features_dim
+        self.C = C
+        self.multiplier = multiplier
+        self.features=nn.Sequential(nn.Conv2d(input_channels, 
                                               self.C * self.multiplier, 
                                               kernel_size=3, 
                                               stride=2),
-                                      get_normalization(normalization_type, self.C * self.multiplier, n_groups=32),
+                                      get_normalization_2d(normalization_type,
+                                                           self.C * self.multiplier, n_groups=n_groups),
                                       nn.ReLU(),
                                       nn.Conv2d(self.C * self.multiplier, 
                                                 self.C * self.multiplier//2, 
                                                 kernel_size=3, 
                                                 stride=1),
-                                      get_normalization(normalization_type, self.C * self.multiplier//2, n_groups=32),
+                                      get_normalization_2d(normalization_type,
+                                                           self.C * self.multiplier//2, n_groups=n_groups),
                                       nn.ReLU(),
                                       nn.Conv2d(self.C * self.multiplier//2,
                                                 self.C * self.multiplier//4, 
                                                 kernel_size=3, 
                                                 stride=1),
-                                      get_normalization(normalization_type, self.C * self.multiplier//4, n_groups=32),
+                                      get_normalization_2d(normalization_type,
+                                                           self.C * self.multiplier//4, n_groups=n_groups),
                                       nn.ReLU(),
                                       nn.Conv2d(self.C * self.multiplier//4,
                                                 self.C * self.multiplier//4, kernel_size=1),
-                                      get_normalization(normalization_type, self.C * self.multiplier//4, n_groups=32),
+                                      get_normalization_2d(normalization_type,
+                                                           self.C * self.multiplier//4, n_groups=n_groups),
                                       nn.ReLU()
                                     )
         
