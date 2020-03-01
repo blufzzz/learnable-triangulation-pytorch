@@ -86,6 +86,34 @@ model:
     return_heatmaps: false
     return_bottleneck: true
 
+  v2v_configuration:
+
+    downsampling: [{'module_type': 'Res3DBlock', 'params':[128,128], 'adain': true},
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': true},
+                  {'module_type': 'Pool3DBlock', 'params': [2], 'adain': false}, # pool
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': true},
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': true},
+                  {'module_type': 'Pool3DBlock', 'params': [2], 'adain': false}, # pool
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': true},
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': true},
+                  {'module_type': 'Pool3DBlock', 'params':[2], 'adain': false}, # pool
+                  {'module_type': 'Res3DBlock', 'params':[128,256], 'adain': true}]
+
+    bottleneck: [{'module_type': 'Res3DBlock', 'params': [256,256], 'adain': true} ] 
+
+    upsampling: [{'module_type': 'Res3DBlock', 'params':[256,128], 'adain': true},
+                  {'module_type': 'Upsample3DBlock', 'params': [128, 128, 2, 2], 'adain': false},
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': true},
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': true},
+                  {'module_type': 'Upsample3DBlock', 'params': [128, 128, 2, 2], 'adain': false},
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': true},
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': true},
+                  {'module_type': 'Upsample3DBlock', 'params':[128, 128, 2, 2], 'adain': false},
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': true},
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': true}]              
+
+                   
+
 dataset:
   kind: "human36m"
   dt: 8

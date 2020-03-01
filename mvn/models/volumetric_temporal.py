@@ -14,7 +14,7 @@ from mvn.utils import multiview
 from mvn.utils import img
 from mvn.utils import misc
 from mvn.utils import volumetric
-from mvn.models.v2v import V2VModel, V2VModelAdaIN_MiddleVector, V2VModel_v2, SPADE
+from mvn.models.v2v import V2VModel, V2VModel_v2, SPADE
 from mvn.models.temporal import Seq2VecRNN,\
                                 Seq2VecCNN, \
                                 Seq2VecRNN2D, \
