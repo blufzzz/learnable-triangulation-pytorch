@@ -28,11 +28,8 @@ class AdaIN(nn.Module):
         features_mean = features.view(batch_size, C, -1).mean(-1).view(batch_size, C,1,1,1)
         features_std = features.view(batch_size, C, -1).std(-1, unbiased=unbiased).view(batch_size, C,1,1,1)
 
-        if use_adain_params:
-            features = ((features - features_mean) / (features_std + eps)) * adain_std + adain_mean
-            return features
-        else:    
-            return torch.cat([((features - features_mean) / (features_std + eps)) * adain_std + adain_mean, style])
+        features = ((features - features_mean) / (features_std + eps)) * adain_std + adain_mean
+        return features
 
 
 class AdaGroupNorm(nn.Module):
