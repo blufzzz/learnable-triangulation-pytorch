@@ -573,9 +573,9 @@ def main(args):
 
     # experiment
     experiment_dir, writer = None, None
-    if master:
-        experiment_dir, writer = setup_experiment(config, type(model).__name__, is_train=not args.eval)
-    print ('Experiment in logdir:', args.logdir)    
+    # if master:
+    #     experiment_dir, writer = setup_experiment(config, type(model).__name__, is_train=not args.eval)
+    # print ('Experiment in logdir:', args.logdir)    
         
     # multi-gpu
     if is_distributed:

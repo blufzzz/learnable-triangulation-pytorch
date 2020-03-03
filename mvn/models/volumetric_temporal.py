@@ -14,7 +14,7 @@ from mvn.utils import multiview
 from mvn.utils import img
 from mvn.utils import misc
 from mvn.utils import volumetric
-from mvn.models.v2v import V2VModel, V2VModel_v2, SPADE
+from mvn.models.v2v import V2VModel, V2VModel_v2
 from mvn.models.temporal import Seq2VecRNN,\
                                 Seq2VecCNN, \
                                 Seq2VecRNN2D, \
@@ -224,27 +224,42 @@ class VolumetricTemporalAdaINNet(nn.Module):
         v2v_input_features_dim = self.volume_features_dim if self.temporal_condition_type == 'adain' else \
                                  (self.volume_features_dim + self.style_vector_dim)
 
-        self.volume_net = {'v1':V2VModel,
-                           'v2':V2VModel_v2}[self.v2v_type](v2v_input_features_dim,
-                                                           self.num_joints,
-                                                           normalization_type=self.v2v_normalization_type,
-                                                           volume_size=self.volume_size)
+
+        if self.v2v_type == 'v1':
+            self.volume_net = V2VModel(v2v_input_features_dim,
+                                       self.num_joints,
+                                       normalization_type=self.v2v_normalization_type,
+                                       volume_size=self.volume_size)
+
+        elif self.v2v_type == 'v2':
+            self.volume_net = V2VModel_v2(v2v_input_features_dim,
+                                          self.num_joints,
+                                          normalization_type=self.v2v_normalization_type,
+                                          volume_size=self.volume_size)
+
+
+        elif self.v2v_type == 'configured':
+            self.volume_net = V2VModel_conf(v2v_input_features_dim,
+                                            self.num_joints,
+                                            normalization_type=self.v2v_normalization_type,
+                                            config=config.model)
+            
 
         if self.temporal_condition_type == 'adain':
             channels_list = {'v1':CHANNELS_LIST,
                              'v2':CHANNELS_LIST_v2}[self.v2v_type]    
 
-            if self.f2v_type[-2:] == '2d':
-                # spatial adaptive denormalization
-                self.affine_mappings = nn.ModuleList([SPADE(self.style_vector_dim, 2*C, S) for C,S in channels_list.items()]) 
-            else:
-                # adaptive denormalization
-                self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*C) for C in channels_list])    
+            # if self.f2v_type[-2:] == '2d':
+            #     # spatial adaptive denormalization
+            #     pass 
+            #     # self.affine_mappings = nn.ModuleList([SPADE(self.style_vector_dim, 2*C, S) for C,S in channels_list.items()]) 
+            # else:
+            #     # adaptive denormalization
+            #     self.affine_mappings = nn.ModuleList([nn.Linear(self.style_vector_dim, 2*C) for C in channels_list])    
 
-                              
-            # for i in [33,36]:  
-            #     for parameter in self.affine_mappings[i].parameters():
-            #         parameter.requires_grad = False
+            #     for i in [33]:  
+            #         for parameter in self.affine_mappings[i].parameters():
+            #             parameter.requires_grad = False
            
         self.process_features = nn.Conv2d(256, self.volume_features_dim, 1)
 
