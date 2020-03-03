@@ -24,7 +24,8 @@ from torch.nn.parallel import DistributedDataParallel
 from tensorboardX import SummaryWriter
 
 from mvn.models.triangulation import VolumetricTriangulationNet
-from mvn.models.volumetric_temporal import VolumetricTemporalAdaINNet, VolumetricTemporalGridDeformation
+from mvn.models.volumetric_temporal import VolumetricTemporalAdaINNet
+from mvn.models.volumetric_grid import VolumetricTemporalGridDeformation
 from mvn.models.loss import KeypointsMSELoss, KeypointsMSESmoothLoss, KeypointsMAELoss, KeypointsL2Loss, VolumetricCELoss
 
 from mvn.utils import img, multiview, op, vis, misc, cfg

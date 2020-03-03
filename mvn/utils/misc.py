@@ -57,3 +57,13 @@ def calc_gradient_magnitude(named_parameters, silence=False):
 
     return total_amplitude
 
+
+def get_capacity(model):
+    s_total = 0
+    for param in model.parameters():
+        s_total+=param.numel()
+    return round(s_total / (10**6),2)
+
+def description(model):
+    for k, m in model._modules.items():
+        print ('{}:  {}M params'.format(k,get_capacity(m)))

@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from copy import deepcopy
 
 
 class Camera:
@@ -186,3 +187,15 @@ def calc_reprojection_error_matrix(keypoints_3d, keypoints_2d_list, proj_matrici
         reprojection_error_matrix.append(reprojection_error)
 
     return np.vstack(reprojection_error_matrix).T
+
+def update_camera(batch, batch_size, image_shape, features_shape, dt, device):
+    # change camera intrinsics
+    new_cameras = deepcopy(batch['cameras'])
+    for view_i in range(dt):
+        for batch_i in range(batch_size):
+            new_cameras[view_i][batch_i].update_after_resize(image_shape, features_shape)
+
+    proj_matricies_batch = torch.stack([torch.stack([torch.from_numpy(camera.projection) \
+                                        for camera in camera_batch], dim=0) \
+                                        for camera_batch in new_cameras], dim=0).transpose(1, 0) 
+    return proj_matricies_batch.float().to(device) # (batch_size, dt, 3, 4)

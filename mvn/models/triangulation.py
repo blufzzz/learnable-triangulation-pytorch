@@ -11,7 +11,8 @@ from torch import nn
 from mvn.utils import op, multiview, img, misc, volumetric
 
 from mvn.models import pose_resnet, pose_hrnet
-from mvn.models.v2v import V2VModel, V2VModel_v2
+from mvn.models.v2v import V2VModel
+from mvn.models.v2v_models import V2VModel_v2
 
 
 class VolumetricTriangulationNet(nn.Module):

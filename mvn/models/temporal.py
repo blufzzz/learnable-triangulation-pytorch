@@ -7,6 +7,50 @@ from pytorch_convolutional_rnn.convolutional_rnn import Conv2dLSTM, Conv2dPeepho
 from mvn.models.v2v import Res3DBlock
 
 
+def get_encoder(encoder_type, 
+                backbone_type,
+                encoded_feature_space, 
+                upscale_bottleneck,
+                capacity=2, 
+                spatial_dimension=1, 
+                encoder_normalization_type='batch_norm'):
+    
+    assert spatial_dimension in [1,2], 'Wrong spatial_dimension! Only 1 and 2 are supported'
+    encoder_input_channels = {'features':{'resnet152':256},
+                              'backbone':{'resnet152':2048}}[encoder_type][backbone_type]
+
+
+
+    if encoder_type == "backbone":
+        if spatial_dimension == 1:
+            return  FeaturesEncoder_Bottleneck(encoded_feature_space,
+                                               encoder_input_channels,     
+                                               C = capacity, 
+                                               normalization_type=encoder_normalization_type)
+        else: #spatial_dimension == 2:
+
+            input_size, target_size = {'resnet152':[12,96]}[backbone_type] 
+
+            return  FeaturesEncoder_Bottleneck2D(encoded_feature_space,
+                                                 encoder_input_channels,
+                                                 C=capacity, 
+                                                 normalization_type=encoder_normalization_type, 
+                                                 upscale=upscale_bottleneck, 
+                                                 input_size=input_size, 
+                                                 target_size=target_size,
+                                                 upscale_kernel_size=2)
+    elif encoder_type == "features":
+        if spatial_dimension == 1:
+            raise NotImplementedError()
+        else: #spatial_dimension == 2:
+            return  FeaturesEncoder_Features2D(encoder_input_channels,
+                                               encoded_feature_space,
+                                               C = capacity, 
+                                               normalization_type=encoder_normalization_type)
+    else:
+        raise RuntimeError('Wrong encoder_type! Only `features` and `backbone` are supported')
+
+
 def get_normalization_2d(normalization_type, out_planes, n_groups):
     if normalization_type ==  'batch_norm':
         return nn.BatchNorm2d(out_planes)
@@ -289,58 +333,6 @@ class FeaturesEncoder_Features2D(nn.Module):
         x = self.features(x)
         return x     
 
-
-
-# class FeaturesEncoder_Bottleneck2D(nn.Module):
-#     """docstring for FeaturesEncoder_Bottleneck2D"""
-#     def __init__(self, output_features_dim, C = 2, multiplier=128, n_groups=32, normalization_type='batch_norm', upscale=False):
-#         super().__init__()
-#         self.output_features_dim = output_features_dim
-#         self.C = C
-#         self.multiplier = multiplier
-#         self.features=nn.Sequential(nn.Conv2d(2048, 
-#                                               self.C * self.multiplier, 
-#                                               kernel_size=3, 
-#                                               padding=1),
-#                                       get_normalization_2d(normalization_type,
-#                                                            self.C * self.multiplier, n_groups=n_groups),
-#                                       nn.ReLU(),
-
-
-#                                       nn.Conv2d(self.C * self.multiplier, 
-#                                                 self.C * self.multiplier//2, 
-#                                                 kernel_size=3, 
-#                                                 padding=1),
-#                                       get_normalization_2d(normalization_type,
-#                                                            self.C * self.multiplier//2, n_groups=n_groups),
-#                                       nn.ReLU(),
-
-
-#                                       nn.Conv2d(self.C * self.multiplier//2,
-#                                                 self.C * self.multiplier//4, 
-#                                                 kernel_size=3, 
-#                                                 padding=1),
-#                                       get_normalization_2d(normalization_type,
-#                                                            self.C * self.multiplier//4, n_groups=n_groups),
-#                                       nn.ReLU(),
-
-
-#                                       nn.Conv2d(self.C * self.multiplier//4,
-#                                                 self.C * self.multiplier//4, kernel_size=1),
-#                                       get_normalization_2d(normalization_type,
-#                                                            self.C * self.multiplier//4, n_groups=n_groups),
-#                                       nn.ReLU()
-
-
-#                                     )
-#         self.final_layer = nn.Conv2d(self.C * self.multiplier//4, output_features_dim, kernel_size=1)
-        
-#     def forward(self, x):
-#         # [2048, 12, 12]
-#         batch_size = x.shape[0]
-#         x = self.features(x)
-#         x = self.final_layer(x)
-#         return x          
 
 class FeaturesEncoder_Bottleneck2D(nn.Module):
     """docstring for FeaturesEncoder_Bottleneck2D"""
