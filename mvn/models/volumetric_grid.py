@@ -31,8 +31,13 @@ class VolumetricTemporalGridDeformation(nn.Module):
     def __init__(self, config, device='cuda:0'):
         super().__init__()
 
-        assert config.dataset.pivot_type == 'first', "pivot_type should be first"
+        self.kind = config.model.kind
         self.num_joints = config.model.backbone.num_joints
+        self.dt  = config.dataset.dt
+        self.pivot_index =  {'first':self.dt-1,
+                            'intermediate':self.dt//2}[config.dataset.pivot_type]
+        self.aux_indexes = list(range(self.dt))
+        self.aux_indexes.remove(self.pivot_index)                    
 
         # volume
         self.volume_softmax = config.model.volume_softmax
@@ -40,73 +45,122 @@ class VolumetricTemporalGridDeformation(nn.Module):
         self.volume_size = config.model.volume_size
         self.volume_aggregation_method = config.model.volume_aggregation_method
 
+        # cuboid
         self.cuboid_side = config.model.cuboid_side
-        self.cuboid_multiplier = config.model.cuboid_multiplier if hasattr(config.model, "cuboid_multiplier") else 1.0
+        self.cuboid_multiplier = config.model.cuboid_multiplier
         self.rotation = config.model.rotation
 
-        self.kind = config.model.kind
-
+        # pelvis
         self.use_precalculated_pelvis = config.model.use_precalculated_pelvis
         self.use_gt_pelvis = config.model.use_gt_pelvis
+        self.use_volumetric_pelvis = config.model.use_volumetric_pelvis
 
         assert self.use_precalculated_pelvis or self.use_gt_pelvis, 'One of the flags "use_<...>_pelvis" should be True'
 
         # transfer
-        self.transfer_cmu_to_human36m = config.model.transfer_cmu_to_human36m if hasattr(config.model, "transfer_cmu_to_human36m") else False
+        self.transfer_cmu_to_human36m = config.model.transfer_cmu_to_human36m
 
         # modules params
+        self.encoder_type = config.model.encoder_type
+        self.encoder_capacity = config.model.encoder_capacity_multiplier
+        self.encoder_normalization_type = config.model.encoder_normalization_type
+        self.upscale_bottleneck = config.model.upscale_bottleneck
+
+        self.f2v_type = config.model.f2v_type
+        self.f2v_intermediate_channels = config.model.f2v_intermediate_channels
+        self.f2v_normalization_type = config.model.f2v_normalization_type
+        
+        self.v2v_type = config.model.v2v_type
+        self.v2v_normalization_type = config.model.v2v_normalization_type
+
         self.style_grad_for_backbone = config.model.style_grad_for_backbone
         self.include_pivot = config.model.include_pivot
-        self.style_net = config.model.style_net
         self.use_auxilary_backbone = hasattr(config.model, 'auxilary_backbone')
-
+        
         # modules dimensions
         self.volume_features_dim = config.model.volume_features_dim
         self.style_vector_dim = config.model.style_vector_dim
-        self.f2v_intermediate_channels = config.model.f2v_intermediate_channels
-        self.normalization_type = config.model.normalization_type
-        assert self.normalization_type not in ['adain','ada-group_norm','group-ada_norm']
-        self.max_cell_size_multiplier = config.model.max_cell_size_multiplier
-        self.dt = config.dataset.dt
-        self.volume_size  = config.model.volume_size
-
+        self.encoded_feature_space = config.model.encoded_feature_space
+            
         # modules
         self.backbone = pose_resnet.get_pose_net(config.model.backbone,
                                                  device=device,
                                                  strict=True)
         
         if self.use_auxilary_backbone:
-            print ('Using auxilary backbone...')
+            print ('Using auxilary {} backbone...'.format(config.model.auxilary_backbone.name))
             self.auxilary_backbone = pose_resnet.get_pose_net(config.model.auxilary_backbone,
                                                               device=device,
                                                               strict=True)  
         else:
-            print ('{} backbone is used...'.format(config.model.backbone.name))
+            print ('Only {} backbone is used...'.format(config.model.backbone.name))
 
-        if self.style_net == 'lstm_2d':
-            self.features_sequence_to_vector = Seq2VecRNN2D(input_features_dim = 256,
-                                                            output_features_dim =  self.style_vector_dim,
-                                                            hidden_dim = self.f2v_intermediate_channels)
-        elif self.style_net == 'cnn_2d':
-            self.features_sequence_to_vector = Seq2VecCNN2D(input_features_dim=256, 
-                                                            output_features_dim = self.style_vector_dim,
-                                                            dt = self.dt-1,
-                                                            intermediate_channel = self.f2v_intermediate_channels,
-                                                            normalization_type=self.normalization_type)
+        
+        if self.f2v_type == 'lstm':
+            self.features_sequence_to_vector = Seq2VecRNN(input_features_dim = self.encoded_feature_space,
+                                                          output_features_dim = self.style_vector_dim,
+                                                          hidden_dim = self.f2v_intermediate_channels)
+        elif self.f2v_type == 'cnn':
+            self.features_sequence_to_vector = Seq2VecCNN(input_features_dim = self.encoded_feature_space,
+                                                          output_features_dim=  self.style_vector_dim,
+                                                          intermediate_channels = self.f2v_intermediate_channels,
+                                                          normalization_type = self.f2v_normalization_type,
+                                                          dt=self.dt if self.include_pivot else self.dt-1,
+                                                          kernel_size = 3)
+
+        elif self.f2v_type == 'lstm2d':
+            self.features_sequence_to_vector = Seq2VecRNN2D(input_features_dim = self.encoded_feature_space,
+                                                            output_features_dim=  self.style_vector_dim,
+                                                            hidden_dim = self.f2v_intermediate_channels)     
+        elif self.f2v_type == 'cnn2d':
+            self.features_sequence_to_vector = Seq2VecCNN2D(input_features_dim = self.encoded_feature_space,
+                                                            output_features_dim=  self.style_vector_dim,
+                                                            intermediate_channels = self.f2v_intermediate_channels,
+                                                            normalization_type = self.f2v_normalization_type,
+                                                            dt=self.dt if self.include_pivot else self.dt-1,
+                                                            kernel_size = 3)
         else:
-            raise RuntimeError('Wrong style_net `lstm_2d` and `cnn_2d` are supported')    
+            raise RuntimeError('Wrong features_sequence_to_vector type')
 
-        self.volume_net = V2VModel(self.volume_features_dim,
-                                   self.num_joints,
-                                   normalization_type=self.normalization_type,
-                                   volume_size=self.volume_size)
+          
+        self.encoder = get_encoder(self.encoder_type,
+                                   config.model.backbone.name,
+                                   self.encoded_feature_space,
+                                   self.upscale_bottleneck,
+                                   capacity = self.encoder_capacity,
+                                   spatial_dimension = 2 if self.f2v_type[-2:] == '2d' else 1,
+                                   encoder_normalization_type = self.encoder_normalization_type)
 
-        self.grid_deformator = V2VModel(self.style_vector_dim,
-                                       3,
-                                       normalization_type=self.normalization_type,
-                                       volume_size=self.volume_size)
 
+        if self.v2v_type == 'v1':
+            raise NotImplementedError()
+            # self.volume_net = V2VModel_v1(v2v_input_features_dim,
+            #                            self.num_joints,
+            #                            normalization_type=self.v2v_normalization_type,
+            #                            volume_size=self.volume_size)
+
+        elif self.v2v_type == 'v2':
+            raise NotImplementedError()
+            # self.volume_net = V2VModel_v2(v2v_input_features_dim,
+            #                               self.num_joints,
+            #                               normalization_type=self.v2v_normalization_type,
+            #                               volume_size=self.volume_size)
+
+
+        elif self.v2v_type == 'conf':
+            self.volume_net = V2VModel(self.volume_features_dim,
+                                        self.num_joints,
+                                        config=config.model)
+            
         self.process_features = nn.Conv2d(256, self.volume_features_dim, 1)
+
+        if self.separate_grid_deformator:
+            self.grid_deformator = V2VModel(self.style_vector_dim,
+                                            3,
+                                            normalization_type=self.normalization_type,
+                                            volume_size=self.volume_size)
+
+        description(self)
 
     def forward(self, images_batch, batch):
 
@@ -204,7 +258,7 @@ class VolumetricTemporalGridDeformation(nn.Module):
                                self.volume_size)
 
         volumes = self.volume_net(volumes)
-        cell_size = self.cuboid_side * self.volume_size
+        cell_size = self.cuboid_side / self.volume_size
         grid_offsets = self.grid_deformator(volumes_aux)
         grid_offsets = grid_offsets.transpose(4,1)
         grid_offsets = grid_offsets.sigmoid() * grid_offsets.sign() * cell_size * self.max_cell_size_multiplier

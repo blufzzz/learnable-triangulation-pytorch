@@ -22,14 +22,17 @@ opt:
   volume_net_lr: 0.001
 
   scale_keypoints_3d: 0.1
+
   save_model: false
+  silence: false
+
 
 model:
   name: "vol"
   kind: "mpii"
-  volume_aggregation_method: "softmax"
+  volume_aggregation_method: "no_aggregation"
 
-  v2v_type: 'v2'
+  v2v_type: 'v1'
 
   init_weights: false
   checkpoint: ""
@@ -42,13 +45,16 @@ model:
   cuboid_side: 2500.0
   rotation: false
 
-  volume_features_dim: 128
-  volume_size: 32
+  volume_features_dim: 32
+  volume_size: 64
   volume_multiplier: 1.0
   volume_softmax: true
+  max_cell_size_multiplier: 1.5
 
   heatmap_softmax: true
   heatmap_multiplier: 100.0
+
+  volume_additional_grid_offsets: true
 
   backbone:
     name: "resnet152"

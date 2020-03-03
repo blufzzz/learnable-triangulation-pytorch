@@ -286,10 +286,10 @@ class V2VModel(nn.Module):
         super().__init__()
 
         global STYLE_VECTOR_CHANNELS
-        STYLE_VECTOR_CHANNELS = config.style_vector_dim
+        STYLE_VECTOR_CHANNELS = config.style_vector_dim if hasattr(config, 'style_vector_dim') else None
         
         self.normalization_type = config.v2v_normalization_type
-        self.temporal_condition_type = config.temporal_condition_type
+        self.temporal_condition_type = config.temporal_condition_type if hasattr(config, 'temporal_condition_type') else None
 
         encoder_input_channels = config.v2v_configuration.downsampling[0]['params'][0]
         encoder_output_channels = config.v2v_configuration.upsampling[-1]['params'][-1]

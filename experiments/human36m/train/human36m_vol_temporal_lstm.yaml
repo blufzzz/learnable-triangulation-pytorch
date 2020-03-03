@@ -21,36 +21,29 @@ opt:
   lr: 0.0001
   process_features_lr: 0.001
   volume_net_lr: 0.001
-  features_sequence_to_vector_lr: 0.001
-  encoder_lr: 0.001
+  lstm3d_lr: 0.001
+  final_processing_lr: 0.001
+
   scale_keypoints_3d: 0.1
 
   save_model: true
   silence: false
 
-
 model:
-  name: "vol_temporal_adain"
+  name: "vol_temporal_lstm"
   kind: "mpii"
 
-  temporal_stuff:
-    encoder_type: "backbone"
-    encoder_capacity_multiplier: 2
-    encoder_normalization_type: 'group_norm'
-    encoded_feature_space: 256
-    upscale_bottleneck: false # True only with encoder_type='backbone'
+  lstm_in_channels: 32
+  lstm_out_channels: 17
+  lstm_bidirectional: false
+  lstm_layers: 2
+  evaluate_only_last_volume: true
 
-    f2v_type: 'lstm2d'
-    f2v_normalization_type: 'group_norm'
-    f2v_intermediate_channels: 128
-    style_vector_dim: 128 
+  v2v_type: 'conf'
+  v2v_normalization_type: 'group_norm'
+  volume_aggregation_method: "no_aggregation"
+  volume_features_dim: 128
 
-    v2v_type: 'conf'
-    v2v_normalization_type: 'group_norm'
-    
-
-  volume_features_dim: 128  
-  volume_aggregation_method: "no_aggregation"  
   include_pivot: false # including pivot getting thigs worse
   style_grad_for_backbone: false
 

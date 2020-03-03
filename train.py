@@ -24,7 +24,8 @@ from torch.nn.parallel import DistributedDataParallel
 from tensorboardX import SummaryWriter
 
 from mvn.models.triangulation import VolumetricTriangulationNet
-from mvn.models.volumetric_temporal import VolumetricTemporalAdaINNet
+from mvn.models.volumetric_adain import VolumetricTemporalAdaINNet
+from mvn.models.volumetric_lstm import VolumetricTemporalLSTM
 from mvn.models.volumetric_grid import VolumetricTemporalGridDeformation
 from mvn.models.loss import KeypointsMSELoss, KeypointsMSESmoothLoss, KeypointsMAELoss, KeypointsL2Loss, VolumetricCELoss
 
@@ -498,7 +499,8 @@ def main(args):
     model = {
         "vol": VolumetricTriangulationNet,
         "vol_temporal_adain":VolumetricTemporalAdaINNet,
-        "vol_temporal_grid": VolumetricTemporalGridDeformation
+        "vol_temporal_grid": VolumetricTemporalGridDeformation,
+        "vol_temporal_lstm": VolumetricTemporalLSTM
     }[config.model.name](config, device=device).to(device)
 
     if config.model.init_weights:
@@ -555,9 +557,16 @@ def main(args):
                 ] + \
                 ([{'params':model.auxilary_backbone.parameters(), 'lr': config.opt.auxilary_backbone_lr if hasattr(config.opt, "auxilary_backbone_lr") else config.opt.lr}] if model.use_auxilary_backbone else []),
                 lr=config.opt.lr)
-
-        elif config.model.name == "vol_temporal_eidetic":
-            raise NotImplementedError                            
+            
+        elif config.model.name == "vol_temporal_lstm":
+             opt = torch.optim.Adam(
+                [{'params': model.backbone.parameters()},
+                 {'params': model.process_features.parameters(), 'lr': config.opt.process_features_lr if hasattr(config.opt, "process_features_lr") else config.opt.lr},
+                 {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr},
+                 {'params': model.lstm3d.parameters(), 'lr': config.opt.lstm3d_lr if hasattr(config.opt, "lstm3d_lr") else config.opt.lr},
+                ]+ \
+                ([{'params':model.final_processing.parameters(), 'lr': config.opt.final_processing_lr if hasattr(config.opt, "final_processing_lr") else config.opt.lr}] if model.use_final_processing else []),
+                lr=config.opt.lr)                         
 
         else:
             raise RuntimeError('Unknown config.model.name')
@@ -575,9 +584,9 @@ def main(args):
 
     # experiment
     experiment_dir, writer = None, None
-    if master: 
-        experiment_dir, writer = setup_experiment(config, type(model).__name__, is_train=not args.eval)
-    print ('Experiment in logdir:', args.logdir)    
+    # if master: 
+    #     experiment_dir, writer = setup_experiment(config, type(model).__name__, is_train=not args.eval)
+    # print ('Experiment in logdir:', args.logdir)    
         
     # multi-gpu
     if is_distributed:

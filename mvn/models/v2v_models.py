@@ -80,7 +80,7 @@ class EncoderDecorder_v1(nn.Module):
         x = self.encoder_pool4(x) if self.volume_size > 16 else x
 
         # torch.Size([1, 128, 1, 1, 1]), no NAN
-        x = self.encoder_res4(x, params[16:18], debug=True) # NAN
+        x = self.encoder_res4(x, params[16:18]) # NAN
         
         # torch.Size([1, 128, 1, 1, 1]), NAN
         skip_x5 = self.skip_res5(x, params[18:20]) # NAN

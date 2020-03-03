@@ -195,7 +195,8 @@ def unproject_heatmaps(heatmaps,
                          coord_volumes, 
                          volume_aggregation_method='sum', 
                          vol_confidences=None, 
-                         volumes_multipliers=None):
+                         volumes_multipliers=None,
+                         fictive_views=None):
 
     device = heatmaps.device
     
@@ -210,7 +211,8 @@ def unproject_heatmaps(heatmaps,
 
     # TODO: speed up this this loop
     for batch_i in range(batch_size):
-        coord_volume = coord_volumes[batch_i]
+        set_trace()
+        coord_volume = coord_volumes[batch_i%fictive_views] if fictive_views is not None else coord_volumes[batch_i] 
         grid_coord = coord_volume.reshape((-1, 3))
 
         volume_batch_to_aggregate = torch.zeros(n_views, n_joints, *volume_shape, device=device)

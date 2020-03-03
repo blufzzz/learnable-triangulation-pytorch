@@ -34,14 +34,14 @@ model:
   kind: "mpii"
 
   encoder_type: "backbone"
-  encoder_capacity_multiplier: 4
+  encoder_capacity_multiplier: 2
   encoder_normalization_type: 'group_norm'
-  encoded_feature_space: 512
+  encoded_feature_space: 256
   upscale_bottleneck: false # True only with encoder_type='backbone'
 
-  f2v_type: 'cnn2d'
+  f2v_type: 'lstm2d'
   f2v_normalization_type: 'group_norm'
-  f2v_intermediate_channels: 256
+  f2v_intermediate_channels: 128
   style_vector_dim: 128 
 
   v2v_type: 'conf'
@@ -113,7 +113,7 @@ model:
 
 dataset:
   kind: "human36m"
-  dt: 9
+  dt: 8
   dilation: 3
   singleview: true
   pivot_type: 'first'

@@ -12,7 +12,7 @@ from mvn.utils import op, multiview, img, misc, volumetric
 
 from mvn.models import pose_resnet, pose_hrnet
 from mvn.models.v2v import V2VModel
-from mvn.models.v2v_models import V2VModel_v2
+from mvn.models.v2v_models import V2VModel_v2, V2VModel_v1
 
 
 class VolumetricTriangulationNet(nn.Module):
@@ -43,6 +43,12 @@ class VolumetricTriangulationNet(nn.Module):
         # transfer
         self.transfer_cmu_to_human36m = config.model.transfer_cmu_to_human36m if hasattr(config.model, "transfer_cmu_to_human36m") else False
 
+        self.volume_additional_grid_offsets = config.model.volume_additional_grid_offsets if \
+                                                 hasattr(config.model, 'volume_additional_grid_offsets') else False
+        if self.volume_additional_grid_offsets:
+            self.cell_size = self.cuboid_side / self.volume_size
+            self.max_cell_size_multiplier = config.model.max_cell_size_multiplier
+
         # modules
         config.model.backbone.alg_confidences = False
         config.model.backbone.vol_confidences = False
@@ -55,6 +61,8 @@ class VolumetricTriangulationNet(nn.Module):
             self.backbone = pose_hrnet.get_pose_net(config.model.backbone, device=device)
         elif config.model.backbone.name in ['resnet152', 'resnet50']:    
             self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
+        else:
+            raise    
 
         if config.model.backbone.return_heatmaps:
             for p in self.backbone.final_layer.parameters():
@@ -64,11 +72,27 @@ class VolumetricTriangulationNet(nn.Module):
             nn.Conv2d(self.backbone_features_dim, self.volume_features_dim, 1)
         )
 
-        if self.v2v_type == 'v2':
-            self.volume_net = V2VModel_v2(self.volume_features_dim, self.num_joints, normalization_type = config.model.normalization_type)
+        v2v_output_dim = self.num_joints + 3 if self.volume_additional_grid_offsets else self.num_joints
 
-        else:    
-            self.volume_net = V2VModel(self.volume_features_dim, self.num_joints, normalization_type = config.model.normalization_type)
+        if self.v2v_type == 'v2':
+            self.volume_net = V2VModel_v2(self.volume_features_dim, 
+                                          v2v_output_dim,
+                                          self.volume_size, 
+                                          normalization_type = config.model.normalization_type)
+
+        elif self.v2v_type == 'v1':    
+            self.volume_net = V2VModel_v1(self.volume_features_dim, 
+                                          v2v_output_dim, 
+                                          self.volume_size,
+                                          normalization_type = config.model.normalization_type)
+
+        elif self.v2v_type == 'conf':
+            self.volume_net = V2VModel(self.volume_features_dim,
+                                       v2v_output_dim,
+                                       self.volume_size,
+                                       config=config.model)
+        else:
+            raise RuntimeError('Unknown v2v_type')                                    
 
 
     def forward(self, images, batch):
@@ -182,11 +206,15 @@ class VolumetricTriangulationNet(nn.Module):
                                         volume_aggregation_method=self.volume_aggregation_method, 
                                         vol_confidences=vol_confidences)
 
-        if self.volume_aggregation_method == 'no_aggregation':
-            volumes = torch.cat(volumes, 0)
-
         # integral 3d
         volumes = self.volume_net(volumes)
+
+        if self.volume_additional_grid_offsets:
+            grid_offsets = volumes[:,-3:,...].contiguous().transpose(4,1)
+            volumes = volumes[:,:-3,...].contiguous()
+            grid_offsets = grid_offsets.tanh() * self.cell_size * self.max_cell_size_multiplier
+            coord_volumes = coord_volumes + grid_offsets
+
         vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
 
         return vol_keypoints_3d, features, volumes, vol_confidences, cuboids, coord_volumes, base_points
