@@ -25,7 +25,7 @@ opt:
   encoder_lr: 0.001
   scale_keypoints_3d: 0.1
 
-  save_model: false
+  save_model: true
   silence: false
 
 
@@ -36,7 +36,7 @@ model:
   encoder_type: "backbone"
   encoder_capacity_multiplier: 4
   encoder_normalization_type: 'group_norm'
-  encoded_feature_space: 256
+  encoded_feature_space: 512
   upscale_bottleneck: false # True only with encoder_type='backbone'
 
   f2v_type: 'cnn2d'
@@ -45,9 +45,9 @@ model:
   style_vector_dim: 128 
 
   v2v_type: 'conf'
-  v2v_normalization_type: ['group_norm', 'adain'] #'ada-group_norm'
+  v2v_normalization_type: 'group_norm'
   volume_aggregation_method: "no_aggregation"
-  temporal_condition_type: 'adain' 
+  temporal_condition_type: 'spade' 
   volume_features_dim: 128
 
   include_pivot: false # including pivot getting thigs worse
@@ -89,8 +89,7 @@ model:
   v2v_configuration:
 
     skip_block_type: 'Res3DBlock'
-    skip_block_adain: false
-    nonadaptive_normalization_type: 'group_norm'
+    skip_block_adain: true
 
                   # first should be Res3DBlock
     downsampling: [{'module_type': 'Res3DBlock', 'params':[128,128], 'adain': true},

@@ -7,6 +7,8 @@ import sys
 
 MODULES_REQUIRES_NORMALIZAION = ['Res3DBlock', 'Upsample3DBlock', 'Basic3DBlock']
 STYLE_VECTOR_CHANNELS = None
+ORDINARY_NORMALIZATIONS = ['group_norm', 'batch_norm']
+ADAPTIVE_NORMALIZATION = ['adain', 'spade']
 
 class SPADE(nn.Module):
     def __init__(self, style_vector_channels, features_channels, hidden=128, ks=3):
@@ -14,19 +16,18 @@ class SPADE(nn.Module):
 
         pw = ks // 2
         self.shared = nn.Sequential(
-            nn.Conv2d(style_vector_channels, hidden, kernel_size=ks, padding=pw),
+            nn.Conv3d(style_vector_channels, hidden, kernel_size=ks, padding=pw),
             nn.ReLU()
         )
-        self.gamma = nn.Conv2d(hidden, features_channels, kernel_size=ks, padding=pw)
-        self.beta = nn.Conv2d(hidden, features_channels, kernel_size=ks, padding=pw)
+        self.gamma = nn.Conv3d(hidden, features_channels, kernel_size=ks, padding=pw)
+        self.beta = nn.Conv3d(hidden, features_channels, kernel_size=ks, padding=pw)
 
     def forward(self, x, params):
-
         params = F.interpolate(params, size=x.size()[2:], mode='nearest')
         actv = self.shared(params)
         gamma = self.gamma(actv)
         beta = self.beta(actv)
-        out = normalized * (1 + gamma) + beta
+        out = x * (1 + gamma) + beta
         return out
 
 
@@ -53,17 +54,17 @@ class AdaIN(nn.Module):
         return features
 
 
-# class CompoundNorm(nn.Module):
-#     def __init__(self, normalization_types, out_planes, n_groups=None):
-#         super().__init__()
-#         self.blocks = nn.Sequential()
-#         for i, norm_type in enumerate(normalization_types):
-#             self.blocks.add_module(f'{norm_type}-{i}', get_normalization(norm_type, out_planes, n_groups=32))
-#     def forward(self, x, params):
-#         self.blocks(x, params)
-#         return x        
-
-
+class CompoundNorm(nn.Module):
+    def __init__(self, normalization_types, out_planes, n_groups=None):
+        super().__init__()
+        norm_type, adaptive_norm_type = normalization_types
+        assert norm_type in ORDINARY_NORMALIZATIONS and adaptive_norm_type in ADAPTIVE_NORMALIZATION
+        self.norm = get_normalization(norm_type, out_planes, n_groups=32)
+        self.adaptive_norm = get_normalization(adaptive_norm_type, out_planes, n_groups=32)
+    def forward(self, x, params):
+        x = self.norm(x)
+        x = self.adaptive_norm(x, params)
+        return x        
 
 class GroupNorm(nn.Module):
     def __init__(self, n_groups, features_channels):
@@ -189,15 +190,15 @@ class Upsample3DBlock(nn.Module):
 
 class EncoderDecorder(nn.Module):
 
-    def __init__(self, config, normalization_type):
+    def __init__(self, config, normalization_type, temporal_condition_type):
         super().__init__()
 
         '''
         default_normalization_type - used where is no adain normalization
         '''
 
-        self.normalization_type = normalization_type
-        self.nonadaptive_normalization_type = config.nonadaptive_normalization_type
+        self.normalization_type = [normalization_type, temporal_condition_type]
+        self.nonadaptive_normalization_type = normalization_type
         self.skip_block_adain = config.skip_block_adain
 
         adain_dict = {}
@@ -262,44 +263,44 @@ class EncoderDecorder(nn.Module):
         skip_connections = []
 
         for name, module in self.downsampling_dict.items():
-            name_list = name.split('_')
-            if name_list[0] == 'skip':
+            if name.split('_')[0] == 'skip':
                 skip_connections.append(module(x, params=params))
             else:
                 x = module(x, params=params)
 
         for name, module in self.bottleneck_dict.items():
             x = module(x, params=params)
-
+            
         skip_number = -1    
         for name, module in self.upsampling_dict.items():
-            x = module(x, params=params)
-            if name == 'Res3DBlock':
+            if name.split('_')[0] == 'Res3DBlock':
                 x = x + skip_connections[skip_number]
-                skip_number -= 1  
+                skip_number -= 1
+            x = module(x, params=params)      
 
         return x                  
 
 
 class V2VModel(nn.Module):
-    def __init__(self, input_channels, output_channels, config, normalization_type):
+    def __init__(self, input_channels, output_channels, config):
         super().__init__()
 
         global STYLE_VECTOR_CHANNELS
         STYLE_VECTOR_CHANNELS = config.style_vector_dim
-        config = config.v2v_configuration
+        
+        self.normalization_type = config.v2v_normalization_type
+        self.temporal_condition_type = config.temporal_condition_type
 
-        self.nonadaptive_normalization_type = config.nonadaptive_normalization_type
-        self.normalization_type = normalization_type
+        encoder_input_channels = config.v2v_configuration.downsampling[0]['params'][0]
+        encoder_output_channels = config.v2v_configuration.upsampling[-1]['params'][-1]
 
-        encoder_input_channels = config.downsampling[0]['params'][0]
-        encoder_output_channels = config.upsampling[-1]['params'][-1]
+        self.front_layer = Basic3DBlock(input_channels, encoder_input_channels, 3, self.normalization_type)
 
-        self.front_layer = Basic3DBlock(input_channels, encoder_input_channels, 3, self.nonadaptive_normalization_type)
+        self.encoder_decoder = EncoderDecorder(config.v2v_configuration,
+                                               self.normalization_type, 
+                                               self.temporal_condition_type)
 
-        self.encoder_decoder = EncoderDecorder(config, normalization_type)
-
-        self.back_layer = Basic3DBlock(encoder_output_channels, 32, 1, self.nonadaptive_normalization_type)
+        self.back_layer = Basic3DBlock(encoder_output_channels, 32, 1, self.normalization_type)
 
         self.output_layer = nn.Conv3d(32, output_channels, kernel_size=1, stride=1, padding=0)
 

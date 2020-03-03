@@ -133,28 +133,30 @@ class VolumetricTemporalAdaINNet(nn.Module):
                                    encoder_normalization_type = self.encoder_normalization_type)
         
 
-        v2v_input_features_dim = self.volume_features_dim if self.temporal_condition_type == 'adain' else \
-                                 (self.volume_features_dim + self.style_vector_dim)
+        v2v_input_features_dim = (self.volume_features_dim + self.style_vector_dim) if \
+                                  self.temporal_condition_type == 'stack' else self.volume_features_dim
+                                 
 
 
         if self.v2v_type == 'v1':
-            self.volume_net = V2VModel_v1(v2v_input_features_dim,
-                                       self.num_joints,
-                                       normalization_type=self.v2v_normalization_type,
-                                       volume_size=self.volume_size)
+            raise NotImplementedError()
+            # self.volume_net = V2VModel_v1(v2v_input_features_dim,
+            #                            self.num_joints,
+            #                            normalization_type=self.v2v_normalization_type,
+            #                            volume_size=self.volume_size)
 
         elif self.v2v_type == 'v2':
-            self.volume_net = V2VModel_v2(v2v_input_features_dim,
-                                          self.num_joints,
-                                          normalization_type=self.v2v_normalization_type,
-                                          volume_size=self.volume_size)
+            raise NotImplementedError()
+            # self.volume_net = V2VModel_v2(v2v_input_features_dim,
+            #                               self.num_joints,
+            #                               normalization_type=self.v2v_normalization_type,
+            #                               volume_size=self.volume_size)
 
 
         elif self.v2v_type == 'conf':
             self.volume_net = V2VModel(v2v_input_features_dim,
-                                            self.num_joints,
-                                            normalization_type=self.v2v_normalization_type,
-                                            config=config.model)
+                                        self.num_joints,
+                                        config=config.model)
             
         self.process_features = nn.Conv2d(256, self.volume_features_dim, 1)
 
@@ -253,7 +255,17 @@ class VolumetricTemporalAdaINNet(nn.Module):
         if self.temporal_condition_type == 'adain':
             volumes = self.volume_net(volumes, params=style_vector)
 
-        if self.temporal_condition_type == 'stack':
+        elif self.temporal_condition_type == 'spade':
+            style_vector = style_vector.unsqueeze(1)
+            style_vector_volumes = unproject_heatmaps(style_vector,  
+                                                         proj_matricies_batch, 
+                                                         coord_volumes, 
+                                                         volume_aggregation_method=self.volume_aggregation_method,
+                                                         vol_confidences=vol_confidences
+                                                         )
+            volumes = self.volume_net(volumes, params=style_vector_volumes)
+
+        elif self.temporal_condition_type == 'stack':
             style_vector = style_vector.unsqueeze(1)
             style_vector_volumes = unproject_heatmaps(style_vector,  
                                                          proj_matricies_batch, 

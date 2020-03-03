@@ -180,13 +180,14 @@ def setup_experiment(config, model_name, is_train=True):
 
 def save(experiment_dir, model, opt, epoch, discriminator, opt_discr, use_temporal_discriminator_loss):
 
-    checkpoint_dir = os.path.join(experiment_dir, "checkpoints", "{:04}".format(epoch))
+    checkpoint_dir = os.path.join(experiment_dir, "checkpoints") # , "{:04}".format(epoch)
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     dict_to_save = {'model_state': model.state_dict(),'opt_state' : opt.state_dict()}
     if use_temporal_discriminator_loss:
         dict_to_save['discr_state'] = discriminator.state_dict()
         dict_to_save['discr_opt_state'] = opt_discr.state_dict()
+
     torch.save(dict_to_save, os.path.join(checkpoint_dir, "weights.pth"))
 
 
@@ -574,9 +575,9 @@ def main(args):
 
     # experiment
     experiment_dir, writer = None, None
-    # if master:
-    #     experiment_dir, writer = setup_experiment(config, type(model).__name__, is_train=not args.eval)
-    # print ('Experiment in logdir:', args.logdir)    
+    if master: 
+        experiment_dir, writer = setup_experiment(config, type(model).__name__, is_train=not args.eval)
+    print ('Experiment in logdir:', args.logdir)    
         
     # multi-gpu
     if is_distributed:
