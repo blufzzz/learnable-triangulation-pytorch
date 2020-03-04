@@ -339,7 +339,7 @@ class Human36MTemporalDataset(Human36MMultiViewDataset):
                          undistort_images=undistort_images,
                          ignore_cameras=ignore_cameras,
                          crop=crop,
-                         use_equidistant_dataset = use_equidistant_dataset)
+                         use_equidistant_dataset=use_equidistant_dataset)
 
 
         # how much consecutive frames in the sequence

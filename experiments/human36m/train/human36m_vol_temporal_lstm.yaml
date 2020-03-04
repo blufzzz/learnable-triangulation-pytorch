@@ -4,12 +4,19 @@ vis_freq: 1000
 vis_n_elements: 10
 distributed_train: true
 image_shape: [384, 384]
+visualize: false
 
 opt:
   criterion: "MAE"
 
   use_volumetric_ce_loss: true
   volumetric_ce_loss_weight: 0.01
+
+  use_temporal_discriminator: true
+  adversarial_temporal_criterion: 'vanilla'
+  adversarial_temporal_loss_weight: 0.01
+  adversarial_critic_iters: 1
+  train_generator_during_critic_iters: true
 
   n_objects_per_epoch: 10000
   n_epochs: 9999
@@ -23,21 +30,27 @@ opt:
   volume_net_lr: 0.001
   lstm3d_lr: 0.001
   final_processing_lr: 0.001
+  discr_lr: 0.001
+
 
   scale_keypoints_3d: 0.1
 
   save_model: true
   silence: false
 
+discriminator:
+  intermediate_channels: 1024
+  normalization_type: 'group_norm'
+
 model:
   name: "vol_temporal_lstm"
   kind: "mpii"
 
-  lstm_in_channels: 32
+  lstm_in_channels: 64
   lstm_out_channels: 17
   lstm_bidirectional: false
   lstm_layers: 2
-  evaluate_only_last_volume: true
+  evaluate_only_last_volume: false
 
   v2v_type: 'conf'
   v2v_normalization_type: 'group_norm'
@@ -110,6 +123,7 @@ dataset:
   dilation: 3
   singleview: true
   pivot_type: 'first'
+  keypoints_per_frame: true
 
   train:
     h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"

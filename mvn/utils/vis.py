@@ -144,6 +144,7 @@ def visualize_batch(images_batch,
     axes[row_i, 0].set_ylabel("2d keypoints (gt projected)", size='large')
     for view_i in range(n_cols):
         axes[row_i][view_i].imshow(images[view_i])
+        # set_trace()
         keypoints_2d_gt_proj = project_3d_points_to_image_plane_without_distortion(proj_matricies_batch[batch_index, view_i].detach().cpu().numpy(),
                                                                                    keypoints_3d_batch_gt[batch_index].detach().cpu().numpy())
         draw_2d_pose(keypoints_2d_gt_proj, axes[row_i][view_i], kind=kind)

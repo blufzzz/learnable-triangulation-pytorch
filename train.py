@@ -27,7 +27,14 @@ from mvn.models.triangulation import VolumetricTriangulationNet
 from mvn.models.volumetric_adain import VolumetricTemporalAdaINNet
 from mvn.models.volumetric_lstm import VolumetricTemporalLSTM
 from mvn.models.volumetric_grid import VolumetricTemporalGridDeformation
-from mvn.models.loss import KeypointsMSELoss, KeypointsMSESmoothLoss, KeypointsMAELoss, KeypointsL2Loss, VolumetricCELoss
+from mvn.models.temporal import Seq2VecCNN
+from mvn.models.loss import KeypointsMSELoss, \
+                            KeypointsMSESmoothLoss, \
+                            KeypointsMAELoss, \
+                            KeypointsL2Loss, \
+                            VolumetricCELoss,\
+                            GAN_loss,\
+                            LSGAN_loss
 
 from mvn.utils import img, multiview, op, vis, misc, cfg
 
@@ -179,13 +186,13 @@ def setup_experiment(config, model_name, is_train=True):
     return experiment_dir, writer
 
 
-def save(experiment_dir, model, opt, epoch, discriminator, opt_discr, use_temporal_discriminator_loss):
+def save(experiment_dir, model, opt, epoch, discriminator, opt_discr, use_temporal_discriminator):
 
     checkpoint_dir = os.path.join(experiment_dir, "checkpoints") # , "{:04}".format(epoch)
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     dict_to_save = {'model_state': model.state_dict(),'opt_state' : opt.state_dict()}
-    if use_temporal_discriminator_loss:
+    if use_temporal_discriminator:
         dict_to_save['discr_state'] = discriminator.state_dict()
         dict_to_save['discr_opt_state'] = opt_discr.state_dict()
 
@@ -219,9 +226,17 @@ def one_epoch(model,
     dump_weights = config.opt.dump_weights if hasattr(config.opt, 'dump_weights') else False
     transfer_cmu_to_human36m = config.transfer_cmu_to_human36m if hasattr(config, "transfer_cmu_to_human36m") else False
     use_temporal_discriminator = config.opt.use_temporal_discriminator if hasattr(config.opt, "use_temporal_discriminator") else False
+    visualize = config.visualize if hasattr(config, "visualize") else True
     
+
     if use_temporal_discriminator:
         assert (discriminator is not None) and (opt_discr is not None) and (not model.evaluate_only_last_volume)
+        adversarial_temporal_criterion = {'vanilla':GAN_loss(),
+                                          'lsgan':LSGAN_loss()}[config.opt.adversarial_temporal_criterion]
+        adversarial_temporal_loss_weight = config.opt.adversarial_temporal_loss_weight
+        adversarial_critic_iters = config.opt.adversarial_critic_iters 
+        train_generator_during_critic_iters = config.opt.train_generator_during_critic_iters                               
+
 
     if is_train:
         model.train()
@@ -278,10 +293,14 @@ def one_epoch(model,
                     coord_volumes_pred, 
                     base_points_pred) = model(images_batch, batch)    
                     
-                batch_size, n_views, image_shape = images_batch.shape[0], images_batch.shape[1], tuple(images_batch.shape[-2:])
+                batch_size, dt, image_shape = images_batch.shape[0], images_batch.shape[1], tuple(images_batch.shape[-2:])
                 n_joints = keypoints_3d_pred[0].shape[1]
                 keypoints_3d_binary_validity_gt = (keypoints_3d_validity_gt > 0.0).type(torch.float32)
                 scale_keypoints_3d = config.opt.scale_keypoints_3d if hasattr(config.opt, "scale_keypoints_3d") else 1.0
+
+                if config.dataset.keypoints_per_frame:
+                    keypoints_3d_gt = keypoints_3d_gt.view(-1, *keypoints_3d_gt.shape[2:])
+                    keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt.view(-1, *keypoints_3d_binary_validity_gt.shape[2:])
 
                 # root-relative coordinates for    
                 # singleview dataset of multiview dataset with singleview setup
@@ -303,7 +322,7 @@ def one_epoch(model,
                 total_loss += loss
                 metric_dict[f'{config.opt.criterion}'].append(loss.item())
 
-                # volumetric ce loss
+                # volumetric loss
                 use_volumetric_ce_loss = config.opt.use_volumetric_ce_loss
                 if use_volumetric_ce_loss:
                     volumetric_ce_criterion = VolumetricCELoss()
@@ -320,18 +339,41 @@ def one_epoch(model,
                 # temporal adversarial loss        
                 if use_temporal_discriminator: 
 
-                    X = torch.cat((keypoints_3d_pred, keypoints_3d_gt), 0)
-                    y = torch.cat((torch.zeros(batch_size), torch.ones(batch_size))).long().to(device)
+                    keypoints_3d_pred_seq = keypoints_3d_pred.view(batch_size, dt, -1)
+                    keypoints_3d_gt_seq = keypoints_3d_gt.view(batch_size, dt, -1)
 
-                    discriminator = ....
+                    # discriminator step, no need gradient flow to generator
+                    discriminator_loss = adversarial_temporal_criterion(discriminator, 
+                                                                        keypoints_3d_pred_seq.clone().detach(), 
+                                                                        keypoints_3d_gt_seq.clone().detach(),
+                                                                        discriminator_loss=True)
+                    opt_discr.zero_grad()
+                    discriminator_loss.backward()
+                    opt_discr.step()
+
+                    # generator step 
+                    discriminator.zero_grad()
+                    generator_loss = adversarial_temporal_criterion(discriminator, 
+                                                                    keypoints_3d_pred_seq,
+                                                                    keypoints_3d_gt_seq,
+                                                                    discriminator_loss=False)
+                    
+                    # add loss                    
+                    if iter_i%adversarial_critic_iters == 0:
+                        total_loss += generator_loss * adversarial_temporal_loss_weight
+
+                    metric_dict[f'{config.opt.adversarial_temporal_criterion}_generator_loss'].append(generator_loss.item())
+                    metric_dict[f'{config.opt.adversarial_temporal_criterion}_discriminator_loss'].append(discriminator_loss.item())
 
 
-
-                metric_dict['total_loss'].append(total_loss.item())
-
-                if is_train:
+                ############
+                # BACKWARD #   
+                ############
+                train_generator = (train_generator_during_critic_iters or iter_i%adversarial_critic_iters == 0)
+                adversarial_condition = (not use_temporal_discriminator) or (use_temporal_discriminator and train_generator)
+                if is_train and adversarial_condition:
                     opt.zero_grad()
-                    total_loss.backward()
+                    total_loss.backward()        
 
                     if hasattr(config.opt, "grad_clip"):
                         torch.nn.utils.clip_grad_norm_(model.parameters(), config.opt.grad_clip / config.opt.lr)
@@ -349,6 +391,7 @@ def one_epoch(model,
                 ###########
                 # METRICS #   
                 ###########
+                metric_dict['total_loss'].append(total_loss.item())
 
                 l2 = KeypointsL2Loss()(keypoints_3d_pred * scale_keypoints_3d, \
                                        keypoints_3d_gt * scale_keypoints_3d, \
@@ -384,9 +427,12 @@ def one_epoch(model,
                 if not is_train:
                     results['keypoints_3d'].append(keypoints_3d_pred.detach().cpu().numpy())
                     results['indexes'].append(batch['indexes'])
-                        
+                
+                #################
+                # VISUALIZATION #   
+                #################        
                 if master:
-                    if n_iters_total % config.vis_freq == 0:
+                    if n_iters_total % config.vis_freq == 0 and visualize:
                         vis_kind = config.kind
                         if (transfer_cmu_to_human36m):
                             vis_kind = "coco"
@@ -400,9 +446,11 @@ def one_epoch(model,
                                 kind=vis_kind,
                                 cuboids_batch=cuboids_pred,
                                 confidences_batch=confidences_pred,
-                                batch_index=batch_i, size=5,
+                                batch_index=batch_i, 
+                                size=5,
                                 keypoints_3d_batch_pred_fr = keypoints_3d_pred_fr if model_type == "vol_temporal_fr_adain" else None,
-                                max_n_cols=10
+                                max_n_cols=10,
+                                keypoints_per_frame = config.dataset.keypoints_per_frame
                             )
                             writer.add_image(f"{name}/keypoints_vis/{batch_i}", keypoints_vis.transpose(2, 0, 1), global_step=n_iters_total)
 
@@ -449,7 +497,7 @@ def one_epoch(model,
 
                     # dump to tensorboard per-iter stats about sizes
                     writer.add_scalar(f"{name}/batch_size", batch_size, n_iters_total)
-                    writer.add_scalar(f"{name}/n_views", n_views, n_iters_total)
+                    writer.add_scalar(f"{name}/n_views", dt, n_iters_total)
 
                     n_iters_total += 1
                     batch_start_time = time.time()
@@ -517,7 +565,7 @@ def main(args):
     # options
     config.opt.n_iters_per_epoch = config.opt.n_objects_per_epoch // config.opt.batch_size
     config.experiment_comment = args.experiment_comment
-    use_temporal_discriminator_loss  = config.opt.use_temporal_discriminator_loss if hasattr(config.opt, "use_temporal_discriminator_loss") else False  
+    use_temporal_discriminator  = config.opt.use_temporal_discriminator if hasattr(config.opt, "use_temporal_discriminator") else False  
     save_model = config.opt.save_model if hasattr(config.opt, "save_model") else True
 
     model = {
@@ -595,11 +643,18 @@ def main(args):
         else:
             raise RuntimeError('Unknown config.model.name')
 
-    # use_temporal_discriminator_loss
-    discriminator = None
-    opt_discr = None    
-    if use_temporal_discriminator_loss:
-        discriminator = TemporalDiscriminator().to(device)
+    # use_temporal_discriminator
+    opt_disc, discriminator = None, None
+    if use_temporal_discriminator:
+
+        discriminator = Seq2VecCNN(config.model.backbone.num_joints*3,
+                                   output_features_dim=1, 
+                                   intermediate_channels=config.discriminator.intermediate_channels, 
+                                   normalization_type=config.discriminator.normalization_type,
+                                   dt = config.dataset.dt,
+                                   kernel_size = 3,
+                                   n_groups = 32).to(device)
+
         opt_discr = optim.Adam(discriminator.parameters(), lr=config.opt.discr_lr)
 
     # datasets
@@ -657,7 +712,7 @@ def main(args):
             # saving    
             if master and save_model:
                 print ('Saving model...')
-                save(experiment_dir, model, opt, epoch, discriminator, opt_discr, use_temporal_discriminator_loss)
+                save(experiment_dir, model, opt, epoch, discriminator, opt_discr, use_temporal_discriminator)
             print(f"{n_iters_total_train} iters done.")
    
     else:

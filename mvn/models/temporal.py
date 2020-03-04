@@ -7,6 +7,8 @@ from pytorch_convolutional_rnn.convolutional_rnn import Conv2dLSTM, Conv2dPeepho
 from mvn.models.v2v import Res3DBlock
 
 
+
+
 def get_encoder(encoder_type, 
                 backbone_type,
                 encoded_feature_space, 
@@ -51,9 +53,15 @@ def get_encoder(encoder_type,
         raise RuntimeError('Wrong encoder_type! Only `features` and `backbone` are supported')
 
 
-def get_normalization_2d(normalization_type, out_planes, n_groups):
+def get_normalization(normalization_type, out_planes, n_groups, dimension=2):
+
     if normalization_type ==  'batch_norm':
-        return nn.BatchNorm2d(out_planes)
+        if dimension == 1:
+            return nn.BatchNorm1d(out_planes)
+        elif dimension == 2:
+            return nn.BatchNorm2d(out_planes)
+        else:
+            raise RuntimeError('{} is unknown n_dimension')       
     elif normalization_type == 'group_norm':
         return nn.GroupNorm(n_groups, out_planes)
     else:
@@ -74,10 +82,10 @@ class Res1DBlock(nn.Module):
         pad = kernel_size // 2 if kernel_size > 1 else 0
         self.res_branch = nn.Sequential(
             nn.Conv1d(in_planes, out_planes, kernel_size=kernel_size, padding=pad),
-            get_normalization_2d(normalization_type, out_planes, n_groups=n_groups),
+            get_normalization(normalization_type, out_planes, n_groups=n_groups, dimension=1),
             nn.ReLU(True),
             nn.Conv1d(out_planes, out_planes, kernel_size=kernel_size),
-            get_normalization_2d(normalization_type, out_planes, n_groups=n_groups)
+            get_normalization(normalization_type, out_planes, n_groups=n_groups, dimension=1)
         )
 
         if in_planes == out_planes:
@@ -86,7 +94,7 @@ class Res1DBlock(nn.Module):
             self.skip_con = nn.Sequential(
                 Slice(kernel_size // 2),
                 nn.Conv1d(in_planes, out_planes, kernel_size=1),
-                get_normalization_2d(normalization_type, out_planes, n_groups=n_groups)
+                get_normalization(normalization_type, out_planes, n_groups=n_groups, dimension=1)
             )
 
     def forward(self, x):
@@ -201,7 +209,8 @@ class Seq2VecCNN(nn.Module):
         
         self.first_block = Res1DBlock(input_features_dim, 
                                       intermediate_channels,
-                                      kernel_size=1)
+                                      kernel_size=1,
+                                      normalization_type=normalization_type)
         
         l = dt
         blocks =  []
@@ -209,13 +218,14 @@ class Seq2VecCNN(nn.Module):
             l = l - kernel_size + 1
             blocks.append(Res1DBlock(intermediate_channels, 
                                      intermediate_channels, 
-                                     kernel_size = kernel_size))
+                                     kernel_size=kernel_size,
+                                     normalization_type=normalization_type))
 
             blocks.append(nn.Sequential(nn.Conv1d(intermediate_channels, intermediate_channels, kernel_size=3, padding=1),
-                                        get_normalization_2d(normalization_type, intermediate_channels, n_groups=n_groups),
+                                        get_normalization(normalization_type, intermediate_channels, n_groups=n_groups, dimension=1),
                                         nn.ReLU(True),
                                         nn.Conv1d(intermediate_channels, intermediate_channels, kernel_size=3, padding=1),
-                                        get_normalization_2d(normalization_type, intermediate_channels, n_groups=n_groups),
+                                        get_normalization(normalization_type, intermediate_channels, n_groups=n_groups, dimension=1),
                                         nn.ReLU(True)
                                         ))
         
@@ -302,27 +312,27 @@ class FeaturesEncoder_Features2D(nn.Module):
                                                   self.C * self.multiplier, 
                                                   kernel_size=3, 
                                                   padding=1),
-                                          get_normalization_2d(normalization_type,
-                                                               self.C * self.multiplier, n_groups=n_groups),
+                                          get_normalization(normalization_type,
+                                                               self.C * self.multiplier, n_groups=n_groups, dimension=2),
                                           nn.ReLU(),
                                           nn.Conv2d(self.C * self.multiplier, 
                                                     self.C * self.multiplier//2, 
                                                     kernel_size=3, 
                                                     padding=1),
-                                          get_normalization_2d(normalization_type,
-                                                               self.C * self.multiplier//2, n_groups=n_groups),
+                                          get_normalization(normalization_type,
+                                                               self.C * self.multiplier//2, n_groups=n_groups, dimension=2),
                                           nn.ReLU(),
                                           nn.Conv2d(self.C * self.multiplier//2,
                                                     self.C * self.multiplier//4, 
                                                     kernel_size=3, 
                                                     padding=1),
-                                          get_normalization_2d(normalization_type,
-                                                               self.C * self.multiplier//4, n_groups=n_groups),
+                                          get_normalization(normalization_type,
+                                                               self.C * self.multiplier//4, n_groups=n_groups, dimension=2),
                                           nn.ReLU(),
                                           nn.Conv2d(self.C * self.multiplier//4,
                                                     self.C * self.multiplier//4, kernel_size=1),
-                                          get_normalization_2d(normalization_type,
-                                                               self.C * self.multiplier//4, n_groups=n_groups),
+                                          get_normalization(normalization_type,
+                                                               self.C * self.multiplier//4, n_groups=n_groups, dimension=2),
                                           nn.ReLU(),
                                           nn.Conv2d(self.C * self.multiplier//4, output_features_dim, kernel_size=1)
                                         )
@@ -382,9 +392,10 @@ class FeaturesEncoder_Bottleneck2D(nn.Module):
                                         out_channels, 
                                         kernel_size=3, 
                                         padding=1),
-                                        get_normalization_2d(self.normalization_type, 
+                                        get_normalization(self.normalization_type, 
                                                              out_channels, 
-                                                             n_groups=self.n_groups))
+                                                             n_groups=self.n_groups, 
+                                                             dimension=2))
         if self.upscale:
             block.add_module('upscale',nn.ConvTranspose2d(out_channels, 
                                                           out_channels, 
@@ -412,27 +423,27 @@ class FeaturesEncoder_Bottleneck(nn.Module):
                                               self.C * self.multiplier, 
                                               kernel_size=3, 
                                               stride=2),
-                                      get_normalization_2d(normalization_type,
-                                                           self.C * self.multiplier, n_groups=n_groups),
+                                      get_normalization(normalization_type,
+                                                           self.C * self.multiplier, n_groups=n_groups, dimension=2),
                                       nn.ReLU(),
                                       nn.Conv2d(self.C * self.multiplier, 
                                                 self.C * self.multiplier//2, 
                                                 kernel_size=3, 
                                                 stride=1),
-                                      get_normalization_2d(normalization_type,
-                                                           self.C * self.multiplier//2, n_groups=n_groups),
+                                      get_normalization(normalization_type,
+                                                           self.C * self.multiplier//2, n_groups=n_groups, dimension=2),
                                       nn.ReLU(),
                                       nn.Conv2d(self.C * self.multiplier//2,
                                                 self.C * self.multiplier//4, 
                                                 kernel_size=3, 
                                                 stride=1),
-                                      get_normalization_2d(normalization_type,
-                                                           self.C * self.multiplier//4, n_groups=n_groups),
+                                      get_normalization(normalization_type,
+                                                           self.C * self.multiplier//4, n_groups=n_groups, dimension=2),
                                       nn.ReLU(),
                                       nn.Conv2d(self.C * self.multiplier//4,
                                                 self.C * self.multiplier//4, kernel_size=1),
-                                      get_normalization_2d(normalization_type,
-                                                           self.C * self.multiplier//4, n_groups=n_groups),
+                                      get_normalization(normalization_type,
+                                                           self.C * self.multiplier//4, n_groups=n_groups, dimension=2),
                                       nn.ReLU()
                                     )
         

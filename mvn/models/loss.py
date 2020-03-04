@@ -2,6 +2,8 @@ import numpy as np
 
 import torch
 from torch import nn
+import torch.nn.functional as F
+
 
 from IPython.core.debugger import set_trace
 
@@ -106,3 +108,33 @@ class VolumetricCELoss(nn.Module):
 
 
         return loss / n_losses
+
+
+
+class GAN_loss(nn.Module):
+    """docstring for GAN_loss"""
+    def __init__(self):
+        super().__init__()
+    def forward(self, discriminator, keypoints_3d_pred, keypoints_3d_gt, discriminator_loss):
+
+        if discriminator_loss:
+            disc_on_real_data = discriminator(keypoints_3d_gt) 
+            disc_on_fake_data = discriminator(keypoints_3d_pred) 
+            logp_real_is_real = F.logsigmoid(disc_on_real_data)
+            logp_gen_is_fake = torch.log(1. - disc_on_fake_data.sigmoid() + 1e-15)
+            discriminator_loss =  - (logp_real_is_real + logp_gen_is_fake).mean()
+            return discriminator_loss
+
+        else:
+            generator_loss =  -F.logsigmoid(discriminator(keypoints_3d_pred)).mean()    
+            return generator_loss
+
+
+
+
+class LSGAN_loss(nn.Module):
+    """docstring for LSGAN_loss"""
+    def __init__(self):
+        super().__init__()
+    def forward(self, discriminator, keypoints_3d_pred, keypoints_3d_gt):
+        pass    

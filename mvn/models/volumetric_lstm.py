@@ -21,7 +21,7 @@ from mvn.models.temporal import Seq2VecRNN,\
                                 Seq2VecCNN2D, \
                                 get_encoder
 
-from pytorch_convolutional_rnn.convolutional_rnn import Conv3dLSTM, Conv3dPeepholeLSTM
+from pytorch_convolutional_rnn.convolutional_rnn import Conv3dLSTM
 from IPython.core.debugger import set_trace
 
 
@@ -123,6 +123,7 @@ class VolumetricTemporalLSTM(nn.Module):
         device = images_batch.device
         batch_size, dt = images_batch.shape[:2]
         image_shape = images_batch.shape[-2:]
+        fictive_view = 1
         assert self.dt == dt
      
         # forward backbone
@@ -132,18 +133,23 @@ class VolumetricTemporalLSTM(nn.Module):
         features = self.process_features(features)
         features_shape = features.shape[-2:]
         features_channels = features.shape[1]
-        features = features.view(-1, 1, features_channels, *features_shape)
-        
+
         proj_matricies_batch = update_camera(batch, batch_size, image_shape, features_shape, dt, device)
-        proj_matricies_batch = proj_matricies_batch.view(-1, 1, *proj_matricies_batch.shape[2:])
 
         if self.use_gt_pelvis:
             tri_keypoints_3d = torch.from_numpy(np.array(batch['keypoints_3d'])).type(torch.float).to(device)
+            if tri_keypoints_3d.dim() == 4:
+                self.keypoints_for_each_frame = True
+            elif ri_keypoints_3d.dim() == 3:
+                self.keypoints_for_each_frame = False
+            else:
+                raise RuntimeError('Broken tri_keypoints_3d shape')     
         else:
             raise RuntimeError('In absence of precalculated pelvis or gt pelvis, self.use_volumetric_pelvis should be True') 
-       
+
+
         # amend coord_volumes position                                                         
-        coord_volumes, cuboids, base_points = get_coord_volumes(self.kind, 
+        coord_volumes, _, base_points = get_coord_volumes(self.kind, 
                                                                 self.training, 
                                                                 self.rotation,
                                                                 self.cuboid_side,
@@ -151,14 +157,19 @@ class VolumetricTemporalLSTM(nn.Module):
                                                                 device,
                                                                 keypoints=tri_keypoints_3d
                                                                 )
+
+        coord_volumes = coord_volumes.view(-1, self.volume_size, self.volume_size, self.volume_size,3)
+        proj_matricies_batch = proj_matricies_batch.view(-1, fictive_view, *proj_matricies_batch.shape[2:])
+        features = features.view(-1, fictive_view, features_channels, *features_shape)
+
         
         # lift each feature-map to distinct volume and aggregate 
         volumes = unproject_heatmaps(features,  
                                      proj_matricies_batch, 
-                                     coord_volumes,
+                                     coord_volumes, 
                                      volume_aggregation_method=self.volume_aggregation_method,
                                      vol_confidences=vol_confidences,
-                                     fictive_views=dt
+                                     fictive_views=dt if (self.evaluate_only_last_volume and not self.keypoints_for_each_frame) else None # TODO: get rid of that shit
                                      )
 
         volumes = self.volume_net(volumes) 
@@ -168,32 +179,31 @@ class VolumetricTemporalLSTM(nn.Module):
         volumes, _ = self.lstm3d(volumes, None)
 
         if self.use_final_processing:
-            volumes = volumes.view(batch_size, *volumes.shape[2:])     
+            volumes = volumes.view(-1, *volumes.shape[2:])     
             volumes = self.final_processing(volumes)   
             volumes = volumes.view(batch_size, dt, *volumes.shape[1:])  
 
         if self.evaluate_only_last_volume:
+            # take all stuff for the last volume
             volumes = volumes[:,-1,...]
+            if self.keypoints_for_each_frame:
+                coord_volumes = coord_volumes.view(batch_size, dt, *coord_volumes.shape[1:])[:,-1,...]
+                base_points = base_points[:,-1,...]
         else:
-            volumes = volumes.view(batch_size, *volumes.shape[2:])    
+            volumes = volumes.view(-1, *volumes.shape[2:])  
+            base_points = base_points.view(-1, *base_points.shape[-1:])  
 
         # integral 3d
         vol_keypoints_3d, volumes = integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier,
                                                                             coord_volumes,
                                                                             softmax=self.volume_softmax)
         
-        if not self.evaluate_only_last_volume:
-            volumes = volumes.view(batch_size, dt, *volumes.shape[1:])
-            vol_keypoints_3d = vol_keypoints_3d.view(batch_size, dt, *vol_keypoints_3d.shape[1:])   
-            features = features.view(batch_size, dt, features_channels, *features_shape)          
-
-        # set_trace()    
 
         return (vol_keypoints_3d,
                 None, # features
                 volumes,
-                vol_confidences,
-                cuboids,
+                None, # vol_confidences
+                None, # cuboids
                 coord_volumes,
                 base_points
                 )
