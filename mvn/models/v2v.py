@@ -258,7 +258,7 @@ class EncoderDecorder(nn.Module):
             name = ''.join((module_type, '_', module_number))
             modules_dict[name] = module
 
-    def forward(self, x, params):
+    def forward(self, x, params=None):
 
         skip_connections = []
 
@@ -306,7 +306,7 @@ class V2VModel(nn.Module):
 
         self._initialize_weights()
 
-    def forward(self, x, params):
+    def forward(self, x, params=None):
         x = self.front_layer(x)
         x = self.encoder_decoder(x, params) 
         x = self.back_layer(x)

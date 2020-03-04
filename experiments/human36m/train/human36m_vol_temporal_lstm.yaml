@@ -45,7 +45,6 @@ model:
   volume_features_dim: 128
 
   include_pivot: false # including pivot getting thigs worse
-  style_grad_for_backbone: false
 
   init_weights: false
   checkpoint: ""

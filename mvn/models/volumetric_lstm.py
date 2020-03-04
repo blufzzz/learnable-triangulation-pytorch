@@ -2,6 +2,7 @@ import numpy as np
 import pickle
 import random
 from collections import defaultdict
+import subprocess
 
 import torch
 from torch import nn
@@ -128,9 +129,9 @@ class VolumetricTemporalLSTM(nn.Module):
         heatmaps, features, _, vol_confidences, _ = self.backbone(images_batch.view(-1, 3, *image_shape))
         
         # extract aux_features
+        features = self.process_features(features)
         features_shape = features.shape[-2:]
         features_channels = features.shape[1]
-        features = self.process_features(features)
         features = features.view(-1, 1, features_channels, *features_shape)
         
         proj_matricies_batch = update_camera(batch, batch_size, image_shape, features_shape, dt, device)
@@ -160,7 +161,8 @@ class VolumetricTemporalLSTM(nn.Module):
                                      fictive_views=dt
                                      )
 
-        volumes = self.volume_net(volumes, params=style_vector) 
+        volumes = self.volume_net(volumes) 
+
         volumes = volumes.view(batch_size, dt, *volumes.shape[1:]) 
 
         volumes, _ = self.lstm3d(volumes, None)
@@ -183,11 +185,12 @@ class VolumetricTemporalLSTM(nn.Module):
         if not self.evaluate_only_last_volume:
             volumes = volumes.view(batch_size, dt, *volumes.shape[1:])
             vol_keypoints_3d = vol_keypoints_3d.view(batch_size, dt, *vol_keypoints_3d.shape[1:])   
-            vol_keypoints_3d = vol_keypoints_3d.view(batch_size, dt, *vol_keypoints_3d.shape[1:])             
             features = features.view(batch_size, dt, features_channels, *features_shape)          
 
+        # set_trace()    
+
         return (vol_keypoints_3d,
-                features,
+                None, # features
                 volumes,
                 vol_confidences,
                 cuboids,
