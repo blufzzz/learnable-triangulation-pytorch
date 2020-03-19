@@ -15,7 +15,7 @@ opt:
   use_temporal_discriminator: true
   adversarial_temporal_criterion: 'vanilla'
   adversarial_temporal_loss_weight: 0.01
-  adversarial_critic_iters: 1
+  adversarial_generator_iters: 5
   train_generator_during_critic_iters: true
 
   n_objects_per_epoch: 10000
@@ -31,7 +31,7 @@ opt:
   lstm3d_lr: 0.001
   final_processing_lr: 0.001
   discr_lr: 0.001
-
+  entangle_processing_net_lr: 0.001
 
   scale_keypoints_3d: 0.1
 
@@ -41,21 +41,25 @@ opt:
 discriminator:
   intermediate_channels: 1024
   normalization_type: 'group_norm'
-
+ 
 model:
   name: "vol_temporal_lstm"
   kind: "mpii"
 
-  lstm_in_channels: 64
-  lstm_out_channels: 17
+  lstm_in_channels: 32
+  lstm_out_channels: 32
   lstm_bidirectional: false
-  lstm_layers: 2
+  lstm_layers: 1
   evaluate_only_last_volume: false
 
-  v2v_type: 'conf'
+  disentangle: true
+  entangle_processing_type: 'stack'
+  entangle_processing_normalization_type: 'group_norm'
+
+  v2v_type: 'v1'
   v2v_normalization_type: 'group_norm'
   volume_aggregation_method: "no_aggregation"
-  volume_features_dim: 128
+  volume_features_dim: 32
 
   include_pivot: false # including pivot getting thigs worse
 
@@ -77,23 +81,37 @@ model:
   transfer_cmu_to_human36m: false
 
   backbone:
-    name: "resnet152"  #"resnet50" #"resnet152"
+    name: "resnet50"
     style: "simple"
 
-    group_norm: false
+    group_norm: true
     init_weights: true
     checkpoint: "./data/pose_resnet_4.5_pixels_human36m.pth"
 
     num_joints: 17
-    num_layers: 152 #50 #152
+    num_layers: 50
 
     alg_confidences: false
     vol_confidences: false
     return_heatmaps: false
     return_bottleneck: true
 
+  epn_configuration:  
+    use_skip_connection: false
+
+                  # first should be Res3DBlock
+    downsampling: [{'module_type': 'Res3DBlock', 'params':[64,128], 'adain': false},
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false}]
+
+    bottleneck: [{'module_type': 'Res3DBlock', 'params': [128,128], 'adain': false}] 
+
+    upsampling: [{'module_type': 'Res3DBlock', 'params':[128,64], 'adain': false},
+                {'module_type': 'Res3DBlock', 'params':[64,64], 'adain': false}]
+                  # last should be Res3DBlock
+
   v2v_configuration:
 
+    use_skip_connection: true
     skip_block_type: 'Res3DBlock'
     skip_block_adain: false
 

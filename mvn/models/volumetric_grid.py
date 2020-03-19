@@ -14,7 +14,7 @@ from mvn.utils.multiview import update_camera
 from mvn.utils.misc import get_capacity, description
 from mvn.utils import volumetric
 from mvn.models.v2v import V2VModel
-from mvn.models.v2v_models import V2VModel_v2
+from mvn.models.v2v_models import V2VModel_v1
 from mvn.models.temporal import Seq2VecRNN,\
                                 Seq2VecCNN, \
                                 Seq2VecRNN2D, \
@@ -133,18 +133,13 @@ class VolumetricTemporalGridDeformation(nn.Module):
 
 
         if self.v2v_type == 'v1':
-            raise NotImplementedError()
-            # self.volume_net = V2VModel_v1(v2v_input_features_dim,
-            #                            self.num_joints,
-            #                            normalization_type=self.v2v_normalization_type,
-            #                            volume_size=self.volume_size)
+            self.volume_net = V2VModel_v1(v2v_input_features_dim,
+                                          self.num_joints,
+                                          normalization_type=self.v2v_normalization_type,
+                                          volume_size=self.volume_size,
+                                          temporal_condition_type = self.temporal_condition_type,
+                                          style_vector_dim = self.style_vector_dim)
 
-        elif self.v2v_type == 'v2':
-            raise NotImplementedError()
-            # self.volume_net = V2VModel_v2(v2v_input_features_dim,
-            #                               self.num_joints,
-            #                               normalization_type=self.v2v_normalization_type,
-            #                               volume_size=self.volume_size)
 
 
         elif self.v2v_type == 'conf':

@@ -16,8 +16,6 @@ from torchvision import transforms
 from mvn.utils.multiview import Camera
 from mvn.utils.img import get_square_bbox, scale_bbox, resize_image, crop_image, image_batch_to_torch, normalize_image
 from mvn.utils import volumetric
-# from mvn.utils.image import transform_points_after_crop_and_resize, image_batch_to_numpy
-
 
 class CMUMultipleSceneDataset(Dataset):
     def __init__(self, datasets):

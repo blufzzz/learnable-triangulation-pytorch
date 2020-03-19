@@ -71,8 +71,26 @@ JOINT_NAMES_DICT = {
         14: "right_knee",
         15: "left_ankle",
         16: "right_ankle"
-    }
+    },
+    'human36m':{0:'RFoot',
+                 1:'RKnee',
+                 2:'RHip',
+                 3:'LHip',
+                 4:'LKnee',
+                 5:'LFoot',
+                 6:'Hip',
+                 7:'Spine',
+                 8:'Thorax',
+                 9:'Head',
+                 10:'RWrist',
+                 11:'RElbow',
+                 12:'RShoulder',
+                 13:'LShoulder',
+                 14:'LElbow',
+                 15:'LWrist',
+                 16:'Neck/Nose'}
 }
+
 
 
 def fig_to_array(fig):
@@ -534,3 +552,10 @@ def draw_voxels(voxels, ax, shape=(8, 8, 8), norm=True, alpha=0.1):
 
     ax.set_xlabel("z"); ax.set_ylabel("x"); ax.set_zlabel("y")
     ax.invert_xaxis(); ax.invert_zaxis()
+
+
+
+
+
+
+

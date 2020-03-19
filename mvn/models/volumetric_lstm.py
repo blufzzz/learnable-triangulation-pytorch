@@ -14,7 +14,7 @@ from mvn.utils.multiview import update_camera
 from mvn.utils.misc import get_capacity, description
 from mvn.utils import volumetric
 from mvn.models.v2v import V2VModel
-from mvn.models.v2v_models import V2VModel_v2, V2VModel_v1
+from mvn.models.v2v_models import V2VModel_v1
 from mvn.models.temporal import Seq2VecRNN,\
                                 Seq2VecCNN, \
                                 Seq2VecRNN2D, \
@@ -74,8 +74,12 @@ class VolumetricTemporalLSTM(nn.Module):
         self.lstm_bidirectional = config.model.lstm_bidirectional
         self.lstm_layers = config.model.lstm_layers
 
-        self.use_final_processing = (self.lstm_out_channels != self.num_joints)
+        self.disentangle = config.model.disentangle
+        self.entangle_processing_type = config.model.entangle_processing_type
+        self.epn_normalization_type = config.model.entangle_processing_normalization_type
         self.evaluate_only_last_volume = config.model.evaluate_only_last_volume
+        self.use_final_processing = (self.lstm_out_channels != self.num_joints) and not self.disentangle 
+
 
         # modules
         self.backbone = pose_resnet.get_pose_net(config.model.backbone,
@@ -90,31 +94,41 @@ class VolumetricTemporalLSTM(nn.Module):
                                  batch_first=True,
                                  kernel_size=3)
 
+        if self.disentangle:
+            if self.entangle_processing_type == 'stack':
+                self.entangle_processing_net = V2VModel(self.lstm_in_channels + self.lstm_out_channels,
+                                                        self.num_joints,
+                                                        v2v_normalization_type=self.epn_normalization_type,
+                                                        config=config.model.epn_configuration)
+
+            elif self.entangle_processing_type == 'sum':
+                assert self.lstm_in_channels == self.lstm_out_channels
+                self.entangle_processing_net = V2VModel(self.lstm_out_channels,
+                                                        self.num_joints,
+                                                        v2v_normalization_type=self.epn_normalization_type,
+                                                        config=config.model.epn_configuration)    
+
+            else:
+                raise RuntimeError('Unknown entangle_processing_type, supported [`stack`,`sum`]')
+
+
+
         if self.v2v_type == 'v1':
-            raise NotImplementedError()
-            # self.volume_net = V2VModel_v1(v2v_input_features_dim,
-            #                            self.num_joints,
-            #                            normalization_type=self.v2v_normalization_type,
-            #                            volume_size=self.volume_size)
-
-        elif self.v2v_type == 'v2':
-            raise NotImplementedError()
-            # self.volume_net = V2VModel_v2(v2v_input_features_dim,
-            #                               self.num_joints,
-            #                               normalization_type=self.v2v_normalization_type,
-            #                               volume_size=self.volume_size)
-
+            self.volume_net = V2VModel_v1(self.volume_features_dim,
+                                          self.lstm_in_channels,
+                                          normalization_type=self.v2v_normalization_type,
+                                          volume_size=self.volume_size)
 
         elif self.v2v_type == 'conf':
             self.volume_net = V2VModel(self.volume_features_dim,
                                         self.lstm_in_channels,
-                                        config=config.model)
-            
+                                        v2v_normalization_type=self.v2v_normalization_type,
+                                        config=config.model.v2v_configuration)
+
         self.process_features = nn.Conv2d(256, self.volume_features_dim, 1)
 
         if self.use_final_processing:
             raise NotImplementedError()
-            # self.final_processing = get_final_processing()
 
         description(self)
 
@@ -140,7 +154,7 @@ class VolumetricTemporalLSTM(nn.Module):
             tri_keypoints_3d = torch.from_numpy(np.array(batch['keypoints_3d'])).type(torch.float).to(device)
             if tri_keypoints_3d.dim() == 4:
                 self.keypoints_for_each_frame = True
-            elif ri_keypoints_3d.dim() == 3:
+            elif tri_keypoints_3d.dim() == 3:
                 self.keypoints_for_each_frame = False
             else:
                 raise RuntimeError('Broken tri_keypoints_3d shape')     
@@ -176,7 +190,21 @@ class VolumetricTemporalLSTM(nn.Module):
 
         volumes = volumes.view(batch_size, dt, *volumes.shape[1:]) 
 
-        volumes, _ = self.lstm3d(volumes, None)
+        rnn_volumes, _ = self.lstm3d(volumes, None)
+
+        if self.disentangle:
+            rnn_volumes = rnn_volumes.view(-1, *rnn_volumes.shape[2:])
+            volumes = volumes.view(-1, *volumes.shape[2:])
+            
+            if self.entangle_processing_type == 'stack':
+                volumes = torch.cat([volumes, rnn_volumes], 1)
+            else: #self.entangle_processing_type == 'sum':
+                volumes = volumes + rnn_volumes
+            
+            volumes = self.entangle_processing_net(volumes)
+            volumes = volumes.view(batch_size, dt, *volumes.shape[1:])
+        else:
+            volumes = rnn_volumes    
 
         if self.use_final_processing:
             volumes = volumes.view(-1, *volumes.shape[2:])     
@@ -207,6 +235,7 @@ class VolumetricTemporalLSTM(nn.Module):
                 coord_volumes,
                 base_points
                 )
+
 
 
 

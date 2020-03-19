@@ -2,16 +2,16 @@
 from IPython.core.debugger import set_trace
 import torch.nn as nn
 import torch.nn.functional as F
+import inspect
 import torch
 import sys 
 
 MODULES_REQUIRES_NORMALIZAION = ['Res3DBlock', 'Upsample3DBlock', 'Basic3DBlock']
-STYLE_VECTOR_CHANNELS = None
 ORDINARY_NORMALIZATIONS = ['group_norm', 'batch_norm']
 ADAPTIVE_NORMALIZATION = ['adain', 'spade']
 
 class SPADE(nn.Module):
-    def __init__(self, style_vector_channels, features_channels, hidden=128, ks=3):
+    def __init__(self, style_vector_channels, features_channels, hidden=64, ks=3): #  hidden=128
         super().__init__()
 
         pw = ks // 2
@@ -34,7 +34,10 @@ class SPADE(nn.Module):
 class AdaIN(nn.Module):
     def __init__(self, style_vector_channels, features_channels):
         super(AdaIN, self).__init__()
-        self.affine = nn.Linear(style_vector_channels, 2*features_channels)
+        try:
+            self.affine = nn.Linear(style_vector_channels, 2*features_channels)
+        except TypeError:
+            set_trace()    
 
     def forward(self, features, params, eps = 1e-4):
         # features: [batch_size, C, D1, D2, D3]
@@ -55,12 +58,12 @@ class AdaIN(nn.Module):
 
 
 class CompoundNorm(nn.Module):
-    def __init__(self, normalization_types, out_planes, n_groups=None):
+    def __init__(self, normalization_types, out_planes, n_groups, style_vector_channels):
         super().__init__()
         norm_type, adaptive_norm_type = normalization_types
         assert norm_type in ORDINARY_NORMALIZATIONS and adaptive_norm_type in ADAPTIVE_NORMALIZATION
-        self.norm = get_normalization(norm_type, out_planes, n_groups=32)
-        self.adaptive_norm = get_normalization(adaptive_norm_type, out_planes, n_groups=32)
+        self.norm = get_normalization(norm_type, out_planes, n_groups, style_vector_channels)
+        self.adaptive_norm = get_normalization(adaptive_norm_type, out_planes, n_groups, style_vector_channels)
     def forward(self, x, params):
         x = self.norm(x)
         x = self.adaptive_norm(x, params)
@@ -81,12 +84,10 @@ class BatchNorm3d(nn.Module):
         return self.batch_norm(x)        
         
 
-def get_normalization(normalization_type, features_channels, n_groups=32):
-
-    style_vector_channels = STYLE_VECTOR_CHANNELS
+def get_normalization(normalization_type, features_channels, n_groups=32, style_vector_channels=None):
 
     if type(normalization_type) is list:
-        return CompoundNorm(normalization_type, features_channels, n_groups)
+        return CompoundNorm(normalization_type, features_channels, n_groups, style_vector_channels)
     else:    
         if normalization_type == 'adain':
             return AdaIN(style_vector_channels, features_channels)
@@ -101,7 +102,7 @@ def get_normalization(normalization_type, features_channels, n_groups=32):
 
 
 class Basic3DBlock(nn.Module):
-    def __init__(self, in_planes, out_planes, kernel_size, normalization_type, n_groups=32):
+    def __init__(self, in_planes, out_planes, kernel_size, normalization_type, n_groups=32, style_vector_channels=None):
         super(Basic3DBlock, self).__init__()
         self.normalization_type = normalization_type
         self.conv =  nn.Conv3d(in_planes, out_planes, 
@@ -109,7 +110,7 @@ class Basic3DBlock(nn.Module):
                                 stride=1, 
                                 padding=((kernel_size-1)//2))
 
-        self.normalization = get_normalization(normalization_type, out_planes, n_groups)
+        self.normalization = get_normalization(normalization_type, out_planes, n_groups, style_vector_channels)
 
         self.activation = nn.ReLU(True)
 
@@ -121,23 +122,23 @@ class Basic3DBlock(nn.Module):
 
 
 class Res3DBlock(nn.Module):
-    def __init__(self, in_planes, out_planes, normalization_type, kernel_size=3, n_groups=32, padding=1):
+    def __init__(self, in_planes, out_planes, normalization_type, kernel_size=3, n_groups=32, padding=1, style_vector_channels=None):
         super(Res3DBlock, self).__init__()
 
         self.normalization_type = normalization_type
         
-        self.res_norm1 = get_normalization(normalization_type, out_planes, n_groups)
-        self.res_norm2 = get_normalization(normalization_type, out_planes, n_groups)
+        self.res_norm1 = get_normalization(normalization_type, out_planes, n_groups,style_vector_channels)
+        self.res_norm2 = get_normalization(normalization_type, out_planes, n_groups,style_vector_channels)
 
         self.res_conv1 = nn.Conv3d(in_planes, out_planes, kernel_size=kernel_size, stride=1, padding=padding)
         self.res_conv2 = nn.Conv3d(out_planes, out_planes, kernel_size=kernel_size, stride=1, padding=padding)
         
         self.activation = nn.ReLU(True)
 
-        self.use_skip_con = ( in_planes != out_planes)
+        self.use_skip_con = (in_planes != out_planes)
         if self.use_skip_con:
             self.skip_con_conv = nn.Conv3d(in_planes, out_planes, kernel_size=1, stride=1, padding=0)
-            self.skip_con_norm = get_normalization(normalization_type, out_planes, n_groups)    
+            self.skip_con_norm = get_normalization(normalization_type, out_planes, n_groups, style_vector_channels)    
 
     def forward(self, x, params=None):
         if self.use_skip_con:
@@ -165,7 +166,7 @@ class Pool3DBlock(nn.Module):
 
 
 class Upsample3DBlock(nn.Module):
-    def __init__(self, in_planes, out_planes, kernel_size, stride, normalization_type, n_groups=32):
+    def __init__(self, in_planes, out_planes, kernel_size, stride, normalization_type, n_groups=32, style_vector_channels=None):
         super().__init__()
         assert(kernel_size == 2)
         assert(stride == 2)
@@ -177,7 +178,7 @@ class Upsample3DBlock(nn.Module):
                                             padding=0, 
                                             output_padding=0)
 
-        self.normalization = get_normalization(normalization_type, out_planes, n_groups)
+        self.normalization = get_normalization(normalization_type, out_planes, n_groups, style_vector_channels)
         self.activation = nn.ReLU(True)
 
     def forward(self, x, params=None):
@@ -190,19 +191,22 @@ class Upsample3DBlock(nn.Module):
 
 class EncoderDecorder(nn.Module):
 
-    def __init__(self, config, normalization_type, temporal_condition_type):
+    def __init__(self, config, normalization_type, temporal_condition_type, style_vector_channels):
         super().__init__()
 
         '''
-        default_normalization_type - used where is no adain normalization
+        default_normalization_type - used where is no adaptive normalization
         '''
 
+        self.style_vector_channels = style_vector_channels
         self.normalization_type = [normalization_type, temporal_condition_type]
         self.nonadaptive_normalization_type = normalization_type
-        self.skip_block_adain = config.skip_block_adain
+        self.use_skip_connection = config.use_skip_connection
+        if self.use_skip_connection:
+            self.skip_block_adain = config.skip_block_adain
+            skip_block_type = config.skip_block_type
 
         adain_dict = {}
-        skip_block_type = config.skip_block_type
 
         downsampling_config = config.downsampling
         bottleneck_config = config.bottleneck
@@ -223,15 +227,19 @@ class EncoderDecorder(nn.Module):
             self._append_module(self.downsampling_dict, module_config, downsampling_blocks_numerator)
             module_type = module_config['module_type']
             module_number = str(downsampling_blocks_numerator[module_type])
-            if module_type == 'Res3DBlock':
-                # add skip-connection
+
+            # add skip-connection
+            if module_type == 'Res3DBlock' and self.use_skip_connection:
                 in_planes = module_config['params'][-1]
                 out_planes = upsampling_config[-i-1]['params'][0]
                 skip_normalization_type = self.normalization_type if self.skip_block_adain else \
-                                            self.nonadaptive_normalization_type 
+                                          self.nonadaptive_normalization_type 
+
                 skip_con_block = getattr(sys.modules[__name__], skip_block_type)(in_planes, 
-                                                               out_planes, 
-                                                               normalization_type=skip_normalization_type)
+                                                                                 out_planes, 
+                                                                                 normalization_type=skip_normalization_type,
+                                                                                 style_vector_channels=self.style_vector_channels)
+
                 name = ''.join(('skip', '_', module_type, '_', module_number))
                 self.downsampling_dict[name] = skip_con_block
                 
@@ -247,14 +255,28 @@ class EncoderDecorder(nn.Module):
             module_adain = module_config['adain']
             module_number = str(blocks_numerator[module_type])
             blocks_numerator[module_type] += 1
-            
+            constructor = getattr(sys.modules[__name__], module_config['module_type'])
+
+            # set_trace()
+
             module_normalization = self.normalization_type if module_adain else \
                                      self.nonadaptive_normalization_type 
-                                     
-            model_params = module_config['params'] + [module_normalization] if \
-                           module_type in MODULES_REQUIRES_NORMALIZAION else module_config['params']
+            
+            # construct params dict                         
+            model_params = {}
+            # get arguments and omitting `self`
+            arguments = inspect.getargspec(constructor.__init__).args[1:]
+            for i, param in enumerate(module_config['params']): 
+                # get arguments for __init__ function
+                param_name = arguments[i]                            
+                model_params[param_name] = param
 
-            module = getattr(sys.modules[__name__], module_config['module_type'])(*model_params)
+            # add some optional arguments for __init__    
+            if module_type in MODULES_REQUIRES_NORMALIZAION:
+                model_params['normalization_type'] = module_normalization
+                model_params['style_vector_channels'] = self.style_vector_channels
+
+            module = constructor(**model_params)
             name = ''.join((module_type, '_', module_number))
             modules_dict[name] = module
 
@@ -263,7 +285,7 @@ class EncoderDecorder(nn.Module):
         skip_connections = []
 
         for name, module in self.downsampling_dict.items():
-            if name.split('_')[0] == 'skip':
+            if name.split('_')[0] == 'skip' and self.use_skip_connection:
                 skip_connections.append(module(x, params=params))
             else:
                 x = module(x, params=params)
@@ -273,7 +295,7 @@ class EncoderDecorder(nn.Module):
             
         skip_number = -1    
         for name, module in self.upsampling_dict.items():
-            if name.split('_')[0] == 'Res3DBlock':
+            if name.split('_')[0] == 'Res3DBlock' and self.use_skip_connection:
                 x = x + skip_connections[skip_number]
                 skip_number -= 1
             x = module(x, params=params)      
@@ -282,25 +304,40 @@ class EncoderDecorder(nn.Module):
 
 
 class V2VModel(nn.Module):
-    def __init__(self, input_channels, output_channels, config):
+    def __init__(self, 
+                 input_channels, 
+                 output_channels, 
+                 v2v_normalization_type, 
+                 config, 
+                 style_vector_dim=None, 
+                 temporal_condition_type=None):
+
         super().__init__()
 
-        global STYLE_VECTOR_CHANNELS
-        STYLE_VECTOR_CHANNELS = config.style_vector_dim if hasattr(config, 'style_vector_dim') else None
+        self.style_vector_channels = style_vector_dim #config.style_vector_dim if hasattr(config, 'style_vector_dim') else None
         
-        self.normalization_type = config.v2v_normalization_type
-        self.temporal_condition_type = config.temporal_condition_type if hasattr(config, 'temporal_condition_type') else None
+        self.normalization_type = v2v_normalization_type #config.v2v_normalization_type
+        self.temporal_condition_type = temporal_condition_type #config.temporal_condition_type if hasattr(config, 'temporal_condition_type') else None
 
-        encoder_input_channels = config.v2v_configuration.downsampling[0]['params'][0]
-        encoder_output_channels = config.v2v_configuration.upsampling[-1]['params'][-1]
+        encoder_input_channels = config.downsampling[0]['params'][0]
+        encoder_output_channels = config.upsampling[-1]['params'][-1]
 
-        self.front_layer = Basic3DBlock(input_channels, encoder_input_channels, 3, self.normalization_type)
+        self.front_layer = Basic3DBlock(input_channels, 
+                                        encoder_input_channels, 
+                                        3, 
+                                        self.normalization_type,
+                                        style_vector_channels=self.style_vector_channels)
 
-        self.encoder_decoder = EncoderDecorder(config.v2v_configuration,
+        self.encoder_decoder = EncoderDecorder(config,
                                                self.normalization_type, 
-                                               self.temporal_condition_type)
+                                               self.temporal_condition_type,
+                                               style_vector_channels=self.style_vector_channels)
 
-        self.back_layer = Basic3DBlock(encoder_output_channels, 32, 1, self.normalization_type)
+        self.back_layer = Basic3DBlock(encoder_output_channels, 
+                                       32, 
+                                       1, 
+                                       self.normalization_type,
+                                       style_vector_channels=self.style_vector_channels)
 
         self.output_layer = nn.Conv3d(32, output_channels, kernel_size=1, stride=1, padding=0)
 

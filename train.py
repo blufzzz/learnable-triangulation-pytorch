@@ -24,7 +24,7 @@ from torch.nn.parallel import DistributedDataParallel
 from tensorboardX import SummaryWriter
 
 from mvn.models.triangulation import VolumetricTriangulationNet
-from mvn.models.volumetric_adain import VolumetricTemporalAdaINNet
+from mvn.models.volumetric_adain import VolumetricTemporalAdaINNet, VolumetricTemporalFRAdaINNet
 from mvn.models.volumetric_lstm import VolumetricTemporalLSTM
 from mvn.models.volumetric_grid import VolumetricTemporalGridDeformation
 from mvn.models.temporal import Seq2VecCNN
@@ -43,6 +43,8 @@ from mvn.datasets import utils as dataset_utils
 
 from IPython.core.debugger import set_trace
 import matplotlib.pyplot as plt
+
+MAKE_EXPERIMENT_DIR = True
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -227,14 +229,16 @@ def one_epoch(model,
     transfer_cmu_to_human36m = config.transfer_cmu_to_human36m if hasattr(config, "transfer_cmu_to_human36m") else False
     use_temporal_discriminator = config.opt.use_temporal_discriminator if hasattr(config.opt, "use_temporal_discriminator") else False
     visualize = config.visualize if hasattr(config, "visualize") else True
-    
+    keypoints_per_frame = config.dataset.keypoints_per_frame if hasattr(config.dataset, 'keypoints_per_frame') else False
+    use_bone_length_term = config.opt.use_bone_length_term if hasattr(config.opt, 'use_bone_length_term') else False
+    bone_length_weight = config.opt.bone_length_weight if hasattr(config.opt, 'bone_length_weight') else None
 
     if use_temporal_discriminator:
         assert (discriminator is not None) and (opt_discr is not None) and (not model.evaluate_only_last_volume)
         adversarial_temporal_criterion = {'vanilla':GAN_loss(),
                                           'lsgan':LSGAN_loss()}[config.opt.adversarial_temporal_criterion]
         adversarial_temporal_loss_weight = config.opt.adversarial_temporal_loss_weight
-        adversarial_critic_iters = config.opt.adversarial_critic_iters 
+        adversarial_generator_iters = config.opt.adversarial_generator_iters 
         train_generator_during_critic_iters = config.opt.train_generator_during_critic_iters                               
 
 
@@ -282,7 +286,7 @@ def one_epoch(model,
                     cuboids_pred, 
                     coord_volumes_pred, 
                     base_points_pred,
-                    coord_offsets) = model(images_batch, batch)    
+                    coord_offsets) = model(images_batch, batch)
 
                 else:    
                     (keypoints_3d_pred, 
@@ -297,8 +301,11 @@ def one_epoch(model,
                 n_joints = keypoints_3d_pred[0].shape[1]
                 keypoints_3d_binary_validity_gt = (keypoints_3d_validity_gt > 0.0).type(torch.float32)
                 scale_keypoints_3d = config.opt.scale_keypoints_3d if hasattr(config.opt, "scale_keypoints_3d") else 1.0
+                keypoints_per_frame_output = keypoints_3d_pred.shape[:-2].numel() == batch_size*dt
+                pivot_index =  {'first':dt-1,
+                                'intermediate':dt//2}[config.dataset.pivot_type]
 
-                if config.dataset.keypoints_per_frame:
+                if keypoints_per_frame:
                     keypoints_3d_gt = keypoints_3d_gt.view(-1, *keypoints_3d_gt.shape[2:])
                     keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt.view(-1, *keypoints_3d_binary_validity_gt.shape[2:])
 
@@ -312,7 +319,6 @@ def one_epoch(model,
                 ##################
                 # CALCULATE LOSS #   
                 ##################
-
                 # MSE\MAE loss
                 total_loss = 0.0
                 loss = criterion(keypoints_3d_pred * scale_keypoints_3d, \
@@ -321,6 +327,16 @@ def one_epoch(model,
 
                 total_loss += loss
                 metric_dict[f'{config.opt.criterion}'].append(loss.item())
+
+                # Bone length loss
+                if use_bone_length_term:
+                    connectivity = vis.CONNECTIVITY_DICT[dataloader.dataset.kind]
+                    bone_length_loss = 0.
+                    for (index_from, index_to) in connectivity:
+                        bone_length_loss += torch.norm(keypoints_3d_pred[:,index_from] - keypoints_3d_gt[:,index_to], dim=-1)
+                    bone_length_loss = bone_length_loss.mean()
+                    total_loss += bone_length_loss * bone_length_weight
+                    metric_dict['bone_length_loss'].append(bone_length_loss.item())
 
                 # volumetric loss
                 use_volumetric_ce_loss = config.opt.use_volumetric_ce_loss
@@ -347,19 +363,22 @@ def one_epoch(model,
                                                                         keypoints_3d_pred_seq.clone().detach(), 
                                                                         keypoints_3d_gt_seq.clone().detach(),
                                                                         discriminator_loss=True)
-                    opt_discr.zero_grad()
-                    discriminator_loss.backward()
-                    opt_discr.step()
 
-                    # generator step 
-                    discriminator.zero_grad()
+                    if is_train:
+                        opt_discr.zero_grad()
+                        discriminator_loss.backward()
+                        opt_discr.step()
+
+                    # generator step
+                    if is_train: 
+                        discriminator.zero_grad()
                     generator_loss = adversarial_temporal_criterion(discriminator, 
                                                                     keypoints_3d_pred_seq,
                                                                     keypoints_3d_gt_seq,
                                                                     discriminator_loss=False)
                     
                     # add loss                    
-                    if iter_i%adversarial_critic_iters == 0:
+                    if iter_i%adversarial_generator_iters == 0:
                         total_loss += generator_loss * adversarial_temporal_loss_weight
 
                     metric_dict[f'{config.opt.adversarial_temporal_criterion}_generator_loss'].append(generator_loss.item())
@@ -369,8 +388,11 @@ def one_epoch(model,
                 ############
                 # BACKWARD #   
                 ############
-                train_generator = (train_generator_during_critic_iters or iter_i%adversarial_critic_iters == 0)
-                adversarial_condition = (not use_temporal_discriminator) or (use_temporal_discriminator and train_generator)
+                if use_temporal_discriminator:
+                    train_generator = (train_generator_during_critic_iters or iter_i%adversarial_generator_iters == 0)
+                    adversarial_condition = (not use_temporal_discriminator) or (use_temporal_discriminator and train_generator)
+                else:
+                    adversarial_condition=True    
                 if is_train and adversarial_condition:
                     opt.zero_grad()
                     total_loss.backward()        
@@ -420,11 +442,11 @@ def one_epoch(model,
                     keypoints_3d_gt = op.root_centering(keypoints_3d_gt, config.kind, inverse=True)
                     keypoints_3d_pred = op.root_centering(keypoints_3d_pred, config.kind, inverse=True)
                     
-                    if model_type == "vol_temporal_fr_adain" and keypoints_3d_pred_fr is not None:
-                        keypoints_3d_pred_fr = op.root_centering(keypoints_3d_pred_fr, config.kind, inverse=True)    
 
-                 # save answers for evalulation
+                # save answers for evalulation
                 if not is_train:
+                    if keypoints_per_frame_output:
+                        keypoints_3d_pred = keypoints_3d_pred.view(batch_size, dt, *keypoints_3d_pred.shape[1:])[:,pivot_index,...]
                     results['keypoints_3d'].append(keypoints_3d_pred.detach().cpu().numpy())
                     results['indexes'].append(batch['indexes'])
                 
@@ -448,9 +470,9 @@ def one_epoch(model,
                                 confidences_batch=confidences_pred,
                                 batch_index=batch_i, 
                                 size=5,
-                                keypoints_3d_batch_pred_fr = keypoints_3d_pred_fr if model_type == "vol_temporal_fr_adain" else None,
+                                keypoints_3d_batch_pred_fr = None,
                                 max_n_cols=10,
-                                keypoints_per_frame = config.dataset.keypoints_per_frame
+                                keypoints_per_frame = keypoints_per_frame
                             )
                             writer.add_image(f"{name}/keypoints_vis/{batch_i}", keypoints_vis.transpose(2, 0, 1), global_step=n_iters_total)
 
@@ -506,7 +528,6 @@ def one_epoch(model,
     if master:
         # validation
         if not is_train:
-            print ('Validation...')
             results['keypoints_3d'] = np.concatenate(results['keypoints_3d'], axis=0)
             results['indexes'] = np.concatenate(results['indexes'])
 
@@ -572,7 +593,8 @@ def main(args):
         "vol": VolumetricTriangulationNet,
         "vol_temporal_adain":VolumetricTemporalAdaINNet,
         "vol_temporal_grid": VolumetricTemporalGridDeformation,
-        "vol_temporal_lstm": VolumetricTemporalLSTM
+        "vol_temporal_lstm": VolumetricTemporalLSTM,
+        "vol_temporal_fr_adain": VolumetricTemporalFRAdaINNet
     }[config.model.name](config, device=device).to(device)
 
     if config.model.init_weights:
@@ -607,7 +629,7 @@ def main(args):
                 ],
                 lr=config.opt.lr
             )
-        elif config.model.name == "vol_temporal_adain":
+        elif config.model.name in ["vol_temporal_adain", "vol_temporal_fr_adain"]:
             opt = torch.optim.Adam(
                 [{'params': model.backbone.parameters()},
                  {'params': model.process_features.parameters(), 'lr': config.opt.process_features_lr if hasattr(config.opt, "process_features_lr") else config.opt.lr},
@@ -637,6 +659,7 @@ def main(args):
                  {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr},
                  {'params': model.lstm3d.parameters(), 'lr': config.opt.lstm3d_lr if hasattr(config.opt, "lstm3d_lr") else config.opt.lr},
                 ]+ \
+                ([{'params':model.entangle_processing_net.parameters(), 'lr': config.opt.entangle_processing_net_lr if hasattr(config.opt, "entangle_processing_net_lr") else config.opt.lr}] if model.disentangle else []) + \
                 ([{'params':model.final_processing.parameters(), 'lr': config.opt.final_processing_lr if hasattr(config.opt, "final_processing_lr") else config.opt.lr}] if model.use_final_processing else []),
                 lr=config.opt.lr)                         
 
@@ -644,7 +667,7 @@ def main(args):
             raise RuntimeError('Unknown config.model.name')
 
     # use_temporal_discriminator
-    opt_disc, discriminator = None, None
+    opt_discr, discriminator = None, None
     if use_temporal_discriminator:
 
         discriminator = Seq2VecCNN(config.model.backbone.num_joints*3,
@@ -663,9 +686,9 @@ def main(args):
 
     # experiment
     experiment_dir, writer = None, None
-    if master: 
+    if master and MAKE_EXPERIMENT_DIR: 
         experiment_dir, writer = setup_experiment(config, type(model).__name__, is_train=not args.eval)
-    print ('Experiment in logdir:', args.logdir)    
+        print ('Experiment in logdir:', args.logdir)    
         
     # multi-gpu
     if is_distributed:
@@ -694,6 +717,8 @@ def main(args):
                                             writer=writer,
                                             discriminator=discriminator,
                                             opt_discr=opt_discr)
+
+            print ('Validation...')
 
             n_iters_total_val = one_epoch(model, 
                                           criterion, 

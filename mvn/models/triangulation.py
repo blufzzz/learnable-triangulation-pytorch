@@ -12,7 +12,7 @@ from mvn.utils import op, multiview, img, misc, volumetric
 
 from mvn.models import pose_resnet, pose_hrnet
 from mvn.models.v2v import V2VModel
-from mvn.models.v2v_models import V2VModel_v2, V2VModel_v1
+from mvn.models.v2v_models import V2VModel_v1
 
 
 class VolumetricTriangulationNet(nn.Module):
@@ -36,7 +36,8 @@ class VolumetricTriangulationNet(nn.Module):
         # heatmap
         self.heatmap_softmax = config.model.heatmap_softmax
         self.heatmap_multiplier = config.model.heatmap_multiplier
-        self.backbone_features_dim = config.model.backbone.backbone_features_dim if hasattr(config.model.backbone, 'backbone_features_dim') else 256
+        self.backbone_features_dim = config.model.backbone.backbone_features_dim if \
+                                        hasattr(config.model.backbone, 'backbone_features_dim') else 256
         self.volume_features_dim = config.model.volume_features_dim
         self.v2v_type = config.model.v2v_type
 
@@ -74,13 +75,7 @@ class VolumetricTriangulationNet(nn.Module):
 
         v2v_output_dim = self.num_joints + 3 if self.volume_additional_grid_offsets else self.num_joints
 
-        if self.v2v_type == 'v2':
-            self.volume_net = V2VModel_v2(self.volume_features_dim, 
-                                          v2v_output_dim,
-                                          self.volume_size, 
-                                          normalization_type = config.model.normalization_type)
-
-        elif self.v2v_type == 'v1':    
+        if self.v2v_type == 'v1':    
             self.volume_net = V2VModel_v1(self.volume_features_dim, 
                                           v2v_output_dim, 
                                           self.volume_size,

@@ -19,7 +19,9 @@ def get_encoder(encoder_type,
     
     assert spatial_dimension in [1,2], 'Wrong spatial_dimension! Only 1 and 2 are supported'
     encoder_input_channels = {'features':{'resnet152':256},
-                              'backbone':{'resnet152':2048}}[encoder_type][backbone_type]
+                              'features':{'resnet50':256}, 
+                              'backbone':{'resnet152':2048},
+                              'backbone':{'resnet50':2048}}[encoder_type][backbone_type]
 
 
 
@@ -31,7 +33,8 @@ def get_encoder(encoder_type,
                                                normalization_type=encoder_normalization_type)
         else: #spatial_dimension == 2:
 
-            input_size, target_size = {'resnet152':[12,96]}[backbone_type] 
+            input_size, target_size = {'resnet152':[12,96],
+                                       'resnet50':[12,96]}[backbone_type] 
 
             return  FeaturesEncoder_Bottleneck2D(encoded_feature_space,
                                                  encoder_input_channels,

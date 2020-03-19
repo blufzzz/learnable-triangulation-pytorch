@@ -2,7 +2,8 @@ title: "human36m_vol_softmax"
 kind: "human36m"
 vis_freq: 100
 vis_n_elements: 10
-
+visualize: False
+distributed_train: false
 image_shape: [384, 384]
 
 opt:
@@ -11,8 +12,12 @@ opt:
   use_volumetric_ce_loss: true
   volumetric_ce_loss_weight: 0.01
 
-  n_objects_per_epoch: 15000
+  use_bone_length_term: false
+  bone_length_weight: 0.001
+
+  n_objects_per_epoch: 10000
   n_epochs: 9999
+  dump_weights: False
 
   batch_size: 1
   val_batch_size: 1
@@ -23,9 +28,8 @@ opt:
 
   scale_keypoints_3d: 0.1
 
-  save_model: false
+  save_model: true
   silence: false
-
 
 model:
   name: "vol"
@@ -36,7 +40,7 @@ model:
 
   init_weights: false
   checkpoint: ""
-  normalization_type: "group_norm"
+  normalization_type: "batch_norm"
 
   use_gt_pelvis: true
   use_precalculated_pelvis: false
@@ -46,18 +50,19 @@ model:
   rotation: false
 
   volume_features_dim: 32
-  volume_size: 64
+  volume_size: 32
   volume_multiplier: 1.0
   volume_softmax: true
   max_cell_size_multiplier: 1.5
 
+
   heatmap_softmax: true
   heatmap_multiplier: 100.0
 
-  volume_additional_grid_offsets: true
+  volume_additional_grid_offsets: false
 
   backbone:
-    name: "resnet152"
+    name: "resnet50"
     style: "simple"
 
     group_norm: false
@@ -65,7 +70,7 @@ model:
     checkpoint: "./data/pose_resnet_4.5_pixels_human36m.pth"
 
     num_joints: 17
-    num_layers: 152
+    num_layers: 50
 
     alg_confidences: false
     vol_confidences: false

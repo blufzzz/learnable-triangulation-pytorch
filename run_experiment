@@ -1,34 +1,24 @@
 #!/bin/bash
-srun -p TitanBlack --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-03 \
+srun -p TitanBlack --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-02 \
 python3.6 train.py \
---logdir=../logs/lstm3d \
---config=./experiments/human36m/train/human36m_vol_temporal_lstm.yaml \
---experiment_comment="h36_sv32_dist_lstm3d-onedir-2layers-64-17_v2v-conf-gn_resnet152-bn_dt-8_dil-3-1-1_norot_noaggr_discr-1024-gn-vanilla-c1-g1-tgdci"
+--logdir=../logs/resnet_50/spade_2d/ \
+--config=./experiments/human36m/train/human36m_vol_temporal_fr_adain.yaml \
+--experiment_comment="h36_sv32_dist_FR-spade64-all-interpolate-gn_s2v-lstm2d-256-256-32-gn_vf32_f2v-features-noupscale-C0-256-group_resnet50-gn-stylegrad_dt-8_dil-3-1-1_lr-1e-4"
 
-#--experiment_comment="h36_sv32-vf128_dist_spade_lstm2d-256-128-128_v2v-conf-group-ada_backbone-res152-batchnorm-nosg_encoder-groupnorm-bottleneck-C2-256-noupscale_dt-8_dil-3-1-1_lr-1e-4"
-
-
-# --logdir=../logs/adain_cnn \
-# --config=./experiments/human36m/train/human36m_vol_temporal_adain.yaml \
-# --experiment_comment="h36_sv32_dist_ada`in-all-group-ada_s2v-cnn-512-group_s256_vf32_f2v-backbone-C2-1024_resnet152-bn-nostylegrad_dt-9_dil-3-1-1_lr-1e-4"
+# LSTM3D
+# --experiment_comment="h36_sv32_dist_lstm3d-1d-1l-32-32_v2v-v1-gn_resnet50-gn_epn-v2v-64-128-gn-noskip-stack_dt-8_dil-3-1-1_noaggr_eval-all"
+# --experiment_comment="h36_sv32_dist_lstm3d-1d-1l-32-17_v2v-v1-gn_resnet50-gn_dt-8_dil-3-1-1_noaggr_eval-all_discr-1024-gn-vanilla-c1-g5-tgdci"
+# --experiment_comment="h36_sv32_dist_lstm3d-1d-1l-32-17_v2v-v1-gn_resnet50-gn_dt-8_dil-3-1-1_noaggr_eval-last"
 
 
-# --logdir=../logs/grid \
-# --config=./experiments/human36m/train/human36m_vol_temporal_grid.yaml \
-# --experiment_comment="h36_sv32_dist_cnn2d-128_s64-nostylegrad_v2v-groupnorm_resnet152-groupnorm_dt-9_dil-3-1-1_lr-1e-4"
+# BASELINE
+# --experiment_comment="h36_sv32_dist_resnet50-gn_v2v-v1-gn-no-aggr_1-1_lr-1e-4"
 
 
-# python3.6 train.py \
-# --logdir=../logs/baseline \
-# --config=./experiments/human36m/train/human36m_vol_baseline_hrnet.yaml \
-# --experiment_comment="h36_sv64_dist_baseline_hrnet32coco-h36m-groupnorm_bs-1-1_norot"
+# SPADE LSTM2D
+# --experiment_comment="h36_sv32_dist_spade-all-interpolate-gn_s2v-lstm2d-1024-1024-1024-gn_vf32_f2v-backbone-noupscale-C4-1024-group_resnet50-gn-nostylegrad_dt-12_dil-3-1-1_lr-1e-4"
 
 
-# python3.6 train.py \
-# --logdir=../logs/adain_lstm_32 \
-# --config=./experiments/human36m/train/human36m_vol_temporal_adain.yaml \
-# --experiment_comment="h36_sv32_dist_adain-lstm-all-group-ada_s256_f2v-backbone-C2-1024_dt-8_dil-3-2-2_lr-1e-4"
-
-
-
+# LSTM1D
+# --experiment_comment="h36_sv32_dist_adain-all-gn-adain_s2v-lstm-1024-1024-1024-gn_vf32_f2v-backbone-C4-1024-group_resnet50-gn-nostylegrad_dt-12_dil-3-1-1_lr-1e-4"
 
