@@ -12,8 +12,8 @@ opt:
   use_volumetric_ce_loss: true
   volumetric_ce_loss_weight: 0.01
 
-  use_bone_length_term: false
-  bone_length_weight: 0.001
+  use_bone_length_term: true
+  bone_length_weight: 0.0001
 
   n_objects_per_epoch: 10000
   n_epochs: 9999
@@ -40,7 +40,7 @@ model:
 
   init_weights: false
   checkpoint: ""
-  normalization_type: "batch_norm"
+  normalization_type: "group_norm"
 
   use_gt_pelvis: true
   use_precalculated_pelvis: false
@@ -65,7 +65,7 @@ model:
     name: "resnet50"
     style: "simple"
 
-    group_norm: false
+    group_norm: true
     init_weights: true
     checkpoint: "./data/pose_resnet_4.5_pixels_human36m.pth"
 

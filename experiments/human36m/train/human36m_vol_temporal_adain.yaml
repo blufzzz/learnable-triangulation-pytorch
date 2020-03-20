@@ -34,23 +34,23 @@ model:
   name: "vol_temporal_adain"
   kind: "mpii"
 
-  encoder_type: "backbone"
-  encoder_capacity_multiplier: 2
+  encoder_type: "features"
+  encoder_capacity_multiplier: 0
   encoder_normalization_type: 'group_norm'
   encoded_feature_space: 256
   upscale_bottleneck: false # True only with encoder_type='backbone' and '2d f2v'
 
-  f2v_type: 'lstm2d'
+  f2v_type: 'v2v'
   f2v_normalization_type: 'group_norm'
   f2v_intermediate_channels: 128
-  style_vector_dim: 64
+  style_vector_dim: 32
 
   v2v_type: 'conf' # ['v1', 'conf']
   v2v_normalization_type: 'group_norm'
   volume_aggregation_method: "no_aggregation"
-  temporal_condition_type: 'stack' 
+  temporal_condition_type: 'spade' 
   spade_broadcasting_type: 'interpolate' #'unprojecting'
-  volume_features_dim: 64
+  volume_features_dim: 32
   include_pivot: false 
   style_grad_for_backbone: false
 
@@ -94,24 +94,47 @@ model:
     skip_block_adain: false
 
                   # first should be Res3DBlock
-    downsampling: [{'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
+    downsampling: [{'module_type': 'Res3DBlock', 'params':[128,128], 'adain': true},
                   {'module_type': 'Pool3DBlock', 'params': [2], 'adain': false}, # pool
-                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': true},
                   {'module_type': 'Pool3DBlock', 'params': [2], 'adain': false}, # pool
-                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': true},
                   {'module_type': 'Pool3DBlock', 'params':[2], 'adain': false}, # pool
-                  {'module_type': 'Res3DBlock', 'params':[128,256], 'adain': false}]
+                  {'module_type': 'Res3DBlock', 'params':[128,256], 'adain': true}]
+
+    bottleneck: [{'module_type': 'Res3DBlock', 'params': [256,256], 'adain': true} ] 
+
+    upsampling: [{'module_type': 'Res3DBlock', 'params':[256,128], 'adain': true},
+                  {'module_type': 'Upsample3DBlock', 'params': [128, 128, 2, 2], 'adain': true},
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': true},
+                  {'module_type': 'Upsample3DBlock', 'params': [128, 128, 2, 2], 'adain': true},
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': true},
+                  {'module_type': 'Upsample3DBlock', 'params':[128, 64, 2, 2], 'adain': true},
+                  {'module_type': 'Res3DBlock', 'params':[64,64], 'adain': true}]
+                  # last should be Res3DBlock
+
+  f2v_configuration:
+
+    use_skip_connection: false
+    skip_block_type: 'Res3DBlock'
+    skip_block_adain: false
+
+                  # first should be Res3DBlock
+    downsampling: [{'module_type': 'Res3DBlock', 'params':[256,128], 'adain': false},
+                  {'module_type': 'Pool3DBlock', 'params': [[1,2,2]], 'adain': false}, # pool
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
+                  {'module_type': 'Pool3DBlock', 'params': [[1,2,2]], 'adain': false}, # pool
+                  {'module_type': 'Res3DBlock', 'params':[128,256], 'adain': false},
+                  {'module_type': 'Pool3DBlock', 'params': [[1,2,2]], 'adain': false} # pool
+                  ]
 
     bottleneck: [{'module_type': 'Res3DBlock', 'params': [256,256], 'adain': false} ] 
 
     upsampling: [{'module_type': 'Res3DBlock', 'params':[256,128], 'adain': false},
-                  {'module_type': 'Upsample3DBlock', 'params': [128, 128, 2, 2], 'adain': false},
-                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
-                  {'module_type': 'Upsample3DBlock', 'params': [128, 128, 2, 2], 'adain': false},
-                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
-                  {'module_type': 'Upsample3DBlock', 'params':[128, 64, 2, 2], 'adain': false},
+                  {'module_type': 'Res3DBlock', 'params':[128,64], 'adain': false},
                   {'module_type': 'Res3DBlock', 'params':[64,64], 'adain': false}]
                   # last should be Res3DBlock
+                  # out 32x11x12x12 for dt=11
 
 dataset:
   kind: "human36m"

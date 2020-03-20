@@ -129,6 +129,15 @@ class VolumetricTemporalAdaINNet(nn.Module):
                                                             normalization_type = self.f2v_normalization_type,
                                                             dt=self.dt if self.include_pivot else self.dt-1,
                                                             kernel_size = 3)
+
+        elif self.f2v_type == 'v2v':
+            self.features_sequence_to_vector = V2VModel(self.encoded_feature_space,
+                                                        self.style_vector_dim,
+                                                        v2v_normalization_type=self.f2v_normalization_type,
+                                                        config=config.model.f2v_configuration,
+                                                        style_vector_dim=None,
+                                                        temporal_condition_type=None)
+
         else:
             raise RuntimeError('Wrong features_sequence_to_vector type')
 
@@ -138,7 +147,8 @@ class VolumetricTemporalAdaINNet(nn.Module):
                                    self.encoded_feature_space,
                                    self.upscale_bottleneck,
                                    capacity = self.encoder_capacity,
-                                   spatial_dimension = 2 if self.f2v_type[-2:] == '2d' else 1,
+                                   spatial_dimension = 2 if (self.f2v_type[-2:] == '2d' or \
+                                                         self.f2v_type == 'v2v')  else 1,
                                    encoder_normalization_type = self.encoder_normalization_type)
         
 
@@ -168,7 +178,7 @@ class VolumetricTemporalAdaINNet(nn.Module):
 
         description(self)
 
-    def forward(self, images_batch, batch, randomize_style=False):
+    def forward(self, images_batch, batch, randomize_style=False, return_style_vector=False):
 
         device = images_batch.device
         batch_size, dt = images_batch.shape[:2]
@@ -228,8 +238,15 @@ class VolumetricTemporalAdaINNet(nn.Module):
             raise RuntimeError('Unknown encoder')    
 
         encoded_features = encoded_features.view(batch_size, -1, *encoded_features.shape[1:]) # [batch_size, dt-1, encoded_fetures_dim]
+        if self.f2v_type == 'v2v':
+            encoded_features = torch.transpose(encoded_features, 1,2) # [batch_size, encoded_fetures_dim[0], dt-1, encoded_fetures_dim[1:]]
         style_vector = self.features_sequence_to_vector(encoded_features, device=device) # [batch_size, style_vector_dim]
         
+        # using for debugging 
+        if randomize_style:
+            idx = torch.randperm(style_vector.nelement())
+            style_vector = style_vector.view(-1)[idx].view(style_vector.size())
+
         if self.use_gt_pelvis:
             tri_keypoints_3d = torch.from_numpy(np.array(batch['keypoints_3d'])).type(torch.float).to(device)
         else:
@@ -267,22 +284,29 @@ class VolumetricTemporalAdaINNet(nn.Module):
                                                          vol_confidences=vol_confidences
                                                          )
             elif self.spade_broadcasting_type == 'interpolate':
-                style_vector_volumes = F.interpolate(style_vector.unsqueeze(-1),
-                                             size=(self.volume_size,self.volume_size,self.volume_size), 
-                                             mode='trilinear')
+                style_vector_volumes = F.interpolate(style_vector.unsqueeze(-1) if not self.f2v_type == 'v2v' else style_vector,
+                                                     size=(self.volume_size,self.volume_size,self.volume_size), 
+                                                     mode='trilinear')
                 
             else:
                 raise KeyError('Unknown spade_broadcasting_type')       
+                
             volumes = self.volume_net(volumes, params=style_vector_volumes)
 
         elif self.temporal_condition_type == 'stack':
-            style_vector = style_vector.unsqueeze(1)
-            style_vector_volumes = unproject_heatmaps(style_vector,  
-                                                         proj_matricies_batch, 
-                                                         coord_volumes, 
-                                                         volume_aggregation_method=self.volume_aggregation_method,
-                                                         vol_confidences=vol_confidences
-                                                         )
+            if self.f2v_type == 'v2v':
+                style_vector_volumes = F.interpolate(style_vector,
+                                                     size=(self.volume_size,self.volume_size,self.volume_size), 
+                                                     mode='trilinear')
+
+            else:    
+                style_vector = style_vector.unsqueeze(1)
+                style_vector_volumes = unproject_heatmaps(style_vector,  
+                                                             proj_matricies_batch, 
+                                                             coord_volumes, 
+                                                             volume_aggregation_method=self.volume_aggregation_method,
+                                                             vol_confidences=vol_confidences
+                                                             )
             volumes = self.volume_net(torch.cat([volumes, style_vector_volumes], 1))
 
         else:
@@ -293,14 +317,14 @@ class VolumetricTemporalAdaINNet(nn.Module):
                                                                             coord_volumes,
                                                                             softmax=self.volume_softmax)
   
-        return (vol_keypoints_3d,
+        return [vol_keypoints_3d,
                 None if self.use_auxilary_backbone else features,
                 volumes,
                 vol_confidences,
                 cuboids,
                 coord_volumes,
                 base_points
-                )
+                ] + ([style_vector] if return_style_vector else [])
 
 
 

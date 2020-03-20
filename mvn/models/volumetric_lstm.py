@@ -68,6 +68,12 @@ class VolumetricTemporalLSTM(nn.Module):
         self.include_pivot = config.model.include_pivot
         
         # modules dimensions
+        self.lstm_on_feature_volumes = config.model.lstm_on_feature_volumes if \
+                                       hasattr(config.model, 'lstm_on_feature_volumes') else False
+
+        self.lstm_on_pose_volumes = config.model.lstm_on_pose_volumes if \
+                                    hasattr(config.model, 'lstm_on_pose_volumes') else True
+
         self.volume_features_dim = config.model.volume_features_dim
         self.lstm_in_channels = config.model.lstm_in_channels
         self.lstm_out_channels = config.model.lstm_out_channels
@@ -78,7 +84,7 @@ class VolumetricTemporalLSTM(nn.Module):
         self.entangle_processing_type = config.model.entangle_processing_type
         self.epn_normalization_type = config.model.entangle_processing_normalization_type
         self.evaluate_only_last_volume = config.model.evaluate_only_last_volume
-        self.use_final_processing = (self.lstm_out_channels != self.num_joints) and not self.disentangle 
+        self.use_final_processing = (self.lstm_out_channels != self.num_joints) and not self.disentangle
 
 
         # modules
@@ -186,10 +192,15 @@ class VolumetricTemporalLSTM(nn.Module):
                                      fictive_views=dt if (self.evaluate_only_last_volume and not self.keypoints_for_each_frame) else None # TODO: get rid of that shit
                                      )
 
+        # if self.lstm_on_feature_volumes:
+        #     volumes = volumes.view(batch_size, dt, *volumes.shape[1:])
+        #     pivot_volume =  
+        #     volumes, _ = self.lstm3d_feature_volumes(volumes, None)
+        #     if self.evaluate_only_last_volume and not self.lstm_on_pose_volumes:
+        #         volumes = volumes[:,-1,...]
+
         volumes = self.volume_net(volumes) 
-
         volumes = volumes.view(batch_size, dt, *volumes.shape[1:]) 
-
         rnn_volumes, _ = self.lstm3d(volumes, None)
 
         if self.disentangle:

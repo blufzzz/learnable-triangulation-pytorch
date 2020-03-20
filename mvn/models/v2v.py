@@ -11,7 +11,7 @@ ORDINARY_NORMALIZATIONS = ['group_norm', 'batch_norm']
 ADAPTIVE_NORMALIZATION = ['adain', 'spade']
 
 class SPADE(nn.Module):
-    def __init__(self, style_vector_channels, features_channels, hidden=64, ks=3): #  hidden=128
+    def __init__(self, style_vector_channels, features_channels, hidden=128, ks=3): #  hidden=128
         super().__init__()
 
         pw = ks // 2
@@ -220,7 +220,7 @@ class EncoderDecorder(nn.Module):
         upsampling_blocks_numerator = {'Res3DBlock':0, 'Pool3DBlock':0, 'Upsample3DBlock':0}
         bottleneck_blocks_numerator = {'Res3DBlock':0, 'Pool3DBlock':0, 'Upsample3DBlock':0}
 
-        assert len(upsampling_config) == len(downsampling_config)
+        # assert len(upsampling_config) == len(downsampling_config)
 
         for i, module_config in enumerate(downsampling_config):
             
@@ -343,7 +343,7 @@ class V2VModel(nn.Module):
 
         self._initialize_weights()
 
-    def forward(self, x, params=None):
+    def forward(self, x, params=None, device=None):
         x = self.front_layer(x)
         x = self.encoder_decoder(x, params) 
         x = self.back_layer(x)
