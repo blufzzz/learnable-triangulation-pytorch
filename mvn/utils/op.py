@@ -9,7 +9,6 @@ from mvn.utils import multiview, volumetric
 from IPython.core.debugger import set_trace
 
 
-
 def get_coord_volumes(kind, 
                         training, 
                         rotation,

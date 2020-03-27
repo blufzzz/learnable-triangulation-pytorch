@@ -34,10 +34,7 @@ class SPADE(nn.Module):
 class AdaIN(nn.Module):
     def __init__(self, style_vector_channels, features_channels):
         super(AdaIN, self).__init__()
-        try:
-            self.affine = nn.Linear(style_vector_channels, 2*features_channels)
-        except TypeError:
-            set_trace()    
+        self.affine = nn.Linear(style_vector_channels, 2*features_channels)
 
     def forward(self, features, params, eps = 1e-4):
         # features: [batch_size, C, D1, D2, D3]
@@ -53,8 +50,7 @@ class AdaIN(nn.Module):
         features_mean = features.view(batch_size, C, -1).mean(-1).view(batch_size, C,1,1,1)
         features_std = features.view(batch_size, C, -1).std(-1, unbiased=unbiased).view(batch_size, C,1,1,1)
 
-        features = ((features - features_mean) / (features_std + eps)) * adain_std + adain_mean
-        return features
+        return ((features - features_mean) / (features_std + eps)) * adain_std + adain_mean
 
 
 class CompoundNorm(nn.Module):
@@ -201,7 +197,7 @@ class EncoderDecorder(nn.Module):
         self.style_vector_channels = style_vector_channels
         self.normalization_type = [normalization_type, temporal_condition_type]
         self.nonadaptive_normalization_type = normalization_type
-        self.use_skip_connection = config.use_skip_connection
+        self.use_skip_connection = config.use_skip_connection if hasattr(config, 'use_skip_connection') else True
         if self.use_skip_connection:
             self.skip_block_adain = config.skip_block_adain
             skip_block_type = config.skip_block_type
@@ -256,8 +252,6 @@ class EncoderDecorder(nn.Module):
             module_number = str(blocks_numerator[module_type])
             blocks_numerator[module_type] += 1
             constructor = getattr(sys.modules[__name__], module_config['module_type'])
-
-            # set_trace()
 
             module_normalization = self.normalization_type if module_adain else \
                                      self.nonadaptive_normalization_type 

@@ -4,8 +4,8 @@ from PIL import Image
 
 import torch
 
-IMAGENET_MEAN, IMAGENET_STD = np.array([0.485, 0.456, 0.406]), np.array([0.229, 0.224, 0.225])
-
+# IMAGENET_MEAN, IMAGENET_STD = np.array([0.485, 0.456, 0.406]), np.array([0.229, 0.224, 0.225])
+IMAGENET_MEAN, IMAGENET_STD = np.array([0.406, 0.456, 0.485]), np.array([0.225, 0.224, 0.229]) # BGR
 
 def crop_image(image, bbox):
     """Crops area from image specified as bbox. Always returns area of size as bbox filling missing parts with zeros
@@ -26,6 +26,25 @@ def crop_image(image, bbox):
 
 def resize_image(image, shape):
     return cv2.resize(image, (shape[1], shape[0]), interpolation=cv2.INTER_AREA)
+
+
+def check_black_border(image, threshold=10):
+    def get_border_length(x):
+        subsequent_zeros = 0
+        count = 0
+        for i in x.sum(1).mean(-1):
+            if i==0:
+                count += 1
+            else:
+                count = 0
+            if count > subsequent_zeros:
+                subsequent_zeros = count
+        return subsequent_zeros  
+
+    l1 = get_border_length(image.sum(0).mean(-1))
+    l2 = get_border_length(image.sum(1).mean(-1))    
+
+    return max(l1,l2) >= threshold
 
 
 def get_square_bbox(bbox):

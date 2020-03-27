@@ -73,8 +73,7 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
     dataset_type = Human36MTemporalDataset if singleview_dataset else Human36MMultiViewDataset
     dilation = config.dataset.dilation if hasattr(config.dataset, 'dilation') else 0
     dilation_type = config.dataset.dilation_type if hasattr(config.dataset, 'dilation_type') else 'constant'
-    keypoints_per_frame=config.dataset.keypoints_per_frame if hasattr(config.dataset, 'keypoints_per_frame') else False
-
+    keypoints_per_frame = config.dataset.keypoints_per_frame if hasattr(config.dataset, 'keypoints_per_frame') else False
 
     if is_train:
         # train
@@ -93,10 +92,10 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
             crop=config.dataset.train.crop if hasattr(config.dataset.train, "crop") else True,
             dt = dt,
             dilation = dilation,
-            evaluate_cameras = [0,1,2,3],
             keypoints_per_frame=keypoints_per_frame,
             pivot_type = pivot_type,
-            dilation_type = dilation_type
+            dilation_type = dilation_type,
+            norm_image=config.dataset.train.norm_image if hasattr(config.dataset.train, "norm_image") else True
             )
 
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if distributed_train else None
@@ -129,10 +128,10 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
         crop=config.dataset.val.crop if hasattr(config.dataset.val, "crop") else True,
         dt = dt,
         dilation = dilation,
-        evaluate_cameras = [0,1,2,3],
         keypoints_per_frame=keypoints_per_frame,
         pivot_type = pivot_type,
-        dilation_type = dilation_type
+        dilation_type = dilation_type,
+        norm_image=config.dataset.val.norm_image if hasattr(config.dataset.val, "norm_image") else True
         )
 
     val_dataloader = DataLoader(
@@ -221,15 +220,17 @@ def one_epoch(model,
     model_type = config.model.name
     silence = config.opt.silence if hasattr(config.opt, 'silence') else False
 
-    singleview_dataset = dataloader.dataset.singleview if hasattr(dataloader.dataset, 'singleview') else False
+    singleview_dataset = config.dataset.singleview if hasattr(config.dataset, 'singleview') else False
+    pivot_index =  {'first':config.dataset.dt-1,
+                    'intermediate':config.dataset.dt//2}[config.dataset.pivot_type]
+    
     visualize_volumes = config.visualize_volumes if hasattr(config, 'visualize_volumes') else False
     visualize_heatmaps = config.visualize_heatmaps if hasattr(config, 'visualize_heatmaps') else False
-    use_heatmaps = config.model.backbone.return_heatmaps if hasattr(config.model.backbone, 'return_heatmaps') else False
-    dump_weights = config.opt.dump_weights if hasattr(config.opt, 'dump_weights') else False
+    visualize = config.visualize if hasattr(config, "visualize") else True
+
+    scale_keypoints_3d = config.opt.scale_keypoints_3d if hasattr(config.opt, "scale_keypoints_3d") else 1.0    
     transfer_cmu_to_human36m = config.transfer_cmu_to_human36m if hasattr(config, "transfer_cmu_to_human36m") else False
     use_temporal_discriminator = config.opt.use_temporal_discriminator if hasattr(config.opt, "use_temporal_discriminator") else False
-    visualize = config.visualize if hasattr(config, "visualize") else True
-    keypoints_per_frame = config.dataset.keypoints_per_frame if hasattr(config.dataset, 'keypoints_per_frame') else False
     use_bone_length_term = config.opt.use_bone_length_term if hasattr(config.opt, 'use_bone_length_term') else False
     bone_length_weight = config.opt.bone_length_weight if hasattr(config.opt, 'bone_length_weight') else None
 
@@ -240,7 +241,6 @@ def one_epoch(model,
         adversarial_temporal_loss_weight = config.opt.adversarial_temporal_loss_weight
         adversarial_generator_iters = config.opt.adversarial_generator_iters 
         train_generator_during_critic_iters = config.opt.train_generator_during_critic_iters                               
-
 
     if is_train:
         model.train()
@@ -259,8 +259,8 @@ def one_epoch(model,
         end = time.time()
 
         iterator = enumerate(dataloader)
-        if is_train and config.opt.n_iters_per_epoch is not None:
-            iterator = islice(iterator, config.opt.n_iters_per_epoch)
+        if is_train and config.opt.n_objects_per_epoch is not None:
+            iterator = islice(iterator, config.opt.n_objects_per_epoch)
 
         for iter_i, batch in iterator:
             with autograd.detect_anomaly():
@@ -288,6 +288,16 @@ def one_epoch(model,
                     base_points_pred,
                     coord_offsets) = model(images_batch, batch)
 
+                elif config.model.name == 'vol_temporal_adain':    
+                    (keypoints_3d_pred, 
+                    features_pred, 
+                    volumes_pred, 
+                    confidences_pred, 
+                    cuboids_pred, 
+                    coord_volumes_pred, 
+                    base_points_pred,
+                    style_vector) = model(images_batch, batch) 
+
                 else:    
                     (keypoints_3d_pred, 
                     features_pred, 
@@ -295,19 +305,19 @@ def one_epoch(model,
                     confidences_pred, 
                     cuboids_pred, 
                     coord_volumes_pred, 
-                    base_points_pred) = model(images_batch, batch)    
+                    base_points_pred) = model(images_batch, batch)            
                     
-                batch_size, dt, image_shape = images_batch.shape[0], images_batch.shape[1], tuple(images_batch.shape[-2:])
-                n_joints = keypoints_3d_pred[0].shape[1]
-                keypoints_3d_binary_validity_gt = (keypoints_3d_validity_gt > 0.0).type(torch.float32)
-                scale_keypoints_3d = config.opt.scale_keypoints_3d if hasattr(config.opt, "scale_keypoints_3d") else 1.0
-                keypoints_per_frame_output = keypoints_3d_pred.shape[:-2].numel() == batch_size*dt
-                pivot_index =  {'first':dt-1,
-                                'intermediate':dt//2}[config.dataset.pivot_type]
+                batch_size, dt = images_batch.shape[:2]
+                keypoints_3d_binary_validity_gt = (keypoints_3d_validity_gt > 0.0).type(torch.float32)                
+
+                ################
+                # MODEL OUTPUT #   
+                ################
+                keypoints_per_frame == keypoints_3d_pred.shape[:-2].numel() == batch_size*dt
 
                 if keypoints_per_frame:
-                    keypoints_3d_gt = keypoints_3d_gt.view(-1, *keypoints_3d_gt.shape[2:])
-                    keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt.view(-1, *keypoints_3d_binary_validity_gt.shape[2:])
+                    keypoints_3d_gt = keypoints_3d_gt.view(-1, *keypoints_3d_gt.shape[-2:])
+                    keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt.view(-1, *keypoints_3d_binary_validity_gt.shape[-2:])
 
                 # root-relative coordinates for    
                 # singleview dataset of multiview dataset with singleview setup
@@ -336,7 +346,7 @@ def one_epoch(model,
                         bone_length_loss += torch.norm(keypoints_3d_pred[:,index_from] - keypoints_3d_gt[:,index_to], dim=-1)
                     bone_length_loss = bone_length_loss.mean()
                     total_loss += bone_length_loss * bone_length_weight
-                    metric_dict['bone_length_loss'].append(bone_length_loss.item())
+                    metric_dict['bone_length_loss_weighted'].append(bone_length_loss*bone_length_weight.item())
 
                 # volumetric loss
                 use_volumetric_ce_loss = config.opt.use_volumetric_ce_loss
@@ -389,8 +399,7 @@ def one_epoch(model,
                 # BACKWARD #   
                 ############
                 if use_temporal_discriminator:
-                    train_generator = (train_generator_during_critic_iters or iter_i%adversarial_generator_iters == 0)
-                    adversarial_condition = (not use_temporal_discriminator) or (use_temporal_discriminator and train_generator)
+                    adversarial_condition =  (train_generator_during_critic_iters or iter_i%adversarial_generator_iters == 0)
                 else:
                     adversarial_condition=True    
                 if is_train and adversarial_condition:
@@ -424,15 +433,16 @@ def one_epoch(model,
                 # base point l2
                 if base_points_pred is not None and not config.model.use_gt_pelvis:
                     base_point_l2_list = []
-                    for batch_i in range(batch_size):
+                    for batch_i in range(base_points_pred.shape[0]):
                         base_point_pred = base_points_pred[batch_i]
 
                         if config.model.kind == "coco":
-                            base_point_gt = (keypoints_3d_gt[batch_i, 11, :3] + keypoints_3d[batch_i, 12, :3]) / 2
+                            base_point_gt = (keypoints_3d_gt[batch_i, 11, :3] + keypoints_3d_gt[batch_i, 12, :3]) / 2
                         elif config.model.kind == "mpii":
                             base_point_gt = keypoints_3d_gt[batch_i, 6, :3]
 
-                        base_point_l2_list.append(torch.sqrt(torch.sum((base_point_pred * scale_keypoints_3d - base_point_gt * scale_keypoints_3d) ** 2)).item())
+                        base_point_l2_list.append(torch.sqrt(torch.sum((base_point_pred * scale_keypoints_3d - \
+                                                                        base_point_gt * scale_keypoints_3d) ** 2)).item())
 
                     base_point_l2 = 0.0 if len(base_point_l2_list) == 0 else np.mean(base_point_l2_list)
                     metric_dict['base_point_l2'].append(base_point_l2)
@@ -446,7 +456,7 @@ def one_epoch(model,
                 # save answers for evalulation
                 if not is_train:
                     if keypoints_per_frame_output:
-                        keypoints_3d_pred = keypoints_3d_pred.view(batch_size, dt, *keypoints_3d_pred.shape[1:])[:,pivot_index,...]
+                        keypoints_3d_pred = keypoints_3d_pred.view(batch_size, dt, *keypoints_3d_pred.shape[-2:])[:,pivot_index,...]
                     results['keypoints_3d'].append(keypoints_3d_pred.detach().cpu().numpy())
                     results['indexes'].append(batch['indexes'])
                 
@@ -476,7 +486,7 @@ def one_epoch(model,
                             )
                             writer.add_image(f"{name}/keypoints_vis/{batch_i}", keypoints_vis.transpose(2, 0, 1), global_step=n_iters_total)
 
-                            if visualize_heatmaps and use_heatmaps:    
+                            if visualize_heatmaps:    
                                 heatmaps_vis = vis.visualize_heatmaps(
                                     images_batch, heatmaps_pred,
                                     kind=vis_kind,
@@ -538,7 +548,6 @@ def one_epoch(model,
 
             except Exception as e:
                 print("Failed to evaluate. Reason: ", e)
-                scalar_metric = 0.0, {}
             
             checkpoint_dir = os.path.join(experiment_dir, "checkpoints", "{:04}".format(epoch))
             os.makedirs(checkpoint_dir, exist_ok=True)
@@ -584,9 +593,10 @@ def main(args):
     device = torch.device(args.local_rank) if is_distributed else torch.device(0)
 
     # options
-    config.opt.n_iters_per_epoch = config.opt.n_objects_per_epoch // config.opt.batch_size
+    # config.opt.n_iters_per_epoch = config.opt.n_objects_per_epoch // config.opt.batch_size
     config.experiment_comment = args.experiment_comment
-    use_temporal_discriminator  = config.opt.use_temporal_discriminator if hasattr(config.opt, "use_temporal_discriminator") else False  
+    use_temporal_discriminator  = config.opt.use_temporal_discriminator if \
+                                     hasattr(config.opt, "use_temporal_discriminator") else False  
     save_model = config.opt.save_model if hasattr(config.opt, "save_model") else True
 
     model = {
@@ -598,11 +608,7 @@ def main(args):
     }[config.model.name](config, device=device).to(device)
 
     if config.model.init_weights:
-        state_dict = torch.load(config.model.checkpoint)
-        for key in list(state_dict.keys()):
-            new_key = key.replace("module.", "")
-            state_dict[new_key] = state_dict.pop(key)
-
+        state_dict = torch.load(config.model.checkpoint)['model_state']
         model.load_state_dict(state_dict, strict=True)
         print("Successfully loaded pretrained weights for whole model")
 
@@ -624,52 +630,85 @@ def main(args):
         if config.model.name == "vol":
             opt = torch.optim.Adam(
                 [{'params': model.backbone.parameters()},
-                 {'params': model.process_features.parameters(), 'lr': config.opt.process_features_lr if hasattr(config.opt, "process_features_lr") else config.opt.lr},
-                 {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr}
+                 {'params': model.process_features.parameters(), \
+                            'lr': config.opt.process_features_lr if \
+                            hasattr(config.opt, "process_features_lr") else config.opt.lr},
+                 {'params': model.volume_net.parameters(), \
+                            'lr': config.opt.volume_net_lr if \
+                            hasattr(config.opt, "volume_net_lr") else config.opt.lr}
                 ],
                 lr=config.opt.lr
             )
+
         elif config.model.name in ["vol_temporal_adain", "vol_temporal_fr_adain"]:
             opt = torch.optim.Adam(
                 [{'params': model.backbone.parameters()},
-                 {'params': model.process_features.parameters(), 'lr': config.opt.process_features_lr if hasattr(config.opt, "process_features_lr") else config.opt.lr},
-                 {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr},
-                 {'params': model.features_sequence_to_vector.parameters(), 'lr': config.opt.features_sequence_to_vector_lr if hasattr(config.opt, "features_sequence_to_vector_lr") else config.opt.lr},
+                 {'params': model.process_features.parameters(), 
+                            'lr': config.opt.process_features_lr if\
+                            hasattr(config.opt, "process_features_lr") else config.opt.lr},
+                 {'params': model.volume_net.parameters(), \
+                            'lr': config.opt.volume_net_lr if \
+                            hasattr(config.opt, "volume_net_lr") else config.opt.lr},
+                 {'params': model.features_sequence_to_vector.parameters(), \
+                            'lr': config.opt.features_sequence_to_vector_lr if \
+                            hasattr(config.opt, "features_sequence_to_vector_lr") else config.opt.lr},
                 ] + \
-                ([{'params':model.auxilary_backbone.parameters(), 'lr': config.opt.auxilary_backbone_lr if hasattr(config.opt, "auxilary_backbone_lr") else config.opt.lr}] if hasattr(model, 'auxilary_backbone') else []) + \
-                ([{'params': model.encoder.parameters(), 'lr': config.opt.encoder_lr if hasattr(config.opt, "encoder_lr") else config.opt.lr}] if hasattr(model, 'encoder') else []) + \
-                ([{'params': model.affine_mappings.parameters(), 'lr': config.opt.affine_mappings_lr if hasattr(config.opt, "affine_mappings_lr") else config.opt.lr}] if hasattr(model, 'affine_mappings') else []),
+                ([{'params':model.auxilary_backbone.parameters(), \
+                            'lr': config.opt.auxilary_backbone_lr if \
+                            hasattr(config.opt, "auxilary_backbone_lr") else config.opt.lr}] if \
+                            model.use_auxilary_backbone else []),
                 lr=config.opt.lr) 
 
         elif config.model.name == "vol_temporal_grid":
             opt = torch.optim.Adam(
                 [{'params': model.backbone.parameters()},
-                 {'params': model.process_features.parameters(), 'lr': config.opt.process_features_lr if hasattr(config.opt, "process_features_lr") else config.opt.lr},
-                 {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr},
-                 {'params': model.features_sequence_to_vector.parameters(), 'lr': config.opt.features_sequence_to_vector_lr if hasattr(config.opt, "features_sequence_to_vector_lr") else config.opt.lr},
-                 {'params': model.grid_deformator.parameters(), 'lr': config.opt.grid_deformator_lr if hasattr(config.opt, "grid_deformator_lr") else config.opt.lr},
+                 {'params': model.process_features.parameters(), \
+                            'lr': config.opt.process_features_lr if \
+                            hasattr(config.opt, "process_features_lr") else config.opt.lr},
+                 {'params': model.volume_net.parameters(), \
+                            'lr': config.opt.volume_net_lr if \
+                            hasattr(config.opt, "volume_net_lr") else config.opt.lr},
+                 {'params': model.features_sequence_to_vector.parameters(), \
+                            'lr': config.opt.features_sequence_to_vector_lr if \
+                            hasattr(config.opt, "features_sequence_to_vector_lr") else config.opt.lr},
+                 {'params': model.grid_deformator.parameters(), \
+                            'lr': config.opt.grid_deformator_lr if \
+                            hasattr(config.opt, "grid_deformator_lr") else config.opt.lr},
                 ] + \
-                ([{'params':model.auxilary_backbone.parameters(), 'lr': config.opt.auxilary_backbone_lr if hasattr(config.opt, "auxilary_backbone_lr") else config.opt.lr}] if model.use_auxilary_backbone else []),
+                ([{'params':model.auxilary_backbone.parameters(), \
+                            'lr': config.opt.auxilary_backbone_lr if \
+                            hasattr(config.opt, "auxilary_backbone_lr") else config.opt.lr}] if \
+                            model.use_auxilary_backbone else []),
                 lr=config.opt.lr)
             
         elif config.model.name == "vol_temporal_lstm":
              opt = torch.optim.Adam(
                 [{'params': model.backbone.parameters()},
-                 {'params': model.process_features.parameters(), 'lr': config.opt.process_features_lr if hasattr(config.opt, "process_features_lr") else config.opt.lr},
-                 {'params': model.volume_net.parameters(), 'lr': config.opt.volume_net_lr if hasattr(config.opt, "volume_net_lr") else config.opt.lr},
-                 {'params': model.lstm3d.parameters(), 'lr': config.opt.lstm3d_lr if hasattr(config.opt, "lstm3d_lr") else config.opt.lr},
+                 {'params': model.process_features.parameters(), \
+                            'lr': config.opt.process_features_lr if \
+                            hasattr(config.opt, "process_features_lr") else config.opt.lr},
+                 {'params': model.volume_net.parameters(), \
+                            'lr': config.opt.volume_net_lr if \
+                            hasattr(config.opt, "volume_net_lr") else config.opt.lr},
+                 {'params': model.lstm3d.parameters(), \
+                            'lr': config.opt.lstm3d_lr if \
+                            hasattr(config.opt, "lstm3d_lr") else config.opt.lr},
                 ]+ \
-                ([{'params':model.entangle_processing_net.parameters(), 'lr': config.opt.entangle_processing_net_lr if hasattr(config.opt, "entangle_processing_net_lr") else config.opt.lr}] if model.disentangle else []) + \
-                ([{'params':model.final_processing.parameters(), 'lr': config.opt.final_processing_lr if hasattr(config.opt, "final_processing_lr") else config.opt.lr}] if model.use_final_processing else []),
+                ([{'params':model.entangle_processing_net.parameters(), \
+                            'lr': config.opt.entangle_processing_net_lr if \
+                            hasattr(config.opt, "entangle_processing_net_lr") else config.opt.lr}] if \
+                            model.disentangle else []) + \
+                ([{'params':model.final_processing.parameters(), \
+                            'lr': config.opt.final_processing_lr if \
+                            hasattr(config.opt, "final_processing_lr") else config.opt.lr}] if \
+                            model.use_final_processing else []),
                 lr=config.opt.lr)                         
-
         else:
             raise RuntimeError('Unknown config.model.name')
 
     # use_temporal_discriminator
     opt_discr, discriminator = None, None
     if use_temporal_discriminator:
-
         discriminator = Seq2VecCNN(config.model.backbone.num_joints*3,
                                    output_features_dim=1, 
                                    intermediate_channels=config.discriminator.intermediate_channels, 
@@ -696,7 +735,6 @@ def main(args):
 
     
     if not args.eval:
-        # try:
         # train loop
         n_iters_total_train, n_iters_total_val = 0, 0
         for epoch in range(config.opt.n_epochs):
@@ -736,9 +774,9 @@ def main(args):
                                           opt_discr=opt_discr)
             # saving    
             if master and save_model:
-                print ('Saving model...')
+                print (f'Saving model at {experiment_dir}...')
                 save(experiment_dir, model, opt, epoch, discriminator, opt_discr, use_temporal_discriminator)
-            print(f"{n_iters_total_train} iters done.")
+            print(f"epoch: {epoch}, iters: {n_iters_total_train}, done.")
    
     else:
         if args.eval_dataset == 'train':

@@ -10,7 +10,10 @@ from mvn.models.v2v import SPADE, \
                             Basic3DBlock, \
                             Res3DBlock, \
                             Pool3DBlock, \
-                            Upsample3DBlock
+                            Upsample3DBlock, \
+                            ADAPTIVE_NORMALIZATION, \
+                            MODULES_REQUIRES_NORMALIZAION, \
+                            ORDINARY_NORMALIZATIONS
 
 
 class EncoderDecorder_v1(nn.Module):
@@ -117,7 +120,7 @@ class V2VModel_v1(nn.Module):
 
             self.style_vector_channels = style_vector_dim 
 
-            self.normalization_type = normalization_type if temporal_condition_type is None \
+            self.normalization_type = normalization_type if (temporal_condition_type is None or temporal_condition_type not in ADAPTIVE_NORMALIZATION) \
                                          else [normalization_type, temporal_condition_type]
 
             self.front_layer1 = Basic3DBlock(input_channels, 32, 7, self.normalization_type, style_vector_channels=self.style_vector_channels)

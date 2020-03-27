@@ -1,0 +1,4 @@
+#!/bin/bash
+srun -p TitanX --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w hpc2 \
+python3.6 make_experiments_reports.py \
+

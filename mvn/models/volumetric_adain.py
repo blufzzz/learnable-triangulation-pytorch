@@ -24,6 +24,8 @@ from mvn.models.temporal import Seq2VecRNN,\
 
 from IPython.core.debugger import set_trace
 
+STYLE_VECTOR_CONST = None
+
 
 class VolumetricTemporalAdaINNet(nn.Module):
 
@@ -153,7 +155,7 @@ class VolumetricTemporalAdaINNet(nn.Module):
         
 
         v2v_input_features_dim = (self.volume_features_dim + self.style_vector_dim) if \
-                                  self.temporal_condition_type == 'stack' else self.volume_features_dim
+                                  self.temporal_condition_type in ['stack', 'stack_poses'] else self.volume_features_dim
                                  
 
 
@@ -175,10 +177,17 @@ class VolumetricTemporalAdaINNet(nn.Module):
 
             
         self.process_features = nn.Conv2d(256, self.volume_features_dim, 1)
-
+        self.STYLE_VECTOR_CONST=None
         description(self)
 
-    def forward(self, images_batch, batch, randomize_style=False, return_style_vector=False):
+
+    def forward(self, 
+                images_batch, 
+                batch, 
+                randomize_style=False, 
+                return_style_vector=False, 
+                const_style_vector=False,
+                return_unproj_features=False):
 
         device = images_batch.device
         batch_size, dt = images_batch.shape[:2]
@@ -246,6 +255,14 @@ class VolumetricTemporalAdaINNet(nn.Module):
         if randomize_style:
             idx = torch.randperm(style_vector.nelement())
             style_vector = style_vector.view(-1)[idx].view(style_vector.size())
+        if const_style_vector:
+            if self.STYLE_VECTOR_CONST is None:
+                self.STYLE_VECTOR_CONST = style_vector.data
+            else:
+                style_vector = torch.tensor(self.STYLE_VECTOR_CONST).to(device)
+                    
+
+            # set_trace()        
 
         if self.use_gt_pelvis:
             tri_keypoints_3d = torch.from_numpy(np.array(batch['keypoints_3d'])).type(torch.float).to(device)
@@ -263,16 +280,16 @@ class VolumetricTemporalAdaINNet(nn.Module):
                                                                 )
         
         # lift each feature-map to distinct volume and aggregate 
-        volumes = unproject_heatmaps(pivot_features,  
-                                        proj_matricies_batch, 
-                                        coord_volumes, 
-                                        volume_aggregation_method=self.volume_aggregation_method,
-                                        vol_confidences=vol_confidences
-                                        )
+        unproj_features = unproject_heatmaps(pivot_features,  
+                                            proj_matricies_batch, 
+                                            coord_volumes, 
+                                            volume_aggregation_method=self.volume_aggregation_method,
+                                            vol_confidences=vol_confidences
+                                            )
 
 
         if self.temporal_condition_type == 'adain':
-            volumes = self.volume_net(volumes, params=style_vector)
+            volumes = self.volume_net(unproj_features, params=style_vector)
 
         elif self.temporal_condition_type == 'spade':
             if self.spade_broadcasting_type == 'unprojecting':
@@ -291,9 +308,10 @@ class VolumetricTemporalAdaINNet(nn.Module):
             else:
                 raise KeyError('Unknown spade_broadcasting_type')       
                 
-            volumes = self.volume_net(volumes, params=style_vector_volumes)
+            volumes = self.volume_net(unproj_features, params=style_vector_volumes)
 
-        elif self.temporal_condition_type == 'stack':
+        elif self.temporal_condition_type in ['stack', 'stack_poses'] :
+            
             if self.f2v_type == 'v2v':
                 style_vector_volumes = F.interpolate(style_vector,
                                                      size=(self.volume_size,self.volume_size,self.volume_size), 
@@ -307,7 +325,21 @@ class VolumetricTemporalAdaINNet(nn.Module):
                                                              volume_aggregation_method=self.volume_aggregation_method,
                                                              vol_confidences=vol_confidences
                                                              )
-            volumes = self.volume_net(torch.cat([volumes, style_vector_volumes], 1))
+
+                if self.temporal_condition_type == 'stack_poses':
+                    assert (self.pivot_index == self.dt-1)
+                    before_pivot_features = aux_features.view(batch_size, dt-1, *aux_features.shape[1:])[:,self.pivot_index - 1].contiguous()
+                    before_pivot_features = self.process_features(before_pivot_features)
+                    approximated_unproj_features = unproject_heatmaps(before_pivot_features,  
+                                                                      proj_matricies_batch, 
+                                                                      coord_volumes, 
+                                                                      volume_aggregation_method=self.volume_aggregation_method,
+                                                                      vol_confidences=vol_confidences
+                                                                      )
+
+                    style_vector_volumes = style_vector_volumes + approximated_unproj_features
+
+            volumes = self.volume_net(torch.cat([unproj_features, style_vector_volumes], 1))
 
         else:
             raise RuntimeError('Wrong self.temporal_condition_type, should be in [`adain`, `stack`, `spade`]')    
@@ -316,7 +348,7 @@ class VolumetricTemporalAdaINNet(nn.Module):
         vol_keypoints_3d, volumes = integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier,
                                                                             coord_volumes,
                                                                             softmax=self.volume_softmax)
-  
+        
         return [vol_keypoints_3d,
                 None if self.use_auxilary_backbone else features,
                 volumes,
@@ -324,9 +356,8 @@ class VolumetricTemporalAdaINNet(nn.Module):
                 cuboids,
                 coord_volumes,
                 base_points
-                ] + ([style_vector] if return_style_vector else [])
-
-
+                ] + ([style_vector] if return_style_vector else []) + \
+                ([unproj_features] if return_unproj_features else [])
 
 
 
@@ -482,7 +513,7 @@ class VolumetricTemporalFRAdaINNet(nn.Module):
             tri_keypoints_3d = torch.from_numpy(np.array(batch['keypoints_3d'])).type(torch.float).to(device)
         else:
             raise RuntimeError('In absence of precalculated pelvis or gt pelvis, self.use_volumetric_pelvis should be True') 
-       
+        
         # amend coord_volumes position                                                         
         coord_volumes, cuboids, base_points = get_coord_volumes(self.kind, 
                                                                 self.training, 
@@ -515,6 +546,7 @@ class VolumetricTemporalFRAdaINNet(nn.Module):
             
         else:
             raise KeyError('Unknown spade_broadcasting_type') 
+
 
         volumes = self.volume_net(volumes, params=style_vector_volumes)
 
