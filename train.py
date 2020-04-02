@@ -95,7 +95,8 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
             keypoints_per_frame=keypoints_per_frame,
             pivot_type = pivot_type,
             dilation_type = dilation_type,
-            norm_image=config.dataset.train.norm_image if hasattr(config.dataset.train, "norm_image") else True
+            norm_image=config.dataset.train.norm_image if hasattr(config.dataset.train, "norm_image") else True,
+            custom_iterator=config.dataset.custom_iterator if hasattr(config.dataset, "custom_iterator") else None
             )
 
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset) if distributed_train else None
@@ -131,7 +132,8 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
         keypoints_per_frame=keypoints_per_frame,
         pivot_type = pivot_type,
         dilation_type = dilation_type,
-        norm_image=config.dataset.val.norm_image if hasattr(config.dataset.val, "norm_image") else True
+        norm_image=config.dataset.val.norm_image if hasattr(config.dataset.val, "norm_image") else True,
+        custom_iterator=config.dataset.custom_iterator if hasattr(config.dataset, "custom_iterator") else None
         )
 
     val_dataloader = DataLoader(
@@ -295,8 +297,7 @@ def one_epoch(model,
                     confidences_pred, 
                     cuboids_pred, 
                     coord_volumes_pred, 
-                    base_points_pred,
-                    style_vector) = model(images_batch, batch) 
+                    base_points_pred) = model(images_batch, batch) 
 
                 else:    
                     (keypoints_3d_pred, 
@@ -313,7 +314,8 @@ def one_epoch(model,
                 ################
                 # MODEL OUTPUT #   
                 ################
-                keypoints_per_frame == keypoints_3d_pred.shape[:-2].numel() == batch_size*dt
+                keypoints_per_frame = keypoints_3d_pred.shape[:-2].numel() == batch_size*dt
+
 
                 if keypoints_per_frame:
                     keypoints_3d_gt = keypoints_3d_gt.view(-1, *keypoints_3d_gt.shape[-2:])
@@ -346,7 +348,7 @@ def one_epoch(model,
                         bone_length_loss += torch.norm(keypoints_3d_pred[:,index_from] - keypoints_3d_gt[:,index_to], dim=-1)
                     bone_length_loss = bone_length_loss.mean()
                     total_loss += bone_length_loss * bone_length_weight
-                    metric_dict['bone_length_loss_weighted'].append(bone_length_loss*bone_length_weight.item())
+                    metric_dict['bone_length_loss_weighted'].append(bone_length_loss.item()*bone_length_weight)
 
                 # volumetric loss
                 use_volumetric_ce_loss = config.opt.use_volumetric_ce_loss
@@ -455,7 +457,7 @@ def one_epoch(model,
 
                 # save answers for evalulation
                 if not is_train:
-                    if keypoints_per_frame_output:
+                    if keypoints_per_frame:
                         keypoints_3d_pred = keypoints_3d_pred.view(batch_size, dt, *keypoints_3d_pred.shape[-2:])[:,pivot_index,...]
                     results['keypoints_3d'].append(keypoints_3d_pred.detach().cpu().numpy())
                     results['indexes'].append(batch['indexes'])
@@ -648,15 +650,20 @@ def main(args):
                             hasattr(config.opt, "process_features_lr") else config.opt.lr},
                  {'params': model.volume_net.parameters(), \
                             'lr': config.opt.volume_net_lr if \
-                            hasattr(config.opt, "volume_net_lr") else config.opt.lr},
-                 {'params': model.features_sequence_to_vector.parameters(), \
-                            'lr': config.opt.features_sequence_to_vector_lr if \
-                            hasattr(config.opt, "features_sequence_to_vector_lr") else config.opt.lr},
+                            hasattr(config.opt, "volume_net_lr") else config.opt.lr}
                 ] + \
+                ([{'params': model.features_sequence_to_vector.parameters(), \
+                            'lr': config.opt.features_sequence_to_vector_lr if \
+                            hasattr(config.opt, "features_sequence_to_vector_lr") else config.opt.lr}] if \
+                            hasattr(model, "features_sequence_to_vector") else []) + \
                 ([{'params':model.auxilary_backbone.parameters(), \
                             'lr': config.opt.auxilary_backbone_lr if \
                             hasattr(config.opt, "auxilary_backbone_lr") else config.opt.lr}] if \
-                            model.use_auxilary_backbone else []),
+                            model.use_auxilary_backbone else []) + \
+                ([{'params':model.motion_extractor.parameters(), \
+                            'lr': config.opt.motion_extractor_lr if \
+                            hasattr(config.opt, "motion_extractor_lr") else config.opt.lr}] if \
+                            model.use_motion_extractor else []),
                 lr=config.opt.lr) 
 
         elif config.model.name == "vol_temporal_grid":
@@ -741,6 +748,8 @@ def main(args):
             if train_sampler is not None:
                 train_sampler.set_epoch(epoch)
 
+            print ('Training...')    
+                
             n_iters_total_train = one_epoch(model,
                                             criterion, 
                                             opt, 

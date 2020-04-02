@@ -11,7 +11,7 @@ from mvn.utils import volumetric
 from IPython.core.debugger import set_trace
 
 CHECK_BLACK_BORDERS = True
-BLACK_BORDERS_THRESHOLD = 20
+BLACK_BORDERS_THRESHOLD = 15
 
 class Human36MMultiViewDataset(Dataset):
     """
@@ -68,6 +68,8 @@ class Human36MMultiViewDataset(Dataset):
         self.ignore_cameras = ignore_cameras
         self.crop = crop
         self.retain_every_n_frames_in_test = retain_every_n_frames_in_test
+        self.train = train
+        self.test = test
 
         self.labels = np.load(labels_path, allow_pickle=True).item()
 
@@ -166,10 +168,9 @@ class Human36MMultiViewDataset(Dataset):
                                              )
             broken_image_path = os.path.join(broken_image_fold, 'img_%06d.jpg' % (frame_idx+1))
             os.makedirs(broken_image_fold, exist_ok=True)
-            cv2.imsave(broken_image_path, image) 
-            print (f'Found broken image, saved to {broken_image_fold}')
-            
-            return None   
+            cv2.imwrite(broken_image_path, image) 
+            # print (f'Found broken image, saved to {broken_image_fold}')
+            # return None   
             
         if self.norm_image:
             image = normalize_image(image)
@@ -366,7 +367,8 @@ class Human36MTemporalDataset(Human36MMultiViewDataset):
         self.keypoints_per_frame=kwargs['keypoints_per_frame']
         self.pivot_type = kwargs['pivot_type']
         self.custom_iterator = kwargs['custom_iterator']
-        assert self.dt == len(self.custom_iterator)
+        if self.custom_iterator is not None:
+            assert self.dt == len(self.custom_iterator)
 
         if self.pivot_type == 'intermediate':
             assert self.dt==0 or self.dt//2 != 0, 'Only odd `dt` is supported for intermediate pivot!'
@@ -418,13 +420,14 @@ class Human36MTemporalDataset(Human36MMultiViewDataset):
         self.pivot_indxs = np.arange(n_frames)[pivot_mask][::retain_every_n_frames_in_test]
         self.n_sequences = len(self.pivot_indxs)
 
-    def __getitem__(self, idx):
 
+    def __getitem__(self, idx):
+    
         camera_idx = idx // self.n_sequences
         shot_idx = idx % self.n_sequences
         pivot_idx = self.pivot_indxs[shot_idx]
-        camera_name = self.self.labels['camera_names'][camera_idx]
-
+        camera_name = self.labels['camera_names'][camera_idx]
+       
         sample = defaultdict(list) # return value
 
         # take shots that are consecutive in time, with specified pivot
@@ -442,8 +445,10 @@ class Human36MTemporalDataset(Human36MMultiViewDataset):
         assert 0 in iterator, 'iterator should contain 0 index for the pivot frame'    
 
         for i in iterator:
-            
-            shot = self.labels['table'][pivot_idx+i]
+            try:
+                shot = self.labels['table'][pivot_idx+i]
+            except Exception:
+                set_trace()     
             unpacked = self._unpack(shot, camera_idx, camera_name)
             if unpacked is None: # we need full sequence
                 return None
@@ -470,12 +475,6 @@ class Human36MTemporalDataset(Human36MMultiViewDataset):
             pivot_shot = self.labels['table'][pivot_idx]
             sample['keypoints_3d'] = np.pad(pivot_shot['keypoints'][:self.num_keypoints],((0,0), (0,1)),
                                              'constant', constant_values=1.0)
-            # build cuboid
-            # base_point = sample['keypoints_3d'][6, :3]
-            # sides = np.array([self.cuboid_side, self.cuboid_side, self.cuboid_side])
-            # position = base_point - sides / 2
-            # sample['cuboids'] = volumetric.Cuboid3D(position, sides)
-            # save sample's index
             
         sample['indexes'] = idx
         sample.default_factory = None
@@ -494,16 +493,24 @@ class Human36MTemporalDataset(Human36MMultiViewDataset):
                 transfer_human36m_to_human36m=False):
 
         original_labels = self.labels['table'].copy()
+        result = 0
+        for camera_index in range(4):
 
-        self.labels['table'] = original_labels[self.pivot_indxs]
+            # choose indexes corresponding to the camera
+            camera_mask = result_indexes // self.n_sequences == camera_index
+            indexes_for_camera = result_indexes[camera_mask]
+            shot_indexes_for_camera = indexes_for_camera % self.n_sequences
 
-        result = super(Human36MTemporalDataset, self).evaluate(keypoints_3d_predicted,
-                                                                mask = mask,
-                                                                split_by_subject=split_by_subject,
-                                                                transfer_cmu_to_human36m=transfer_cmu_to_human36m,
-                                                                transfer_human36m_to_human36m=transfer_human36m_to_human36m)
+            # to ensure proper evaluation in super().evaluate() below
+            self.labels['table'] = original_labels[self.pivot_indxs][shot_indexes_for_camera]
+
+            result += super(Human36MTemporalDataset, self).evaluate(keypoints_3d_predicted[camera_mask],
+                                                                    mask = mask,
+                                                                    split_by_subject=split_by_subject,
+                                                                    transfer_cmu_to_human36m=transfer_cmu_to_human36m,
+                                                                    transfer_human36m_to_human36m=transfer_human36m_to_human36m)
 
         # to ensure furtfer __getitem__ iterations
         self.labels['table'] = original_labels
 
-        return result
+        return result / 4.

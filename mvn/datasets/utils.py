@@ -60,7 +60,6 @@ def prepare_batch(batch, device):
     images_batch = []
     for image_batch in batch['images']:
         image_batch = image_batch_to_torch(image_batch)
-        # image_batch /= 255.0
         image_batch = image_batch.to(device)
         images_batch.append(image_batch)
 

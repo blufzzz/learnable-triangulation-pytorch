@@ -11,7 +11,7 @@ ORDINARY_NORMALIZATIONS = ['group_norm', 'batch_norm']
 ADAPTIVE_NORMALIZATION = ['adain', 'spade']
 
 class SPADE(nn.Module):
-    def __init__(self, style_vector_channels, features_channels, hidden=128, ks=3): #  hidden=128
+    def __init__(self, style_vector_channels, features_channels, hidden=64, ks=3): #  hidden=128
         super().__init__()
 
         pw = ks // 2
@@ -75,7 +75,7 @@ class GroupNorm(nn.Module):
 class BatchNorm3d(nn.Module):
     def __init__(self, features_channels):
         super().__init__()
-        self.batch_norm = nn.BatchNorm3d(features_channels)
+        self.batch_norm = nn.BatchNorm3d(features_channels, affine=False)
     def forward(self, x, params=None):
         return self.batch_norm(x)        
         
@@ -356,4 +356,76 @@ class V2VModel(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
 
+
+
+class C3D(nn.Module):
+    def __init__(self,poolings=5, n_layers=5):
+        super(C3D, self).__init__()
+
+        self.poolings = poolings
+        self.n_layers = n_layers
+
+        assert self.n_layers >= 1
+
+        if self.n_layers >= 1:
+            self.conv1 = nn.Conv3d(3, 64, kernel_size=(3, 3, 3), padding=(1, 1, 1))
+            if self.poolings >= 5:
+                self.pool1 = nn.MaxPool3d(kernel_size=(1, 2, 2), stride=(1, 2, 2))
+
+        if self.n_layers >= 2:    
+            self.conv2 = nn.Conv3d(64, 128, kernel_size=(3, 3, 3), padding=(1, 1, 1))
+            if self.poolings >= 4:
+                self.pool2 = nn.MaxPool3d(kernel_size=(1, 2, 2), stride=(1, 2, 2))
+
+        if self.n_layers >= 3:    
+            self.conv3a = nn.Conv3d(128, 256, kernel_size=(3, 3, 3), padding=(1, 1, 1))
+            self.conv3b = nn.Conv3d(256, 256, kernel_size=(3, 3, 3), padding=(1, 1, 1))
+            if self.poolings >= 3:
+                self.pool3 = nn.MaxPool3d(kernel_size=(1, 2, 2), stride=(1, 2, 2))
+
+        if self.n_layers >= 4:    
+            self.conv4a = nn.Conv3d(256, 512, kernel_size=(3, 3, 3), padding=(1, 1, 1))
+            self.conv4b = nn.Conv3d(512, 512, kernel_size=(3, 3, 3), padding=(1, 1, 1))
+            if self.poolings >= 2:
+                self.pool4 = nn.MaxPool3d(kernel_size=(1, 2, 2), stride=(1, 2, 2))
+
+        if self.n_layers >= 5:    
+            self.conv5a = nn.Conv3d(512, 512, kernel_size=(3, 3, 3), padding=(1, 1, 1))
+            self.conv5b = nn.Conv3d(512, 512, kernel_size=(3, 3, 3), padding=(1, 1, 1))
+            if self.poolings >= 1:
+                self.pool5 = nn.MaxPool3d(kernel_size=(1, 2, 2), stride=(1, 2, 2))
+
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+
+        if self.n_layers >= 1:
+            h = self.relu(self.conv1(x))
+            if self.poolings >= 5:
+                h = self.pool1(h)
+
+        if self.n_layers >= 2:         
+            h = self.relu(self.conv2(h))
+            if self.poolings >= 4:
+                h = self.pool2(h)
+
+        if self.n_layers >= 3:         
+            h = self.relu(self.conv3a(h))
+            h = self.relu(self.conv3b(h))
+            if self.poolings >= 3:
+                h = self.pool3(h)
+
+        if self.n_layers >= 4:         
+            h = self.relu(self.conv4a(h))
+            h = self.relu(self.conv4b(h))
+            if self.poolings >= 2:    
+                h = self.pool4(h)
+
+        if self.n_layers >= 5:         
+            h = self.relu(self.conv5a(h))
+            h = self.relu(self.conv5b(h))
+            if self.poolings >= 1:
+                h = self.pool5(h)
+
+        return h    
 

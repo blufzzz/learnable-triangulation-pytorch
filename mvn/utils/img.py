@@ -32,7 +32,7 @@ def check_black_border(image, threshold=10):
     def get_border_length(x):
         subsequent_zeros = 0
         count = 0
-        for i in x.sum(1).mean(-1):
+        for i in x:
             if i==0:
                 count += 1
             else:

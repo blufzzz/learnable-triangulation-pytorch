@@ -14,7 +14,7 @@ from mvn.utils.op import get_coord_volumes, unproject_heatmaps, integrate_tensor
 from mvn.utils.multiview import update_camera
 from mvn.utils.misc import get_capacity, description
 from mvn.utils import volumetric
-from mvn.models.v2v import V2VModel
+from mvn.models.v2v import V2VModel, C3D
 from mvn.models.v2v_models import V2VModel_v1
 from mvn.models.temporal import Seq2VecRNN,\
                                 Seq2VecCNN, \
@@ -80,6 +80,14 @@ class VolumetricTemporalAdaINNet(nn.Module):
         self.include_pivot = config.model.include_pivot
         self.use_auxilary_backbone = hasattr(config.model, 'auxilary_backbone')
 
+        self.use_motion_extractor = config.model.use_motion_extractor if hasattr(config.model, 'use_motion_extractor') else False
+        if self.use_motion_extractor:   
+            self.motion_extractor_type = config.model.motion_extractor_type
+            self.motion_extractor_path = config.model.motion_extractor_path
+            self.motion_extractor_from = config.model.motion_extractor_from
+            self.motion_extractor_poolings = config.model.poolings
+            self.motion_extractor_layers = config.model.n_layers if hasattr(config.model, 'n_layers') else 5
+
         self.use_f2v_output_as_v2v_input = config.model.use_f2v_output_as_v2v_input if \
                                              hasattr(config.model, 'use_f2v_output_as_v2v_input') else False
 
@@ -108,57 +116,84 @@ class VolumetricTemporalAdaINNet(nn.Module):
             print ('Only {} backbone is used...'.format(config.model.backbone.name))
 
         
-        if self.f2v_type == 'lstm':
-            self.features_sequence_to_vector = Seq2VecRNN(input_features_dim = self.encoded_feature_space,
-                                                          output_features_dim = self.style_vector_dim,
-                                                          hidden_dim = self.f2v_intermediate_channels)
-        elif self.f2v_type == 'cnn':
-            self.features_sequence_to_vector = Seq2VecCNN(input_features_dim = self.encoded_feature_space,
-                                                          output_features_dim=  self.style_vector_dim,
-                                                          intermediate_channels = self.f2v_intermediate_channels,
-                                                          normalization_type = self.f2v_normalization_type,
-                                                          dt=self.dt if self.include_pivot else self.dt-1,
-                                                          kernel_size = 3)
+        ######################################
+        # DEFINE TEMPORAL FEATURE ECTRACTION #   
+        ######################################
 
-        elif self.f2v_type == 'lstm2d':
-            self.features_sequence_to_vector = Seq2VecRNN2D(input_features_dim = self.encoded_feature_space,
-                                                            output_features_dim=  self.style_vector_dim,
-                                                            hidden_dim = self.f2v_intermediate_channels)     
-        elif self.f2v_type == 'cnn2d':
-            self.features_sequence_to_vector = Seq2VecCNN2D(input_features_dim = self.encoded_feature_space,
-                                                            output_features_dim=  self.style_vector_dim,
-                                                            intermediate_channels = self.f2v_intermediate_channels,
-                                                            normalization_type = self.f2v_normalization_type,
-                                                            dt=self.dt if self.include_pivot else self.dt-1,
-                                                            kernel_size = 3)
+        if self.use_motion_extractor:
+            if self.motion_extractor_type == 'c3d':
+                self.motion_extractor = C3D(self.motion_extractor_poolings, 
+                                            self.motion_extractor_layers)   # [3,11,384,384] -> [512, 1, 13, 13]
 
-        elif self.f2v_type == 'v2v':
-            self.features_sequence_to_vector = V2VModel(self.encoded_feature_space,
-                                                        self.style_vector_dim,
-                                                        v2v_normalization_type=self.f2v_normalization_type,
-                                                        config=config.model.f2v_configuration,
-                                                        style_vector_dim=None,
-                                                        temporal_condition_type=None)
 
-        else:
-            raise RuntimeError('Wrong features_sequence_to_vector type')
+                me_out_channels = {1:64, 2:128, 3:256, 4:512, 5:512}[self.motion_extractor_layers]
 
-          
-        self.encoder = get_encoder(self.encoder_type,
-                                   config.model.backbone.name,
-                                   self.encoded_feature_space,
-                                   self.upscale_bottleneck,
-                                   capacity = self.encoder_capacity,
-                                   spatial_dimension = 2 if (self.f2v_type[-2:] == '2d' or \
-                                                         self.f2v_type == 'v2v')  else 1,
-                                   encoder_normalization_type = self.encoder_normalization_type)
+                weights_dict = torch.load(self.motion_extractor_path, map_location=device)
+                model_dict = self.motion_extractor.state_dict()
+                new_pretrained_state_dict = {}
+                
+                for k, v in weights_dict.items():
+                    if k in model_dict:
+                        new_pretrained_state_dict[k] = weights_dict[k]
+                    else:    
+                        print (k, 'hasnt been loaded in C3D')
+
+                self.motion_extractor.load_state_dict(new_pretrained_state_dict)
+                print (f'Successfully loaded pretrained weights for motion_extractor {self.motion_extractor_type}')
+                self.me_postprocess = nn.Conv3d(me_out_channels,self.style_vector_dim,kernel_size=1)    
+            else:
+                raise RuntimeError('Wrong motion_extractor_type') 
+        
+        else:            
+            if self.f2v_type == 'lstm':
+                self.features_sequence_to_vector = Seq2VecRNN(input_features_dim = self.encoded_feature_space,
+                                                              output_features_dim = self.style_vector_dim,
+                                                              hidden_dim = self.f2v_intermediate_channels)
+            elif self.f2v_type == 'cnn':
+                self.features_sequence_to_vector = Seq2VecCNN(input_features_dim = self.encoded_feature_space,
+                                                              output_features_dim=  self.style_vector_dim,
+                                                              intermediate_channels = self.f2v_intermediate_channels,
+                                                              normalization_type = self.f2v_normalization_type,
+                                                              dt=self.dt if self.include_pivot else self.dt-1,
+                                                              kernel_size = 3)
+
+            elif self.f2v_type == 'lstm2d':
+                self.features_sequence_to_vector = Seq2VecRNN2D(input_features_dim = self.encoded_feature_space,
+                                                                output_features_dim=  self.style_vector_dim,
+                                                                hidden_dim = self.f2v_intermediate_channels)     
+            elif self.f2v_type == 'cnn2d':
+                self.features_sequence_to_vector = Seq2VecCNN2D(input_features_dim = self.encoded_feature_space,
+                                                                output_features_dim=  self.style_vector_dim,
+                                                                intermediate_channels = self.f2v_intermediate_channels,
+                                                                normalization_type = self.f2v_normalization_type,
+                                                                dt=self.dt if self.include_pivot else self.dt-1,
+                                                                kernel_size = 3)
+
+            elif self.f2v_type == 'v2v':
+                self.features_sequence_to_vector = V2VModel(self.encoded_feature_space,
+                                                            self.style_vector_dim,
+                                                            v2v_normalization_type=self.f2v_normalization_type,
+                                                            config=config.model.f2v_configuration,
+                                                            style_vector_dim=None,
+                                                            temporal_condition_type=None)
+
+            else:
+                raise RuntimeError('Wrong features_sequence_to_vector type')
+
+               
+            self.encoder = get_encoder(self.encoder_type,
+                                       config.model.backbone.name,
+                                       self.encoded_feature_space,
+                                       self.upscale_bottleneck,
+                                       capacity = self.encoder_capacity,
+                                       spatial_dimension = 2 if (self.f2v_type[-2:] == '2d' or \
+                                                             self.f2v_type == 'v2v')  else 1,
+                                       encoder_normalization_type = self.encoder_normalization_type)
         
 
         v2v_input_features_dim = (self.volume_features_dim + self.style_vector_dim) if \
                                   self.temporal_condition_type in ['stack', 'stack_poses'] else self.volume_features_dim
                                  
-
-
         if self.v2v_type == 'v1':
             self.volume_net = V2VModel_v1(v2v_input_features_dim,
                                           self.num_joints,
@@ -232,24 +267,41 @@ class VolumetricTemporalAdaINNet(nn.Module):
             bottleneck_channels = bottleneck.shape[1]
             bottleneck = bottleneck.view(batch_size, dt, bottleneck_channels, *bottleneck_shape)
             aux_bottleneck = bottleneck if self.include_pivot else bottleneck[:,self.aux_indexes,...].contiguous()
-            aux_bottleneck = aux_bottleneck.view(-1, bottleneck_channels, *bottleneck_shape)
-        
+            aux_bottleneck = aux_bottleneck.view(-1, bottleneck_channels, *bottleneck_shape)   
+
         proj_matricies_batch = update_camera(batch, batch_size, image_shape, features_shape, dt, device)
         proj_matricies_batch = proj_matricies_batch[:,self.pivot_index,...].unsqueeze(1) # pivot camera 
 
-        if self.encoder_type == 'backbone':
-            aux_bottleneck = aux_bottleneck if self.style_grad_for_backbone else aux_bottleneck.detach()
-            encoded_features = self.encoder(aux_bottleneck)
-        elif self.encoder_type == 'features': 
-            aux_features = aux_features if self.style_grad_for_backbone else aux_features.detach()
-            encoded_features = self.encoder(aux_features)
-        else:
-            raise RuntimeError('Unknown encoder')    
+        ###############################
+        # TEMPORAL FEATURE ECTRACTION #   
+        ###############################
 
-        encoded_features = encoded_features.view(batch_size, -1, *encoded_features.shape[1:]) # [batch_size, dt-1, encoded_fetures_dim]
-        if self.f2v_type == 'v2v':
-            encoded_features = torch.transpose(encoded_features, 1,2) # [batch_size, encoded_fetures_dim[0], dt-1, encoded_fetures_dim[1:]]
-        style_vector = self.features_sequence_to_vector(encoded_features, device=device) # [batch_size, style_vector_dim]
+        if self.use_motion_extractor:
+            if self.motion_extractor_from == 'rgb':
+                style_vector = self.motion_extractor(images_batch.view(batch_size, 3, dt, *image_shape))
+            elif self.motion_extractor_from == 'features':    
+                style_vector = self.motion_extractor(aux_features.view(batch_size, dt-1, features_shape, *features_channels))
+            elif self.motion_extractor_from == 'bottleneck':    
+                style_vector = self.motion_extractor(aux_bottleneck.view(batch_size, dt-1, bottleneck_shape, *bottleneck_channels))    
+            else:
+                raise RuntimeError('Wrong `motion_extractor_from`')    
+
+            style_vector = self.me_postprocess(style_vector) 
+
+        else:    
+            if self.encoder_type == 'backbone':
+                aux_bottleneck = aux_bottleneck if self.style_grad_for_backbone else aux_bottleneck.detach()
+                encoded_features = self.encoder(aux_bottleneck)
+            elif self.encoder_type == 'features': 
+                aux_features = aux_features if self.style_grad_for_backbone else aux_features.detach()
+                encoded_features = self.encoder(aux_features)
+            else:
+                raise RuntimeError('Unknown encoder')    
+
+            encoded_features = encoded_features.view(batch_size, -1, *encoded_features.shape[1:]) # [batch_size, dt-1, encoded_fetures_dim]
+            if self.f2v_type == 'v2v':
+                encoded_features = torch.transpose(encoded_features, 1,2) # [batch_size, encoded_fetures_dim[0], dt-1, encoded_fetures_dim[1:]]
+            style_vector = self.features_sequence_to_vector(encoded_features, device=device) # [batch_size, style_vector_dim]
         
         # using for debugging 
         if randomize_style:
@@ -301,7 +353,8 @@ class VolumetricTemporalAdaINNet(nn.Module):
                                                          vol_confidences=vol_confidences
                                                          )
             elif self.spade_broadcasting_type == 'interpolate':
-                style_vector_volumes = F.interpolate(style_vector.unsqueeze(-1) if not self.f2v_type == 'v2v' else style_vector,
+                unsqueeze_style = not (self.f2v_type == 'v2v' or self.use_motion_extractor)
+                style_vector_volumes = F.interpolate(style_vector.unsqueeze(-1) if unsqueeze_style else style_vector,
                                                      size=(self.volume_size,self.volume_size,self.volume_size), 
                                                      mode='trilinear')
                 
