@@ -8,6 +8,13 @@ from mvn.models.v2v import Res3DBlock
 
 
 
+class FeatureDecoderLSTM(nn.Module):
+    """docstring for FeatureDecoderLSTM"""
+    def __init__(self, arg):
+        super(FeatureDecoderLSTM, self).__init__()
+        self.arg = arg
+        
+
 
 def get_encoder(encoder_type, 
                 backbone_type,
@@ -18,12 +25,8 @@ def get_encoder(encoder_type,
                 encoder_normalization_type='batch_norm'):
     
     assert spatial_dimension in [1,2], 'Wrong spatial_dimension! Only 1 and 2 are supported'
-    encoder_input_channels = {'features':{'resnet152':256},
-                              'features':{'resnet50':256}, 
-                              'backbone':{'resnet152':2048},
-                              'backbone':{'resnet50':2048}}[encoder_type][backbone_type]
-
-
+    encoder_input_channels = {'features':256,
+                              'backbone':2048}[encoder_type]
 
     if encoder_type == "backbone":
         if spatial_dimension == 1:

@@ -10,7 +10,7 @@ from mvn.utils.img import get_square_bbox, resize_image, crop_image, normalize_i
 from mvn.utils import volumetric
 from IPython.core.debugger import set_trace
 
-CHECK_BLACK_BORDERS = True
+CHECK_BLACK_BORDERS = False
 BLACK_BORDERS_THRESHOLD = 15
 
 class Human36MMultiViewDataset(Dataset):
@@ -208,7 +208,7 @@ class Human36MMultiViewDataset(Dataset):
         sample['keypoints_3d'] = np.pad(
             shot['keypoints'][:self.num_keypoints],
             ((0,0), (0,1)), 'constant', constant_values=1.0)
-
+        
         # build cuboid
         # base_point = sample['keypoints_3d'][6, :3]
         # sides = np.array([self.cuboid_side, self.cuboid_side, self.cuboid_side])

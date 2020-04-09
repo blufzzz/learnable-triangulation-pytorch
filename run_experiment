@@ -1,14 +1,14 @@
 #!/bin/bash
-srun -p TitanX --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w hpc3 \
+srun -p TitanBlack --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-05 \
 python3.6 train.py \
 --logdir=../logs/resnet_50_3d \
 --config=./experiments/human36m/train/human36m_vol_temporal_adain.yaml \
---experiment_comment='h36_sv32_dist_stack3d-h64-interpolate-gn_s2v-C3D-3l-5p-Sports1M-RGB-32-1e-4_vf32_resnet50-gn_dt-12_dil-3-1-1_lr-1e-4_rotation'
+--experiment_comment='h36_sv32_dist_spade3d-128-interpolate-gn-bn-conf-leakyrelu_s2v-v2v-256-128-64-64-gn-decoder-w1e-3_vf64_f2v-features-C0-256_resnet50-gn-nostylegrad_dt-11-intermediate_dil-3-1-1_lr-1e-4_norot_gradclip-1e-2'
 
 
 # ME
-# h36_sv32_dist_spade3d-h64-interpolate-gn_s2v-C3D-3l-5p-Sports1M-RGB-32-1e-4_vf32_resnet50-gn_dt-6_dil-3-1-1_lr-1e-4_no-rot@02.04.2020-19:28:28
-# h36_sv32_dist_stack3d-interpolate-gn_s2v-C3D-3l-5p-Sports1M-RGB-32-1e-4_vf32_resnet50-gn_dt-6_dil-3-1-1_lr-1e-4_no-rot@02.04.2020-19:30:50
+# h36_sv32_dist_spade3d-h64-interpolate-gn_s2v-C3D-3l-5p-Sports1M-RGB-32-1e-4_vf32_resnet50-gn_dt-6_dil-3-1-1_lr-1e-4_no-rot
+# h36_sv32_dist_stack3d-interpolate-gn_s2v-C3D-3l-5p-Sports1M-RGB-32-1e-4_vf32_resnet50-gn_dt-6_dil-3-1-1_lr-1e-4_no-rot
 
 
 # FR

@@ -6,28 +6,31 @@ import inspect
 import torch
 import sys 
 
+ACTIVATION_TYPE = 'LeakyReLU'
 MODULES_REQUIRES_NORMALIZAION = ['Res3DBlock', 'Upsample3DBlock', 'Basic3DBlock']
 ORDINARY_NORMALIZATIONS = ['group_norm', 'batch_norm']
 ADAPTIVE_NORMALIZATION = ['adain', 'spade']
 
 class SPADE(nn.Module):
-    def __init__(self, style_vector_channels, features_channels, hidden=64, ks=3): #  hidden=128
+    def __init__(self, style_vector_channels, features_channels, hidden=128, ks=3): #  hidden=128
         super().__init__()
 
         pw = ks // 2
         self.shared = nn.Sequential(
             nn.Conv3d(style_vector_channels, hidden, kernel_size=ks, padding=pw),
-            nn.ReLU()
+            get_activation(ACTIVATION_TYPE)()
         )
         self.gamma = nn.Conv3d(hidden, features_channels, kernel_size=ks, padding=pw)
         self.beta = nn.Conv3d(hidden, features_channels, kernel_size=ks, padding=pw)
+        self.bn = nn.BatchNorm3d(features_channels, affine=False, track_running_stats=False)
 
     def forward(self, x, params):
+
         params = F.interpolate(params, size=x.size()[2:], mode='nearest')
         actv = self.shared(params)
         gamma = self.gamma(actv)
         beta = self.beta(actv)
-        out = x * (1 + gamma) + beta
+        out = self.bn(x) * (1 + gamma) + beta
         return out
 
 
@@ -80,6 +83,9 @@ class BatchNorm3d(nn.Module):
         return self.batch_norm(x)        
         
 
+def get_activation(activation_type):
+    return {'LeakyReLU':nn.LeakyReLU,'ReLU':nn.ReLU}[activation_type]
+
 def get_normalization(normalization_type, features_channels, n_groups=32, style_vector_channels=None):
 
     if type(normalization_type) is list:
@@ -108,7 +114,7 @@ class Basic3DBlock(nn.Module):
 
         self.normalization = get_normalization(normalization_type, out_planes, n_groups, style_vector_channels)
 
-        self.activation = nn.ReLU(True)
+        self.activation = get_activation(ACTIVATION_TYPE)(True)
 
     def forward(self, x, params=None):
         x = self.conv(x)
@@ -129,7 +135,7 @@ class Res3DBlock(nn.Module):
         self.res_conv1 = nn.Conv3d(in_planes, out_planes, kernel_size=kernel_size, stride=1, padding=padding)
         self.res_conv2 = nn.Conv3d(out_planes, out_planes, kernel_size=kernel_size, stride=1, padding=padding)
         
-        self.activation = nn.ReLU(True)
+        self.activation = get_activation(ACTIVATION_TYPE)(True)
 
         self.use_skip_con = (in_planes != out_planes)
         if self.use_skip_con:
@@ -164,8 +170,8 @@ class Pool3DBlock(nn.Module):
 class Upsample3DBlock(nn.Module):
     def __init__(self, in_planes, out_planes, kernel_size, stride, normalization_type, n_groups=32, style_vector_channels=None):
         super().__init__()
-        assert(kernel_size == 2)
-        assert(stride == 2)
+        # assert(kernel_size == 2)
+        # assert(stride == 2)
         self.normalization_type = normalization_type
         self.transpose = nn.ConvTranspose3d(in_planes, 
                                             out_planes, 
@@ -175,7 +181,7 @@ class Upsample3DBlock(nn.Module):
                                             output_padding=0)
 
         self.normalization = get_normalization(normalization_type, out_planes, n_groups, style_vector_channels)
-        self.activation = nn.ReLU(True)
+        self.activation = get_activation(ACTIVATION_TYPE)(True)
 
     def forward(self, x, params=None):
         x = self.transpose(x)
@@ -274,27 +280,37 @@ class EncoderDecorder(nn.Module):
             name = ''.join((module_type, '_', module_number))
             modules_dict[name] = module
 
-    def forward(self, x, params=None):
+    def forward(self, x, params=None, return_intermediate=False):
 
         skip_connections = []
+        intermediate_list = []
 
         for name, module in self.downsampling_dict.items():
             if name.split('_')[0] == 'skip' and self.use_skip_connection:
                 skip_connections.append(module(x, params=params))
             else:
                 x = module(x, params=params)
+                if return_intermediate:
+                    intermediate_list.append(x)
 
         for name, module in self.bottleneck_dict.items():
             x = module(x, params=params)
+            if return_intermediate:
+                intermediate_list.append(x)
             
         skip_number = -1    
         for name, module in self.upsampling_dict.items():
             if name.split('_')[0] == 'Res3DBlock' and self.use_skip_connection:
                 x = x + skip_connections[skip_number]
                 skip_number -= 1
-            x = module(x, params=params)      
+            x = module(x, params=params)
+            if return_intermediate:
+                intermediate_list.append(x)      
 
-        return x                  
+        if return_intermediate:
+            return x, intermediate_list
+        else:    
+            return x                  
 
 
 class V2VModel(nn.Module):
@@ -314,7 +330,7 @@ class V2VModel(nn.Module):
         self.temporal_condition_type = temporal_condition_type #config.temporal_condition_type if hasattr(config, 'temporal_condition_type') else None
 
         encoder_input_channels = config.downsampling[0]['params'][0]
-        encoder_output_channels = config.upsampling[-1]['params'][-1]
+        encoder_output_channels = config.upsampling[-1]['params'][1]
 
         self.front_layer = Basic3DBlock(input_channels, 
                                         encoder_input_channels, 
@@ -337,12 +353,29 @@ class V2VModel(nn.Module):
 
         self._initialize_weights()
 
-    def forward(self, x, params=None, device=None):
+    def forward(self, x, params=None, device=None, return_intermediate=False):
+        intermediate_list = []
         x = self.front_layer(x)
-        x = self.encoder_decoder(x, params) 
+        if return_intermediate:
+            intermediate_list.append(x)
+
+        
+        if return_intermediate:
+            x, intermediate = self.encoder_decoder(x, params, return_intermediate=return_intermediate)
+            intermediate_list += intermediate
+        else:
+            x = self.encoder_decoder(x, params, return_intermediate=return_intermediate)    
+
         x = self.back_layer(x)
+        if return_intermediate:
+            intermediate_list.append(x)
+
         x = self.output_layer(x)
-        return x
+
+        if return_intermediate:
+            return x, intermediate_list
+        else:
+            return x
 
     def _initialize_weights(self):
         for m in self.modules():
@@ -359,7 +392,7 @@ class V2VModel(nn.Module):
 
 
 class C3D(nn.Module):
-    def __init__(self,poolings=5, n_layers=5):
+    def __init__(self, poolings=5, n_layers=5):
         super(C3D, self).__init__()
 
         self.poolings = poolings
@@ -395,7 +428,7 @@ class C3D(nn.Module):
             if self.poolings >= 1:
                 self.pool5 = nn.MaxPool3d(kernel_size=(1, 2, 2), stride=(1, 2, 2))
 
-        self.relu = nn.ReLU()
+        self.relu = get_activation(ACTIVATION_TYPE)()
 
     def forward(self, x):
 
