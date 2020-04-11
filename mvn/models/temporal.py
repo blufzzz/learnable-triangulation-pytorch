@@ -1,20 +1,132 @@
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
 from IPython.core.debugger import set_trace
 from torchvision import models
-from pytorch_convolutional_rnn.convolutional_rnn import Conv2dLSTM, Conv2dPeepholeLSTM
+from pytorch_convolutional_rnn.convolutional_rnn import Conv2dLSTM, Conv2dLSTMCell, Conv3dLSTMCell
 from mvn.models.v2v import Res3DBlock
 
 
-
 class FeatureDecoderLSTM(nn.Module):
-    """docstring for FeatureDecoderLSTM"""
-    def __init__(self, arg):
-        super(FeatureDecoderLSTM, self).__init__()
-        self.arg = arg
+    def __init__(self, style_vector_dim, feature_space, hidden_dim=512, time=5):
+        super().__init__()
+        self.style_vector_dim = style_vector_dim
+        self.feature_space = feature_space
+        self.hidden_dim = hidden_dim
         
+        self.style2cell_state = nn.Sequential(nn.ConvTranspose3d(style_vector_dim,
+                                                                 hidden_dim//4,
+                                                                 kernel_size=[1,2,2], 
+                                                                 stride=[1,2,2]),
+                                             nn.LeakyReLU(), 
+                                             nn.GroupNorm(32, hidden_dim//4),
+                                             nn.ConvTranspose3d(hidden_dim//4,
+                                                                hidden_dim//2,
+                                                                kernel_size=[1,2,2],
+                                                                stride=[1,2,2]),
+                                             nn.LeakyReLU(), 
+                                             nn.GroupNorm(32, hidden_dim//2),
+                                             nn.Conv3d(hidden_dim//2,
+                                                        hidden_dim,
+                                                        kernel_size=[time,1,1],
+                                                        stride=1),
+                                             nn.LeakyReLU()
+                                             )
+        
+        self.lstm_cell = Conv2dLSTMCell(in_channels=feature_space,
+                                        out_channels=hidden_dim,
+                                        kernel_size=3,
+                                        bias=True)
+        
+        self.hidden2feature = nn.Conv2d(hidden_dim, feature_space, kernel_size=1)
 
+    def forward(self, style_vector, init_feature_map, time=5):
+        
+        hx_init = torch.zeros(1, self.hidden_dim, 96, 96).cuda()
+        cx_init = self.style2cell_state(style_vector).squeeze(2)
+        output = []
+        for i in range(time):
+            
+            if i == 0:
+                hx, cx = self.lstm_cell(init_feature_map, (hx_init, cx_init))
+            else:
+                hx, cx = self.lstm_cell(feature, (hx, cx))
+            
+            feature = self.hidden2feature(hx)
+            output.append(feature)    
+        
+        output = torch.stack(output,1)
+        return output
+        
+  # use_style_pose_lstm_loss: false
+  # style_pose_lstm_loss_weight: 0.01
+  # style_pose_lstm_decoder_lr: 0.001
+
+class StylePosesLSTM(nn.Module):
+    def __init__(self, style_vector_dim, style_shape, pose_space=17, hidden_dim=128, volume_size=32, time=5, n_layers = 3):
+        super().__init__()
+        self.style_vector_dim = style_vector_dim
+        self.pose_space = pose_space
+        self.hidden_dim = hidden_dim
+        self.volume_size = volume_size
+        self.n_layers = n_layers
+        self.style_shape = style_shape
+
+        hidden_shape = np.array([volume_size,volume_size,volume_size]) 
+        diff_shape = (hidden_shape - style_shape) 
+        kernel_size = 1 + (diff_shape//n_layers)
+        kernel_size_residual = 1 + diff_shape%n_layers
+        assert (diff_shape > 0).all()
+
+        layers = []
+        for i in range(n_layers):
+            layers.append(nn.ConvTranspose3d(style_vector_dim if i==0 else hidden_dim//2,
+                                             hidden_dim//2,
+                                             kernel_size=kernel_size))
+            layers.append(nn.LeakyReLU())
+            layers.append(nn.GroupNorm(32, hidden_dim//2))
+            
+        # last block    
+        layers.append(nn.ConvTranspose3d(hidden_dim//2,
+                                         hidden_dim,
+                                         kernel_size=kernel_size_residual))
+        layers.append(nn.LeakyReLU())    
+
+        self.style2cell_state = nn.Sequential(*layers)
+        
+        self.lstm_cell = Conv3dLSTMCell(in_channels=pose_space,
+                                        out_channels=hidden_dim,
+                                        kernel_size=3,
+                                        bias=True)
+        
+        self.hidden2feature = nn.Conv3d(hidden_dim, pose_space, kernel_size=1)
+
+    def forward(self, style_vector, init_pose, time=5):
+        
+        hx_init = torch.zeros(1, 
+                                self.hidden_dim,
+                                self.volume_size, 
+                                self.volume_size, 
+                                self.volume_size).cuda()
+
+        cx_init = self.style2cell_state(style_vector)
+        output = []
+        for i in range(time):
+            
+            if i == 0:
+                hx, cx = self.lstm_cell(init_pose, (hx_init, cx_init))
+            else:
+                hx, cx = self.lstm_cell(feature, (hx, cx))
+            
+            feature = self.hidden2feature(hx)
+            output.append(feature)    
+        
+        output = torch.stack(output,1)
+        return output
+
+
+        
 
 def get_encoder(encoder_type, 
                 backbone_type,

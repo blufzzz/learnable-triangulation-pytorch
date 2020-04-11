@@ -115,4 +115,6 @@ error_log.txt
 pytorch_convolutional_rnn
 backup
 broken_images
-ssd.pytorch
+ssd_pytorch
+PyTorch_YOLOv3
+

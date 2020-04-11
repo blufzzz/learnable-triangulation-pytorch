@@ -1,5 +1,7 @@
 # Reference: https://github.com/dragonbook/V2V-PoseNet-pytorch
 from IPython.core.debugger import set_trace
+from torchvision.models.video.resnet import VideoResNet, BasicBlock, R2Plus1dStem, Conv2Plus1D
+from collections import OrderedDict
 import torch.nn as nn
 import torch.nn.functional as F
 import inspect
@@ -10,6 +12,14 @@ ACTIVATION_TYPE = 'LeakyReLU'
 MODULES_REQUIRES_NORMALIZAION = ['Res3DBlock', 'Upsample3DBlock', 'Basic3DBlock']
 ORDINARY_NORMALIZATIONS = ['group_norm', 'batch_norm']
 ADAPTIVE_NORMALIZATION = ['adain', 'spade']
+
+def convert_bn_to_gn(model):
+    for child_name, child in model.named_children():
+        if isinstance(child, nn.BatchNorm3d):
+            C = child.num_features
+            setattr(model, child_name, nn.GroupNorm(C,C))
+        else:
+            convert_relu_to_softplus(child)
 
 class SPADE(nn.Module):
     def __init__(self, style_vector_channels, features_channels, hidden=128, ks=3): #  hidden=128
@@ -462,3 +472,58 @@ class C3D(nn.Module):
 
         return h    
 
+
+class R2D(nn.Module):
+
+    def __init__(self, device, normalization_type):
+
+        super().__init__()
+                    
+        weights_path = './data/r2plus1d_34_clip8_ig65m_from_scratch-9bae36ae.pth'
+
+        model = VideoResNet(block=BasicBlock,
+                                        conv_makers=[Conv2Plus1D] * 4,
+                                        layers=[3, 4, 6, 3], # [3,4,6,3]
+                                        stem=R2Plus1dStem)
+        model.layer2[0].conv2[0] = Conv2Plus1D(128, 128, 288)
+        model.layer3[0].conv2[0] = Conv2Plus1D(256, 256, 576)
+        model.layer4[0].conv2[0] = Conv2Plus1D(512, 512, 1152)
+
+        self.motion_extractor = nn.Sequential(OrderedDict([
+                                  ('stem', model.stem), 
+                                  ('layer1', model.layer1), 
+                                  ('layer2', model.layer2)
+        #                           ('layer3', model.layer3)
+                                  ]))
+
+
+        weights_dict = torch.load(weights_path, map_location=device)
+        model_dict = self.motion_extractor.state_dict()
+        new_pretrained_state_dict = {}
+
+        for k, v in weights_dict.items():
+            if k in model_dict:
+                new_pretrained_state_dict[k] = weights_dict[k]
+
+        self.motion_extractor.load_state_dict(new_pretrained_state_dict)
+
+        # We need exact Caffe2 momentum for BatchNorm scaling
+        if normalization_type == 'batch_norm':
+            for m in self.motion_extractor.modules():
+                if isinstance(m, nn.BatchNorm3d):
+                    m.eps = 1e-3
+                    m.momentum = 0.9
+        elif normalization_type == 'group_norm':
+            convert_bn_to_gn(self.motion_extractor)            
+
+        # x = torch.randn(3,3,5,112,112)
+        # print ('shape:',self.motion_extractor(x).shape , 'capacity:', get_capacity(sefl.motion_extractor))
+
+    def forward(self, x):
+
+        # x: (batch,3,time,112,112)
+        # output: torch.Size([batch, 256, f(time), 14, 14])
+        
+        x = self.motion_extractor(x)
+
+        return x    

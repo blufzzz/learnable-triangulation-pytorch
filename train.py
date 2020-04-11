@@ -238,7 +238,10 @@ def one_epoch(model,
 
     use_style_decoder = config.model.use_style_decoder if hasattr(config.model, 'use_style_decoder') else False
     use_time_weighted_loss = config.opt.use_time_weighted_loss if hasattr(config.opt, 'use_time_weighted_loss') else False
-    use_future_keypoints_loss = config.opt.use_future_keypoints_loss if hasattr(config.opt, 'use_future_keypoints_loss') else False
+
+    use_style_pose_lstm_loss = config.opt.use_style_pose_lstm_loss if hasattr(config.opt, 'use_style_pose_lstm_loss') else False
+    if use_style_pose_lstm_loss:
+        style_pose_lstm_loss_weight = config.opt.style_pose_lstm_loss_weight if hasattr(config.opt, 'style_pose_lstm_loss_weight') else 0.1
 
     if use_temporal_discriminator:
         assert (discriminator is not None) and (opt_discr is not None) and (not model.evaluate_only_last_volume)
@@ -340,17 +343,21 @@ def one_epoch(model,
                 ##################
                 # MSE\MAE loss
                 total_loss = 0.0
-                # if use_future_keypoints_loss:
-                #     future_keypoints_loss_weight = torch.stack([torch.exp(torch.arange(0,(-dt//2)+1, -1, dtype=torch.float)) \
-                #                                                 for i in range(batch_size)]).view(batch_size, -1,1,1,1).to(device)
-                # else:    
-                #     future_keypoints_loss_weight = 1.
                 loss = criterion(keypoints_3d_pred * scale_keypoints_3d, \
                                  keypoints_3d_gt * scale_keypoints_3d, \
                                  keypoints_3d_binary_validity_gt)
 
                 total_loss += loss
                 metric_dict[f'{config.opt.criterion}'].append(loss.item())
+
+                # lstm temporal pose-style loss
+                if use_style_pose_lstm_loss:
+                    assert keypoints_per_frame
+                    future_keypoints_loss_weight = torch.stack([torch.exp(torch.arange(0,(-dt//2)+1, -1, dtype=torch.float)) \
+                                                                for i in range(batch_size)]).view(batch_size, -1,1,1,1).to(device)
+
+                    total_loss += style_pose_lstm_loss_weight * (loss * future_keypoints_loss_weight)
+
 
                 # Bone length loss
                 if use_bone_length_term:
@@ -415,7 +422,7 @@ def one_epoch(model,
                                             for i in range(batch_size)]).view(batch_size, -1,1,1,1).to(device) # [bs,(dt//2)-1,1,1,1]
                     else:
                         time_weights = 1.    
-                    style_decoder_loss = torch.norm(torch.transpose(decoded_features,1,2) - features_pred)*time_weights
+                    style_decoder_loss = torch.norm(decoded_features - features_pred)*time_weights
                     style_decoder_loss = style_decoder_loss.mean()
                     style_decoder_loss_weight = config.opt.style_decoder_loss_weight
                     total_loss += style_decoder_loss * style_decoder_loss_weight
@@ -677,22 +684,31 @@ def main(args):
                             'lr': config.opt.volume_net_lr if \
                             hasattr(config.opt, "volume_net_lr") else config.opt.lr}
                 ] + \
+
                 ([{'params': model.features_sequence_to_vector.parameters(), \
                             'lr': config.opt.features_sequence_to_vector_lr if \
                             hasattr(config.opt, "features_sequence_to_vector_lr") else config.opt.lr}] if \
                             hasattr(model, "features_sequence_to_vector") else []) + \
+
                 ([{'params':model.auxilary_backbone.parameters(), \
                             'lr': config.opt.auxilary_backbone_lr if \
                             hasattr(config.opt, "auxilary_backbone_lr") else config.opt.lr}] if \
                             model.use_auxilary_backbone else []) + \
+
                 ([{'params':model.motion_extractor.parameters(), \
                             'lr': config.opt.motion_extractor_lr if \
                             hasattr(config.opt, "motion_extractor_lr") else config.opt.lr}] if \
                             model.use_motion_extractor else []) + \
+
                 ([{'params':model.style_decoder.parameters(), \
                             'lr': config.opt.style_decoder_lr if \
                             hasattr(config.opt, "style_decoder_lr") else config.opt.lr}] if \
-                            model.use_style_decoder else []),
+                            model.use_style_decoder else []) + \
+
+                ([{'params':model.style_pose_lstm_loss_decoder.parameters(), \
+                            'lr': config.opt.style_pose_lstm_decoder_lr if \
+                            hasattr(config.opt, "style_pose_lstm_decoder_lr") else config.opt.lr}] if \
+                            model.use_style_pose_lstm_loss else []),
                 lr=config.opt.lr) 
 
         elif config.model.name == "vol_temporal_grid":

@@ -14,7 +14,7 @@ from mvn.utils.op import get_coord_volumes, unproject_heatmaps, integrate_tensor
 from mvn.utils.multiview import update_camera
 from mvn.utils.misc import get_capacity, description
 from mvn.utils import volumetric
-from mvn.models.v2v import V2VModel, C3D
+from mvn.models.v2v import V2VModel, C3D, R2D
 from mvn.models.v2v_models import V2VModel_v1
 from mvn.models.temporal import Seq2VecRNN,\
                                 Seq2VecCNN, \
@@ -82,8 +82,10 @@ class VolumetricTemporalAdaINNet(nn.Module):
         self.include_pivot = config.model.include_pivot
         self.use_auxilary_backbone = hasattr(config.model, 'auxilary_backbone')
 
-
         self.use_style_decoder = config.model.use_style_decoder if hasattr(config.model, 'use_style_decoder') else False
+        self.style_decoder_type = config.model.style_decoder_type if hasattr(config.model, 'style_decoder_type') else 'v2v'
+
+        self.use_style_pose_lstm_loss = config.model.use_style_pose_lstm_loss if hasattr(config.model, 'use_style_pose_lstm_loss') else False
 
         self.use_motion_extractor = config.model.use_motion_extractor if hasattr(config.model, 'use_motion_extractor') else False
         if self.use_motion_extractor:   
@@ -92,12 +94,6 @@ class VolumetricTemporalAdaINNet(nn.Module):
             self.motion_extractor_from = config.model.motion_extractor_from
             self.motion_extractor_poolings = config.model.poolings
             self.motion_extractor_layers = config.model.n_layers if hasattr(config.model, 'n_layers') else 5
-
-        self.use_f2v_output_as_v2v_input = config.model.use_f2v_output_as_v2v_input if \
-                                             hasattr(config.model, 'use_f2v_output_as_v2v_input') else False
-
-        if self.use_f2v_output_as_v2v_input:
-            assert self.temporal_condition_type == 'spade'                               
         
         # modules dimensions
         self.volume_features_dim = config.model.volume_features_dim
@@ -125,6 +121,17 @@ class VolumetricTemporalAdaINNet(nn.Module):
         # DEFINE TEMPORAL FEATURE ECTRACTION #   
         ######################################
 
+        if self.use_style_pose_lstm_loss:
+            style_shape = {'v2v':[5,24,24]}[self.f2v_type]
+            self.style_pose_lstm_loss_decoder = StylePosesLSTM(self.style_vector_dim,
+                                                                style_shape,
+                                                                pose_space=17,
+                                                                hidden_dim=128,
+                                                                volume_size=self.volume_size, 
+                                                                time=style_shape[0], 
+                                                                n_layers=3)
+
+
         if self.use_motion_extractor:
             if self.motion_extractor_type == 'c3d':
                 self.motion_extractor = C3D(self.motion_extractor_poolings, 
@@ -145,7 +152,11 @@ class VolumetricTemporalAdaINNet(nn.Module):
 
                 self.motion_extractor.load_state_dict(new_pretrained_state_dict)
                 print (f'Successfully loaded pretrained weights for motion_extractor {self.motion_extractor_type}')
-                self.me_postprocess = nn.Conv3d(me_out_channels,self.style_vector_dim,kernel_size=1)    
+                self.me_postprocess = nn.Conv3d(me_out_channels,self.style_vector_dim,kernel_size=1) 
+
+            elif self.motion_extractor_type == 'r2d':
+                self.motion_extractor = R2D(device, self.f2v_normalization_type)  
+                self.me_postprocess = nn.Conv3d(128,self.style_vector_dim,kernel_size=1)      
             else:
                 raise RuntimeError('Wrong motion_extractor_type') 
         
@@ -332,6 +343,7 @@ class VolumetricTemporalAdaINNet(nn.Module):
                 encoded_features = torch.transpose(encoded_features, 1,2) # [batch_size, encoded_fetures_dim[0], dt-1, encoded_fetures_dim[1:]]
             style_vector = self.features_sequence_to_vector(encoded_features, device=device) # [batch_size, style_vector_dim]
         
+
         # using for debugging 
         if randomize_style:
             idx = torch.randperm(style_vector.nelement())
@@ -430,14 +442,18 @@ class VolumetricTemporalAdaINNet(nn.Module):
         vol_keypoints_3d, volumes = integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier,
                                                                             coord_volumes,
                                                                             softmax=self.volume_softmax)
-        
+        decoded_features = None
         if self.use_style_decoder:
-            if 'style_decoder_type' == 'v2v':
+            if self.style_decoder_type == 'v2v':
                 decoded_features = self.style_decoder(style_vector)
+                decoded_features = torch.transpose(decoded_features,1,2)
 
-            elif 'style_decoder_type' == 'lstm':
+            elif self.style_decoder_type == 'lstm':
                 last_feature = aux_features.view(batch_size, -1, *aux_features.shape[1:])[:,-1,...]
                 decoded_features = self.style_decoder(style_vector, last_feature)
+
+        if self.use_style_pose_lstm_loss
+            lstm_volumes = self.style_pose_lstm_loss_decoder(style_vector, pose)   
 
         return [vol_keypoints_3d,
                 features_for_loss if self.use_style_decoder else None,
@@ -448,7 +464,7 @@ class VolumetricTemporalAdaINNet(nn.Module):
                 base_points,
                 style_vector,
                 unproj_features,
-                decoded_features if self.use_style_decoder else None
+                decoded_features
                 ]
 
 
