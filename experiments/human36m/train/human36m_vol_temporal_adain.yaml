@@ -30,10 +30,8 @@ opt:
   use_time_weighted_loss: true
   style_decoder_loss_weight: 0.001
 
-  use_style_pose_lstm_loss: false
-  style_pose_lstm_loss_weight: 0.01
+  style_pose_lstm_loss_weight: 0.1
   style_pose_lstm_decoder_lr: 0.001
-
 
   save_model: true
   silence: false
@@ -55,6 +53,7 @@ model:
   
   use_style_decoder: true
   style_decoder_type: 'lstm'
+  use_style_pose_lstm_loss: true
 
   use_motion_extractor: false
   motion_extractor_type: 'c3d'
@@ -197,7 +196,7 @@ dataset:
   dilation: 3
   singleview: true
   pivot_type: 'intermediate'
-  keypoints_per_frame: false
+  keypoints_per_frame: true
 
   train:
     h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"

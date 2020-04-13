@@ -33,6 +33,7 @@ class JointsMSELoss(nn.Module):
 
         return loss / num_joints
 
+##################
 
 class KeypointsMSELoss(nn.Module):
     def __init__(self):
@@ -62,12 +63,13 @@ class KeypointsMAELoss(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, keypoints_pred, keypoints_gt, keypoints_binary_validity):
-        dimension = keypoints_pred.shape[-1]
-        loss = torch.sum(torch.abs(keypoints_gt - keypoints_pred) * keypoints_binary_validity)
+    def forward(self, diff, keypoints_binary_validity):
+        dimension = diff.shape[-1]
+        loss = torch.sum(torch.abs(diff) * keypoints_binary_validity)
         loss = loss / (dimension * max(1, torch.sum(keypoints_binary_validity).item()))
         return loss
 
+#######################
 
 class KeypointsL2Loss(nn.Module):
     def __init__(self):

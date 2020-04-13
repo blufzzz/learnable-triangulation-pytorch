@@ -54,41 +54,44 @@ for pose in tqdm(poses):
     
     for camera_name in os.listdir(images_dir):
         images_camera_dir = os.path.join(images_dir, camera_name)
+
         for image_name in sorted(os.listdir(images_camera_dir)):
             image_path =  os.path.join(images_camera_dir, image_name)
 
-            # Configure input
-            pil_image = Image.open(image_path)
-            img = np.asarray(pil_image)
-            transforms = Compose([Resize((img_size,img_size)), ToTensor()])
-            x_tensor = transforms(pil_image).unsqueeze(0).to(device)
+            final_detections = None
+            try:
+                # Configure input
+                pil_image = Image.open(image_path)
+                img = np.asarray(pil_image)
+                transforms = Compose([Resize((img_size,img_size)), ToTensor()])
+                x_tensor = transforms(pil_image).unsqueeze(0).to(device)
 
-            # Get detections
-            with torch.no_grad():
-                detections = model(x_tensor)
-                detections = non_max_suppression(detections, conf_thres, nms_thres)
+                # Get detections
+                with torch.no_grad():
+                    detections = model(x_tensor)
+                    detections = non_max_suppression(detections, conf_thres, nms_thres)
 
-            # Draw bounding boxes and labels of detections
-            # Rescale boxes to original image
-            if check_detections(detections):
-                detections = rescale_boxes(detections[0], img_size, img.shape[:2])
-                unique_labels = detections[:, -1].cpu().unique()
-                n_cls_preds = len(unique_labels)
+                # Draw bounding boxes and labels of detections
+                # Rescale boxes to original image
+                if check_detections(detections):
+                    detections = rescale_boxes(detections[0], img_size, img.shape[:2])
+                    unique_labels = detections[:, -1].cpu().unique()
+                    n_cls_preds = len(unique_labels)
 
-                # sort detections
-                is_person = detections[:,-1] == 0
-                person_class_confidence = detections[:,5] >= class_thresh
-                if (is_person * person_class_confidence).any():
-                    # FOUND
-                    person_detections = detections[detections[:,-1] == 0]
-                    person_detections_conf = person_detections[person_detections[:,5] >= class_thresh]
-                    detections = person_detections_conf[person_detections_conf[:,4].argmax()]
-                    detections = detections.tolist()
-                else:
-                    detections = None
-            
+                    # sort detections
+                    is_person = detections[:,-1] == 0
+                    person_class_confidence = detections[:,5] >= class_thresh
+                    if (is_person * person_class_confidence).any():
+                        # FOUND
+                        person_detections = detections[detections[:,-1] == 0]
+                        person_detections_conf = person_detections[person_detections[:,5] >= class_thresh]
+                        detections = person_detections_conf[person_detections_conf[:,4].argmax()]
+                        final_detections = detections.tolist()
+            except:
+                pass
+
             #  x1, y1, x2, y2, conf, cls_conf, cls_pred
-            detections_dict[camera_name][image_name] = detections
+            detections_dict[camera_name][image_name] = final_detections
 
         os.makedirs(detections_dict_path, exist_ok=True)    
         with open(f'{detections_dict_path}/{camera_name}.json', 'w') as fp:

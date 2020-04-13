@@ -117,10 +117,10 @@ class StylePosesLSTM(nn.Module):
             if i == 0:
                 hx, cx = self.lstm_cell(init_pose, (hx_init, cx_init))
             else:
-                hx, cx = self.lstm_cell(feature, (hx, cx))
+                hx, cx = self.lstm_cell(pose, (hx, cx))
             
-            feature = self.hidden2feature(hx)
-            output.append(feature)    
+            pose = self.hidden2feature(hx)
+            output.append(pose)    
         
         output = torch.stack(output,1)
         return output

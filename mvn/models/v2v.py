@@ -492,8 +492,8 @@ class R2D(nn.Module):
         self.motion_extractor = nn.Sequential(OrderedDict([
                                   ('stem', model.stem), 
                                   ('layer1', model.layer1), 
-                                  ('layer2', model.layer2)
-        #                           ('layer3', model.layer3)
+                                  ('layer2', model.layer2),
+                                  ('layer3', model.layer3)
                                   ]))
 
 

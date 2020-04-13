@@ -44,7 +44,7 @@ from mvn.datasets import utils as dataset_utils
 from IPython.core.debugger import set_trace
 import matplotlib.pyplot as plt
 
-MAKE_EXPERIMENT_DIR = True
+MAKE_EXPERIMENT_DIR = False
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -235,11 +235,12 @@ def one_epoch(model,
     use_temporal_discriminator = config.opt.use_temporal_discriminator if hasattr(config.opt, "use_temporal_discriminator") else False
     use_bone_length_term = config.opt.use_bone_length_term if hasattr(config.opt, 'use_bone_length_term') else False
     bone_length_weight = config.opt.bone_length_weight if hasattr(config.opt, 'bone_length_weight') else None
+    keypoints_per_frame = config.dataset.keypoints_per_frame if hasattr(config.dataset, 'keypoints_per_frame') else False
 
     use_style_decoder = config.model.use_style_decoder if hasattr(config.model, 'use_style_decoder') else False
     use_time_weighted_loss = config.opt.use_time_weighted_loss if hasattr(config.opt, 'use_time_weighted_loss') else False
 
-    use_style_pose_lstm_loss = config.opt.use_style_pose_lstm_loss if hasattr(config.opt, 'use_style_pose_lstm_loss') else False
+    use_style_pose_lstm_loss = config.model.use_style_pose_lstm_loss if hasattr(config.model, 'use_style_pose_lstm_loss') else False
     if use_style_pose_lstm_loss:
         style_pose_lstm_loss_weight = config.opt.style_pose_lstm_loss_weight if hasattr(config.opt, 'style_pose_lstm_loss_weight') else 0.1
 
@@ -324,12 +325,21 @@ def one_epoch(model,
                 ################
                 # MODEL OUTPUT #   
                 ################
-                keypoints_per_frame = keypoints_3d_pred.shape[:-2].numel() == batch_size*dt
-
-
                 if keypoints_per_frame:
+                    assert keypoints_3d_pred.dim() == 4 and keypoints_3d_gt.dim() == 4
+
+                    if use_style_pose_lstm_loss:
+                        keypoints_3d_gt = keypoints_3d_gt[:,pivot_index]
+                        keypoints_3d_pred = keypoints_3d_pred[:,0]
+                        keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt[:,pivot_index]
+
+                        auxilary_keypoints_3d_gt = keypoints_3d_gt[:,pivot_index+1:]
+                        auxilary_keypoints_3d_pred = keypoints_3d_pred[:,1:].contiguous()
+                        auxilary_keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt[:,pivot_index+1:]
+
                     keypoints_3d_gt = keypoints_3d_gt.view(-1, *keypoints_3d_gt.shape[-2:])
-                    keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt.view(-1, *keypoints_3d_binary_validity_gt.shape[-2:])
+                    keypoints_3d_pred = keypoints_3d_pred.view(-1, *keypoints_3d_pred.shape[-2:])
+                    keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt.view(-1, *keypoints_3d_binary_validity_gt.shape[-2:])    
 
                 # root-relative coordinates for    
                 # singleview dataset of multiview dataset with singleview setup
@@ -343,8 +353,7 @@ def one_epoch(model,
                 ##################
                 # MSE\MAE loss
                 total_loss = 0.0
-                loss = criterion(keypoints_3d_pred * scale_keypoints_3d, \
-                                 keypoints_3d_gt * scale_keypoints_3d, \
+                loss = criterion((keypoints_3d_pred  - keypoints_3d_gt)*scale_keypoints_3d,
                                  keypoints_3d_binary_validity_gt)
 
                 total_loss += loss
@@ -355,8 +364,13 @@ def one_epoch(model,
                     assert keypoints_per_frame
                     future_keypoints_loss_weight = torch.stack([torch.exp(torch.arange(0,(-dt//2)+1, -1, dtype=torch.float)) \
                                                                 for i in range(batch_size)]).view(batch_size, -1,1,1,1).to(device)
-
-                    total_loss += style_pose_lstm_loss_weight * (loss * future_keypoints_loss_weight)
+                    set_trace()
+                    # check auxilary_keypoints_3d_pred grad_fn
+                    pose_lstm_diff = (auxilary_keypoints_3d_gt - auxilary_keypoints_3d_pred)*scale_keypoints_3d*future_keypoints_loss_weight
+                    pose_lstm_loss = сriterion(pose_lstm_diff, auxilary_keypoints_3d_binary_validity_gt)
+                    weighted_style_pose_lstm_loss = style_pose_lstm_loss_weight * (pose_lstm_loss * future_keypoints_loss_weight)
+                    total_loss += weighted_style_pose_lstm_loss
+                    metric_dict['style_pose_lstm_loss_weighted'].append(weighted_style_pose_lstm_loss.item())
 
 
                 # Bone length loss
@@ -385,7 +399,6 @@ def one_epoch(model,
 
                 # temporal adversarial loss        
                 if use_temporal_discriminator: 
-
                     keypoints_3d_pred_seq = keypoints_3d_pred.view(batch_size, dt, -1)
                     keypoints_3d_gt_seq = keypoints_3d_gt.view(batch_size, dt, -1)
 
@@ -489,7 +502,7 @@ def one_epoch(model,
 
                 # save answers for evalulation
                 if not is_train:
-                    if keypoints_per_frame:
+                    if keypoints_per_frame and keypoints_3d_pred.dim() == 4:
                         keypoints_3d_pred = keypoints_3d_pred.view(batch_size, dt, *keypoints_3d_pred.shape[-2:])[:,pivot_index,...]
                     results['keypoints_3d'].append(keypoints_3d_pred.detach().cpu().numpy())
                     results['indexes'].append(batch['indexes'])
@@ -794,7 +807,6 @@ def main(args):
                 train_sampler.set_epoch(epoch)
 
             print ('Training...')    
-                
             n_iters_total_train = one_epoch(model,
                                             criterion, 
                                             opt, 
@@ -811,7 +823,6 @@ def main(args):
                                             opt_discr=opt_discr)
 
             print ('Validation...')
-
             n_iters_total_val = one_epoch(model, 
                                           criterion, 
                                           opt, 
