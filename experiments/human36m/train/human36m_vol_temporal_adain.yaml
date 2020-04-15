@@ -2,7 +2,7 @@ title: "human36m_vol_temporal_lstm_adain_softmax"
 kind: "human36m"
 vis_freq: 1000
 vis_n_elements: 10
-distributed_train: true
+distributed_train: false
 image_shape: [384, 384]
 visualize: false
 
@@ -51,16 +51,16 @@ model:
   f2v_type: 'v2v'
   f2v_normalization_type: 'group_norm'
   
-  use_style_decoder: true
+  use_style_decoder: false
   style_decoder_type: 'lstm'
+  style_decoder_hidden_dim: 128
+  style_pose_lstm_hidden_dim: 64
   use_style_pose_lstm_loss: true
 
-  use_motion_extractor: false
-  motion_extractor_type: 'c3d'
-  motion_extractor_path: './data/c3d.pickle'
-  motion_extractor_from: 'rgb'
-  poolings: 5 # max: 5. rgb - 5, features - 3
-  n_layers: 3 
+  # use_motion_extractor: false
+  # motion_extractor_type: 'c3d'
+  # motion_extractor_path: './data/c3d.pickle'
+  # motion_extractor_from: 'rgb'
 
   f2v_intermediate_channels: 512
   style_vector_dim: 64
@@ -138,23 +138,6 @@ model:
     use_skip_connection: false
     skip_block_type: 'Res3DBlock'
     skip_block_adain: false
-
-    #               # first should be Res3DBlock
-    # downsampling: [{'module_type': 'Res3DBlock', 'params':[256,128], 'adain': false},
-    #               {'module_type': 'Pool3DBlock', 'params': [[1,2,2]], 'adain': false}, # pool
-    #               {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
-    #               {'module_type': 'Pool3DBlock', 'params': [[1,2,2]], 'adain': false}, # pool
-    #               {'module_type': 'Res3DBlock', 'params':[128,256], 'adain': false},
-    #               {'module_type': 'Pool3DBlock', 'params': [[1,2,2]], 'adain': false} # pool
-    #               ]
-
-    # bottleneck: [{'module_type': 'Res3DBlock', 'params': [256,256], 'adain': false} ] 
-
-    # upsampling: [{'module_type': 'Res3DBlock', 'params':[256,128], 'adain': false},
-    #               {'module_type': 'Res3DBlock', 'params':[128,64], 'adain': false},
-    #               {'module_type': 'Res3DBlock', 'params':[64,64], 'adain': false}]
-    #               # last should be Res3DBlock
-    #               # out 32x(dt-1)x12x12 
 
                       # first should be Res3DBlock
     downsampling: [{'module_type': 'Res3DBlock', 'params':[256,128], 'adain': false},

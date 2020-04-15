@@ -87,7 +87,7 @@ def get_capacity(model):
 
 def description(model):
     for k, m in model._modules.items():
-        print ('{}:  {}M params'.format(k,get_capacity(m)))
+        print ('{}:  {}M'.format(k,get_capacity(m)))
 
 
 def get_start_stop_frame_indxs(labels):

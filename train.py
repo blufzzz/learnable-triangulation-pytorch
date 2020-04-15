@@ -24,7 +24,7 @@ from torch.nn.parallel import DistributedDataParallel
 from tensorboardX import SummaryWriter
 
 from mvn.models.triangulation import VolumetricTriangulationNet
-from mvn.models.volumetric_adain import VolumetricTemporalAdaINNet, VolumetricTemporalFRAdaINNet
+from mvn.models.volumetric_adain import VolumetricTemporalAdaINNet
 from mvn.models.volumetric_lstm import VolumetricTemporalLSTM
 from mvn.models.volumetric_grid import VolumetricTemporalGridDeformation
 from mvn.models.temporal import Seq2VecCNN
@@ -281,13 +281,15 @@ def one_epoch(model,
                     print("Found None batch at iter {}, continue...".format(iter_i))
                     continue
 
+                # set_trace()
+                torch.cuda.empty_cache()
                 (images_batch, 
                 keypoints_3d_gt, 
                 keypoints_3d_validity_gt, 
                 proj_matricies_batch) = dataset_utils.prepare_batch(batch, device)
 
                 heatmaps_pred, keypoints_2d_pred, cuboids_pred, base_points_pred = None, None, None, None
-
+                
                 if config.model.name == 'vol_temporal_grid':
                     (keypoints_3d_pred, 
                     features_pred, 
@@ -325,21 +327,16 @@ def one_epoch(model,
                 ################
                 # MODEL OUTPUT #   
                 ################
-                if keypoints_per_frame:
-                    assert keypoints_3d_pred.dim() == 4 and keypoints_3d_gt.dim() == 4
+                if use_style_pose_lstm_loss:
+                    assert keypoints_per_frame and isinstance(keypoints_3d_pred, list)
+                    
+                    auxilary_keypoints_3d_gt = keypoints_3d_gt[:,pivot_index+1:]
+                    auxilary_keypoints_3d_pred = keypoints_3d_pred[1]
+                    auxilary_keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt[:,pivot_index+1:]
 
-                    if use_style_pose_lstm_loss:
-                        keypoints_3d_gt = keypoints_3d_gt[:,pivot_index]
-                        keypoints_3d_pred = keypoints_3d_pred[:,0]
-                        keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt[:,pivot_index]
-
-                        auxilary_keypoints_3d_gt = keypoints_3d_gt[:,pivot_index+1:]
-                        auxilary_keypoints_3d_pred = keypoints_3d_pred[:,1:].contiguous()
-                        auxilary_keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt[:,pivot_index+1:]
-
-                    keypoints_3d_gt = keypoints_3d_gt.view(-1, *keypoints_3d_gt.shape[-2:])
-                    keypoints_3d_pred = keypoints_3d_pred.view(-1, *keypoints_3d_pred.shape[-2:])
-                    keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt.view(-1, *keypoints_3d_binary_validity_gt.shape[-2:])    
+                    keypoints_3d_gt = keypoints_3d_gt[:,pivot_index]
+                    keypoints_3d_pred = keypoints_3d_pred[0]
+                    keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt[:,pivot_index]
 
                 # root-relative coordinates for    
                 # singleview dataset of multiview dataset with singleview setup
@@ -361,15 +358,18 @@ def one_epoch(model,
 
                 # lstm temporal pose-style loss
                 if use_style_pose_lstm_loss:
-                    assert keypoints_per_frame
-                    future_keypoints_loss_weight = torch.stack([torch.exp(torch.arange(0,(-dt//2)+1, -1, dtype=torch.float)) \
-                                                                for i in range(batch_size)]).view(batch_size, -1,1,1,1).to(device)
-                    set_trace()
+                    if use_time_weighted_loss:
+                        future_keypoints_loss_weight = torch.stack([torch.exp(torch.arange(0,(-dt//2)+1, -1, dtype=torch.float)) \
+                                                                    for i in range(batch_size)]).view(batch_size, -1,1,1).to(device)
+                    else:
+                        future_keypoints_loss_weight = 1.    
                     # check auxilary_keypoints_3d_pred grad_fn
                     pose_lstm_diff = (auxilary_keypoints_3d_gt - auxilary_keypoints_3d_pred)*scale_keypoints_3d*future_keypoints_loss_weight
-                    pose_lstm_loss = сriterion(pose_lstm_diff, auxilary_keypoints_3d_binary_validity_gt)
-                    weighted_style_pose_lstm_loss = style_pose_lstm_loss_weight * (pose_lstm_loss * future_keypoints_loss_weight)
+                    validity = auxilary_keypoints_3d_binary_validity_gt.view(-1, *auxilary_keypoints_3d_binary_validity_gt.shape[-2:])
+                    pose_lstm_loss = criterion(pose_lstm_diff.view(-1, *pose_lstm_diff.shape[-2:]), validity)
+                    weighted_style_pose_lstm_loss = style_pose_lstm_loss_weight * pose_lstm_loss
                     total_loss += weighted_style_pose_lstm_loss
+
                     metric_dict['style_pose_lstm_loss_weighted'].append(weighted_style_pose_lstm_loss.item())
 
 
@@ -441,7 +441,6 @@ def one_epoch(model,
                     total_loss += style_decoder_loss * style_decoder_loss_weight
                     metric_dict['style_decoder_loss_weighted'].append(style_decoder_loss.item()*style_decoder_loss_weight)
 
-
                 ############
                 # BACKWARD #   
                 ############
@@ -465,7 +464,7 @@ def one_epoch(model,
 
                     opt.step()
 
-                
+
                 ###########
                 # METRICS #   
                 ###########
@@ -503,14 +502,14 @@ def one_epoch(model,
                 # save answers for evalulation
                 if not is_train:
                     if keypoints_per_frame and keypoints_3d_pred.dim() == 4:
-                        keypoints_3d_pred = keypoints_3d_pred.view(batch_size, dt, *keypoints_3d_pred.shape[-2:])[:,pivot_index,...]
+                        keypoints_3d_pred = keypoints_3d_pred.view(batch_size, -1, *keypoints_3d_pred.shape[-2:])[:,pivot_index]
                     results['keypoints_3d'].append(keypoints_3d_pred.detach().cpu().numpy())
                     results['indexes'].append(batch['indexes'])
                 
                 #################
                 # VISUALIZATION #   
                 #################        
-                if master:
+                if master and MAKE_EXPERIMENT_DIR:
                     if n_iters_total % config.vis_freq == 0 and visualize:
                         vis_kind = config.kind
                         if (transfer_cmu_to_human36m):
@@ -596,16 +595,18 @@ def one_epoch(model,
             except Exception as e:
                 print("Failed to evaluate. Reason: ", e)
             
-            checkpoint_dir = os.path.join(experiment_dir, "checkpoints", "{:04}".format(epoch))
-            os.makedirs(checkpoint_dir, exist_ok=True)
+            if MAKE_EXPERIMENT_DIR:
+                checkpoint_dir = os.path.join(experiment_dir, "checkpoints", "{:04}".format(epoch))
+                os.makedirs(checkpoint_dir, exist_ok=True)
 
-            # dump results
-            with open(os.path.join(checkpoint_dir, "results.pkl"), 'wb') as fout:
-                pickle.dump(results, fout)
+                # dump results
+                with open(os.path.join(checkpoint_dir, "results.pkl"), 'wb') as fout:
+                    pickle.dump(results, fout)
 
         # dump to tensorboard per-epoch stats
-        for title, value in metric_dict.items():
-            writer.add_scalar(f"{name}/{title}_epoch", np.mean(value), epoch)
+        if MAKE_EXPERIMENT_DIR:
+            for title, value in metric_dict.items():
+                writer.add_scalar(f"{name}/{title}_epoch", np.mean(value), epoch)
 
     return n_iters_total
 
@@ -645,14 +646,16 @@ def main(args):
     use_temporal_discriminator  = config.opt.use_temporal_discriminator if \
                                      hasattr(config.opt, "use_temporal_discriminator") else False  
     save_model = config.opt.save_model if hasattr(config.opt, "save_model") else True
-
+    
     model = {
         "vol": VolumetricTriangulationNet,
         "vol_temporal_adain":VolumetricTemporalAdaINNet,
         "vol_temporal_grid": VolumetricTemporalGridDeformation,
-        "vol_temporal_lstm": VolumetricTemporalLSTM,
-        "vol_temporal_fr_adain": VolumetricTemporalFRAdaINNet
+        "vol_temporal_lstm": VolumetricTemporalLSTM
     }[config.model.name](config, device=device).to(device)
+
+
+
 
     if config.model.init_weights:
         state_dict = torch.load(config.model.checkpoint)['model_state']
@@ -669,7 +672,7 @@ def main(args):
     if config.opt.criterion == "MSESmooth":
         criterion = criterion_class(config.opt.mse_smooth_threshold)
     else:
-        criterion = criterion_class()
+        criterion = criterion_class()    
 
     # optimizer
     opt = None
@@ -687,7 +690,7 @@ def main(args):
                 lr=config.opt.lr
             )
 
-        elif config.model.name in ["vol_temporal_adain", "vol_temporal_fr_adain"]:
+        elif config.model.name == "vol_temporal_adain":
             opt = torch.optim.Adam(
                 [{'params': model.backbone.parameters()},
                  {'params': model.process_features.parameters(), 
@@ -792,7 +795,7 @@ def main(args):
     experiment_dir, writer = None, None
     if master and MAKE_EXPERIMENT_DIR: 
         experiment_dir, writer = setup_experiment(config, type(model).__name__, is_train=not args.eval)
-        print ('Experiment in logdir:', args.logdir)    
+        print ('EXPERIMENT IN LOGDIR:', args.logdir)    
         
     # multi-gpu
     if is_distributed:
@@ -807,6 +810,8 @@ def main(args):
                 train_sampler.set_epoch(epoch)
 
             print ('Training...')    
+            # set_trace()
+            # time.sleep(15) 
             n_iters_total_train = one_epoch(model,
                                             criterion, 
                                             opt, 

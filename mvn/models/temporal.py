@@ -45,6 +45,7 @@ class FeatureDecoderLSTM(nn.Module):
         
         hx_init = torch.zeros(1, self.hidden_dim, 96, 96).cuda()
         cx_init = self.style2cell_state(style_vector).squeeze(2)
+        # set_trace()
         output = []
         for i in range(time):
             
@@ -59,12 +60,25 @@ class FeatureDecoderLSTM(nn.Module):
         output = torch.stack(output,1)
         return output
         
-  # use_style_pose_lstm_loss: false
-  # style_pose_lstm_loss_weight: 0.01
-  # style_pose_lstm_decoder_lr: 0.001
+
 
 class StylePosesLSTM(nn.Module):
-    def __init__(self, style_vector_dim, style_shape, pose_space=17, hidden_dim=128, volume_size=32, time=5, n_layers = 3):
+
+    '''
+    use_style_pose_lstm_loss: true
+    style_pose_lstm_loss_weight: 0.01
+    style_pose_lstm_decoder_lr: 0.001
+    '''
+
+    def __init__(self, 
+                style_vector_dim,
+                style_shape, 
+                pose_space=17, 
+                hidden_dim=128, 
+                volume_size=32, 
+                time=5, 
+                n_layers=3):
+
         super().__init__()
         self.style_vector_dim = style_vector_dim
         self.pose_space = pose_space
@@ -111,6 +125,7 @@ class StylePosesLSTM(nn.Module):
                                 self.volume_size).cuda()
 
         cx_init = self.style2cell_state(style_vector)
+        # set_trace()
         output = []
         for i in range(time):
             

@@ -399,14 +399,13 @@ class V2VModel(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
 
-
-
 class C3D(nn.Module):
-    def __init__(self, poolings=5, n_layers=5):
+    def __init__(self, device, output_channels, poolings=5, n_layers=5, weights_path='./data/c3d.pickle'):
         super(C3D, self).__init__()
 
         self.poolings = poolings
         self.n_layers = n_layers
+        self.output_channels = output_channels
 
         assert self.n_layers >= 1
 
@@ -439,6 +438,20 @@ class C3D(nn.Module):
                 self.pool5 = nn.MaxPool3d(kernel_size=(1, 2, 2), stride=(1, 2, 2))
 
         self.relu = get_activation(ACTIVATION_TYPE)()
+
+        last_layer_channels = {1:64, 2:128, 3:256, 4:512, 5:512}[self.n_layers]
+
+        self.final_layer = nn.Conv3d(last_layer_channels, self.output_channels)
+
+        weights_dict = torch.load(weights_path, map_location=device)
+        model_dict = self.state_dict()
+        new_pretrained_state_dict = {}
+        for k, v in weights_dict.items():
+            if k in model_dict:
+                new_pretrained_state_dict[k] = weights_dict[k]
+            else:    
+                print (k, 'hasnt been loaded in C3D')
+        self.load_state_dict(new_pretrained_state_dict)
 
     def forward(self, x):
 
@@ -475,9 +488,29 @@ class C3D(nn.Module):
 
 class R2D(nn.Module):
 
-    def __init__(self, device, normalization_type):
+    def __init__(self, device, style_vector_dim, normalization_type, n_r2d_layers, output_volume_dim, time):
 
         super().__init__()
+
+        assert n_r2d_layers >= 1
+        assert output_volume_dim in [2,3]
+
+        self.output_volume_dim = output_volume_dim
+        self.n_r2d_layers = n_r2d_layers
+        self.style_vector_dim = style_vector_dim
+        self.normalization_type = normalization_type
+        self.output_features = {2:128,
+                                3:256,
+                                4:512}[n_r2d_layers]
+
+        x_kernel_size = 1
+        if self.output_volume_dim == 2:
+            x_kernel_size = {2:{3:2, 4:2, 5:3, 6:3, 7:4, 8:4, 9:5},
+                             3:{3:1, 4:1, 5:2, 6:2, 7:2, 8:2, 9:3}}[n_r2d_layers][time]
+
+        self.final_layer = nn.Sequential(nn.Conv3d(self.output_features, 
+                                                    self.style_vector_dim, 
+                                                    kernel_size=(x_kernel_size, 1,1)))
                     
         weights_path = './data/r2plus1d_34_clip8_ig65m_from_scratch-9bae36ae.pth'
 
@@ -485,19 +518,17 @@ class R2D(nn.Module):
                                         conv_makers=[Conv2Plus1D] * 4,
                                         layers=[3, 4, 6, 3], # [3,4,6,3]
                                         stem=R2Plus1dStem)
-        model.layer2[0].conv2[0] = Conv2Plus1D(128, 128, 288)
-        model.layer3[0].conv2[0] = Conv2Plus1D(256, 256, 576)
-        model.layer4[0].conv2[0] = Conv2Plus1D(512, 512, 1152)
+
+        model.layer2[0].conv2[0] = Conv2Plus1D(128, 128, 288) # 128
+        model.layer3[0].conv2[0] = Conv2Plus1D(256, 256, 576) # 256
+        model.layer4[0].conv2[0] = Conv2Plus1D(512, 512, 1152) # 512
 
         self.motion_extractor = nn.Sequential(OrderedDict([
                                   ('stem', model.stem), 
-                                  ('layer1', model.layer1), 
-                                  ('layer2', model.layer2),
-                                  ('layer3', model.layer3)
+                                  *[(f'layer{i}', model._modules[f'layer{i}']) for i in range(1,n_r2d_layers+1)]
                                   ]))
 
-
-        weights_dict = torch.load(weights_path, map_location=device)
+        weights_dict = torch.load(weights_path) # , map_location=device
         model_dict = self.motion_extractor.state_dict()
         new_pretrained_state_dict = {}
 
@@ -525,5 +556,8 @@ class R2D(nn.Module):
         # output: torch.Size([batch, 256, f(time), 14, 14])
         
         x = self.motion_extractor(x)
+        x = self.final_layer(x)
+        if self.output_volume_dim == 2:
+            x = x.squeeze(-3)
 
         return x    

@@ -1,19 +1,20 @@
 #!/bin/bash
-srun -p TitanBlack --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-03 \
+srun -p TitanBlack --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-05 \
 python3.6 train.py \
 --logdir=../logs/resnet_50_3d \
 --config=./experiments/human36m/train/human36m_vol_temporal_adain.yaml \
---experiment_comment='h36_sv32_dist_spade3d-128-interpolate-gn-bn-conf-leakyrelu_s2v-v2v-256-128-64-64-gn-decoder-lstm-w1e-3-timeweight-exp_vf64_f2v-features-C0-256_resnet50-gn-nostylegrad_dt-11-intermediate_dil-3-1-1_lr-1e-4_norot_gradclip-1e-2_style-pose-lstm-1e-1'
-
+--experiment_comment='h36_sv32_dist_spade3d-128-interpolate-gn-bn-conf-LR-64_s2v-v2v-gn-64_SPL-lstm-w1e-1_EXP-weight_F-C0-256_R50-gn-nostylegrad_dt-11-inter_dil-3_bs1-1_lr-1e-4_norot_gradclip-1e-2'
 
 # DECODER
+# --experiment_comment='h36_sv32_dist_spade3d-128-interpolate-gn-bn-conf-LR-64_s2v-v2v-gn-64_FD-lstm-w1e-3_SPL-lstm-w1e-1_EXP-weight_F-C0-256_R50-gn-nostylegrad_dt-11-inter_dil-3_bs1-1_lr-1e-4_norot_gradclip-1e-2'
+
 # --experiment_comment='h36_sv32_dist_spade3d-128-interpolate-gn-bn-conf-leakyrelu_s2v-v2v-256-128-64-64-gn-decoder-lstm-w1e-3-timeweight-exp_vf64_f2v-features-C0-256_resnet50-gn-nostylegrad_dt-11-intermediate_dil-3-1-1_lr-1e-4_norot_gradclip-1e-2'
 
 
 # ME
+# --experiment_comment='h36_sv32_dist_spade3d-h128-interpolate-gn-bn-conf-leakyrelu_s2v-R2D-3l-RGB-112-64-1e-4_vf64_resnet50-gn_dt-10_dil-1_bs1-1_lr-1e-4_norot_gradclip-1e-2'
 # h36_sv32_dist_spade3d-h64-interpolate-gn_s2v-C3D-3l-5p-Sports1M-RGB-32-1e-4_vf32_resnet50-gn_dt-6_dil-3-1-1_lr-1e-4_no-rot
 # h36_sv32_dist_stack3d-interpolate-gn_s2v-C3D-3l-5p-Sports1M-RGB-32-1e-4_vf32_resnet50-gn_dt-6_dil-3-1-1_lr-1e-4_no-rot
-
 
 # FR
 #--experiment_comment="h36_sv32_dist_FR-spade64-all-interpolate-gn_s2v-lstm2d-256-256-32-gn_vf32_f2v-features-noupscale-C0-256-group_resnet50-gn-stylegrad_dt-8_dil-3-1-1_lr-1e-4"
