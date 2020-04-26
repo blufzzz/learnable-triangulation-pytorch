@@ -217,7 +217,7 @@ def one_epoch(model,
               writer=None, 
               discriminator=None, 
               opt_discr=None):
-
+    
     name = "train" if is_train else "val"
     model_type = config.model.name
     silence = config.opt.silence if hasattr(config.opt, 'silence') else False
@@ -238,6 +238,7 @@ def one_epoch(model,
     keypoints_per_frame = config.dataset.keypoints_per_frame if hasattr(config.dataset, 'keypoints_per_frame') else False
 
     use_style_decoder = config.model.use_style_decoder if hasattr(config.model, 'use_style_decoder') else False
+    decoder_loss_with_next_features = config.model.decoder_loss_with_next_features if hasattr(config.model, 'decoder_loss_with_next_features') else True
     use_time_weighted_loss = config.opt.use_time_weighted_loss if hasattr(config.opt, 'use_time_weighted_loss') else False
 
     use_style_pose_lstm_loss = config.model.use_style_pose_lstm_loss if hasattr(config.model, 'use_style_pose_lstm_loss') else False
@@ -277,19 +278,21 @@ def one_epoch(model,
                 # measure data loading time
                 data_time.update(time.time() - end)
 
+                # print (f'iter = {iter_i}')
                 if batch is None:
                     print("Found None batch at iter {}, continue...".format(iter_i))
-                    continue
+                    continue 
 
-                # set_trace()
-                torch.cuda.empty_cache()
+                debug = False #(iter_i >= 23) 
+                if debug:
+                    set_trace()   
                 (images_batch, 
                 keypoints_3d_gt, 
                 keypoints_3d_validity_gt, 
                 proj_matricies_batch) = dataset_utils.prepare_batch(batch, device)
 
                 heatmaps_pred, keypoints_2d_pred, cuboids_pred, base_points_pred = None, None, None, None
-                
+
                 if config.model.name == 'vol_temporal_grid':
                     (keypoints_3d_pred, 
                     features_pred, 
@@ -310,7 +313,7 @@ def one_epoch(model,
                     base_points_pred,
                     style_vector,
                     unproj_features,
-                    decoded_features) = model(images_batch, batch) 
+                    decoded_features) = model(images_batch, batch, debug=debug) 
 
                 else:    
                     (keypoints_3d_pred, 
@@ -322,7 +325,9 @@ def one_epoch(model,
                     base_points_pred) = model(images_batch, batch)            
                     
                 batch_size, dt = images_batch.shape[:2]
-                keypoints_3d_binary_validity_gt = (keypoints_3d_validity_gt > 0.0).type(torch.float32)                
+                keypoints_3d_binary_validity_gt = (keypoints_3d_validity_gt > 0.0).type(torch.float32)
+                keypoints_shape = keypoints_3d_pred.shape[-2:]           
+
 
                 ################
                 # MODEL OUTPUT #   
@@ -338,12 +343,18 @@ def one_epoch(model,
                     keypoints_3d_pred = keypoints_3d_pred[0]
                     keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt[:,pivot_index]
 
-                # root-relative coordinates for    
-                # singleview dataset of multiview dataset with singleview setup
                 if singleview_dataset:
                     coord_volumes_pred = coord_volumes_pred - base_points_pred.unsqueeze(1).unsqueeze(1).unsqueeze(1)
                     keypoints_3d_gt = op.root_centering(keypoints_3d_gt, config.kind)
                     keypoints_3d_pred = op.root_centering(keypoints_3d_pred, config.kind)
+                    if use_style_pose_lstm_loss:
+                        auxilary_keypoints_3d_gt = op.root_centering(auxilary_keypoints_3d_gt.view(-1, *keypoints_shape),
+                                                                     config.kind)
+                        auxilary_keypoints_3d_pred = op.root_centering(auxilary_keypoints_3d_pred.view(-1, *keypoints_shape), 
+                                                                       config.kind)
+                        auxilary_keypoints_3d_gt = auxilary_keypoints_3d_gt.view(batch_size, -1, *keypoints_shape)
+                        auxilary_keypoints_3d_pred = auxilary_keypoints_3d_pred.view(batch_size, -1, *keypoints_shape)
+
 
                 ##################
                 # CALCULATE LOSS #   
@@ -463,7 +474,6 @@ def one_epoch(model,
                                                                   model.named_parameters()), silence=silence))
 
                     opt.step()
-
 
                 ###########
                 # METRICS #   
@@ -810,8 +820,6 @@ def main(args):
                 train_sampler.set_epoch(epoch)
 
             print ('Training...')    
-            # set_trace()
-            # time.sleep(15) 
             n_iters_total_train = one_epoch(model,
                                             criterion, 
                                             opt, 

@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import os
 
 from mvn.utils.img import image_batch_to_torch
 
@@ -72,7 +73,91 @@ def prepare_batch(batch, device):
     keypoints_3d_validity_batch_gt = torch.from_numpy(np.stack(batch['keypoints_3d'], axis=0)[..., 3:]).float().to(device)
 
     # projection matricies
-    proj_matricies_batch = torch.stack([torch.stack([torch.from_numpy(camera.projection) for camera in camera_batch], dim=0) for camera_batch in batch['cameras']], dim=0).transpose(1, 0)  # shape (batch_size, n_views, 3, 4)
+    proj_matricies_batch = torch.stack([torch.stack([torch.from_numpy(camera.projection) for camera in \
+                             camera_batch], dim=0) for camera_batch in \
+                                batch['cameras']], dim=0).transpose(1, 0)  # shape (batch_size, n_views, 3, 4)
+    
     proj_matricies_batch = proj_matricies_batch.float().to(device)
 
     return images_batch, keypoints_3d_batch_gt, keypoints_3d_validity_batch_gt, proj_matricies_batch
+
+
+
+# Loading utilities
+def load_objects(obj_root):
+    object_names = ['juice_bottle', 'liquid_soap', 'milk', 'salt']
+    all_models = {}
+    for obj_name in object_names:
+        obj_path = os.path.join(obj_root, '{}_model'.format(obj_name),
+                                '{}_model.ply'.format(obj_name))
+        mesh = trimesh.load(obj_path)
+        all_models[obj_name] = {
+            'verts': np.array(mesh.vertices),
+            'faces': np.array(mesh.faces)
+        }
+    return all_models
+
+
+def get_skeleton(sample, skel_root):
+    skeleton_path = os.path.join(skel_root, sample['subject'],
+                                 sample['action_name'], sample['seq_idx'],
+                                 'skeleton.txt')
+    print('Loading skeleton from {}'.format(skeleton_path))
+    skeleton_vals = np.loadtxt(skeleton_path)
+    skeleton = skeleton_vals[:, 1:].reshape(skeleton_vals.shape[0], 21,
+                                            -1)[sample['frame_idx']]
+    return skeleton
+
+
+def get_obj_transform(sample, obj_root):
+    seq_path = os.path.join(obj_root, sample['subject'], sample['action_name'],
+                            sample['seq_idx'], 'object_pose.txt')
+    with open(seq_path, 'r') as seq_f:
+        raw_lines = seq_f.readlines()
+    raw_line = raw_lines[sample['frame_idx']]
+    line = raw_line.strip().split(' ')
+    trans_matrix = np.array(line[1:]).astype(np.float32)
+    trans_matrix = trans_matrix.reshape(4, 4).transpose()
+    print('Loading obj transform from {}'.format(seq_path))
+    return trans_matrix
+
+
+# Display utilities
+def visualize_joints_2d(ax, joints, joint_idxs=True, links=None, alpha=1):
+    """Draw 2d skeleton on matplotlib axis"""
+    if links is None:
+        links = [(0, 1, 2, 3, 4), (0, 5, 6, 7, 8), (0, 9, 10, 11, 12),
+                 (0, 13, 14, 15, 16), (0, 17, 18, 19, 20)]
+    # Scatter hand joints on image
+    x = joints[:, 0]
+    y = joints[:, 1]
+    ax.scatter(x, y, 1, 'r')
+
+    # Add idx labels to joints
+    for row_idx, row in enumerate(joints):
+        if joint_idxs:
+            plt.annotate(str(row_idx), (row[0], row[1]))
+    _draw2djoints(ax, joints, links, alpha=alpha)
+
+
+def _draw2djoints(ax, annots, links, alpha=1):
+    """Draw segments, one color per link"""
+    colors = ['r', 'm', 'b', 'c', 'g']
+
+    for finger_idx, finger_links in enumerate(links):
+        for idx in range(len(finger_links) - 1):
+            _draw2dseg(
+                ax,
+                annots,
+                finger_links[idx],
+                finger_links[idx + 1],
+                c=colors[finger_idx],
+                alpha=alpha)
+
+
+def _draw2dseg(ax, annot, idx1, idx2, c='r', alpha=1):
+    """Draw segment of given color"""
+    ax.plot(
+        [annot[idx1, 0], annot[idx2, 0]], [annot[idx1, 1], annot[idx2, 1]],
+        c=c,
+        alpha=alpha)

@@ -125,7 +125,6 @@ class StylePosesLSTM(nn.Module):
                                 self.volume_size).cuda()
 
         cx_init = self.style2cell_state(style_vector)
-        # set_trace()
         output = []
         for i in range(time):
             

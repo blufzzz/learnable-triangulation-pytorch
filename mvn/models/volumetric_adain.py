@@ -6,6 +6,7 @@ import sys
 import torch
 from torch import nn
 import torch.nn.functional as F
+import os
 
 
 from mvn.models import pose_resnet, pose_hrnet
@@ -138,15 +139,21 @@ class VolumetricTemporalAdaINNet(nn.Module):
         if self.use_motion_extractor:
             if self.motion_extractor_type == 'r2d':
                 n_r2d_layers = config.model.n_r2d_layers if hasattr(config.model, 'n_r2d_layers') else 2
-                output_volume_dim = {'unprojecting':2,
-                                     'interpolate':3}[self.spade_broadcasting_type]
+                upscale_me_heatmap = config.model.upscale_me_heatmap if hasattr(config.model, 'upscale_me_heatmap') else False
+                
+                if hasattr(config.model, 'output_volume_dim'):
+                    output_volume_dim = config.model.output_volume_dim
+                else:    
+                    output_volume_dim = {'unprojecting':2,
+                                         'interpolate':3}[self.spade_broadcasting_type]
                 time = self.dt-1 if self.pivot_type == 'first' else self.dt//2
                 self.motion_extractor = R2D(device,
                                             self.style_vector_dim, 
                                             self.f2v_normalization_type, 
                                             n_r2d_layers, 
                                             output_volume_dim,
-                                            time=time)
+                                            time=time,
+                                            upscale_heatmap=upscale_me_heatmap)
             else:
                 raise RuntimeError('Wrong motion_extractor_type') 
         
@@ -241,45 +248,53 @@ class VolumetricTemporalAdaINNet(nn.Module):
                 images_batch, 
                 batch, 
                 randomize_style=False, 
-                const_style_vector=False):
+                const_style_vector=False,
+                return_me_vector = False,
+                debug=False):
 
         device = images_batch.device
         batch_size, dt = images_batch.shape[:2]
         image_shape = images_batch.shape[-2:]
         assert self.dt == dt
 
+        backbone_indexes = self.dt
+
+        if debug:
+            set_trace()
         ######################
         # FEATURE ECTRACTION #   
         ######################
         if self.use_auxilary_backbone:
+            raise RuntimeError
+            # pivot_images_batch = images_batch[:,self.pivot_index,...]
+            # aux_images_batch = images_batch if self.include_pivot else images_batch[:,self.aux_indexes,...].contiguous()
+            # aux_images_batch = aux_images_batch.view(-1, 3, *image_shape)
 
-            pivot_images_batch = images_batch[:,self.pivot_index,...]
-            aux_images_batch = images_batch if self.include_pivot else images_batch[:,self.aux_indexes,...].contiguous()
-            aux_images_batch = aux_images_batch.view(-1, 3, *image_shape)
+            # aux_heatmaps, aux_features, _, _, aux_bottleneck = self.auxilary_backbone(aux_images_batch)
+            # pivot_heatmaps, pivot_features, _, _, pivot_bottleneck = self.backbone(pivot_images_batch)
 
-            aux_heatmaps, aux_features, _, _, aux_bottleneck = self.auxilary_backbone(aux_images_batch)
-            pivot_heatmaps, pivot_features, _, _, pivot_bottleneck = self.backbone(pivot_images_batch)
+            # features_shape = pivot_features.shape[-2:]
+            # features_channels = pivot_features.shape[1]
+            # bottleneck_shape = aux_bottleneck.shape[-2:]
+            # bottleneck_channels = aux_bottleneck.shape[1]
 
-            features_shape = pivot_features.shape[-2:]
-            features_channels = pivot_features.shape[1]
-            bottleneck_shape = aux_bottleneck.shape[-2:]
-            bottleneck_channels = aux_bottleneck.shape[1]
+            # original_pivot_features = pivot_features.clone().detach()
+            # pivot_features = self.process_features(pivot_features).unsqueeze(1)
 
-            original_pivot_features = pivot_features.clone().detach()
-            pivot_features = self.process_features(pivot_features).unsqueeze(1)
+            # if self.use_style_decoder or self.use_style_pose_lstm_loss:
+            #     aux_features = aux_features.view(batch_size, -1, *aux_features.shape[-3:])
+            #     aux_features = aux_features[:,:dt//2].contiguous()
+            #     features_for_loss = aux_features[:,dt//2:].clone().detach()
 
-            if self.use_style_decoder or self.use_style_pose_lstm_loss:
-                aux_features = aux_features.view(batch_size, -1, *aux_features.shape[-3:])
-                aux_features = aux_features[:,:dt//2].contiguous()
-                features_for_loss = aux_features[:,dt//2:].clone().detach()
-
-            if aux_features is not None:
-                aux_features = aux_features.view(-1, *aux_features.shape[-3:])
+            # if aux_features is not None:
+            #     aux_features = aux_features.view(-1, *aux_features.shape[-3:])
 
         else:    
             # forward backbone
             heatmaps, features, _, vol_confidences, bottleneck = self.backbone(images_batch.view(-1, 3, *image_shape))
 
+            if debug:
+                set_trace()
             # extract aux_features
             features_shape = features.shape[-2:]
             features_channels = features.shape[1]
@@ -290,6 +305,8 @@ class VolumetricTemporalAdaINNet(nn.Module):
             pivot_features = self.process_features(pivot_features).unsqueeze(1)
             aux_features = features if self.include_pivot else features[:,self.aux_indexes,...].contiguous()
 
+            if debug:
+                set_trace()
             if self.use_style_decoder or self.use_style_pose_lstm_loss:
                 aux_features = aux_features[:,:dt//2,...].contiguous()
                 features_for_loss = features[:,(dt//2)+1:,...].clone().detach()
@@ -301,10 +318,12 @@ class VolumetricTemporalAdaINNet(nn.Module):
             bottleneck = bottleneck.view(batch_size, dt, bottleneck_channels, *bottleneck_shape)
             aux_bottleneck = bottleneck if self.include_pivot else bottleneck[:,self.aux_indexes,...].contiguous()
             aux_bottleneck = aux_bottleneck.view(-1, bottleneck_channels, *bottleneck_shape)   
-
+            
         proj_matricies_batch = update_camera(batch, batch_size, image_shape, features_shape, dt, device)
         proj_matricies_batch = proj_matricies_batch[:,self.pivot_index,...].unsqueeze(1) # pivot camera 
 
+        if debug:
+            set_trace()
         ###############################
         # TEMPORAL FEATURE ECTRACTION #   
         ###############################
@@ -314,7 +333,10 @@ class VolumetricTemporalAdaINNet(nn.Module):
                 if self.resize_images_for_me:
                     aux_images = F.interpolate(aux_images.view(-1, 3, *image_shape),size=self.images_me_target_size,  mode='bilinear')
                     aux_images = aux_images.view(batch_size, -1, 3, *self.images_me_target_size)
-                style_vector = self.motion_extractor(aux_images.transpose(1,2))
+                if return_me_vector:    
+                    style_vector, style_vector_me  = self.motion_extractor(aux_images.transpose(1,2), return_me_vector=return_me_vector)
+                else:
+                    style_vector  = self.motion_extractor(aux_images.transpose(1,2), return_me_vector=False)
             elif self.motion_extractor_from == 'features':
                 style_vector = self.motion_extractor(aux_features.view(batch_size,
                                                                         -1, # time
@@ -342,9 +364,9 @@ class VolumetricTemporalAdaINNet(nn.Module):
                 # encoded_features = torch.transpose(encoded_features.unsqueeze(-1), 1,5).squeeze(1) # make time-dimension new z-coordinate
                 encoded_features = torch.transpose(encoded_features, 1,2) # [batch_size, encoded_fetures_dim[0], dt-1, encoded_fetures_dim[1:]]
             style_vector = self.features_sequence_to_vector(encoded_features, device=device) # [batch_size, style_vector_dim]
-
-        set_trace()    
         
+        if debug:
+            set_trace()
         #########
         # DEBUG #   
         #########
@@ -354,6 +376,7 @@ class VolumetricTemporalAdaINNet(nn.Module):
         if const_style_vector:
             if self.STYLE_VECTOR_CONST is None:
                 self.STYLE_VECTOR_CONST = style_vector.data
+                print ('STYLE_VECTOR_CONST INITED')
             else:
                 style_vector = torch.tensor(self.STYLE_VECTOR_CONST).to(device)
                     
@@ -366,6 +389,9 @@ class VolumetricTemporalAdaINNet(nn.Module):
         else:
             raise RuntimeError('In absence of precalculated pelvis or gt pelvis, self.use_volumetric_pelvis should be True') 
         
+
+        if debug:
+            set_trace()    
         #####################
         # VOLUMES CREATING  #   
         #####################    
@@ -383,6 +409,8 @@ class VolumetricTemporalAdaINNet(nn.Module):
             coord_volumes = coord_volumes[:,self.pivot_index,...]
             base_points = base_points[:,self.pivot_index,...]
 
+        if debug:
+            set_trace()      
         # lift each feature-map to distinct volume and aggregate 
         unproj_features = unproject_heatmaps(pivot_features,  
                                             proj_matricies_batch, 
@@ -390,21 +418,23 @@ class VolumetricTemporalAdaINNet(nn.Module):
                                             volume_aggregation_method=self.volume_aggregation_method,
                                             vol_confidences=vol_confidences
                                             )
+        if not self.temporal_condition_type == 'adain':
+            if self.spade_broadcasting_type == 'unprojecting':
+                    style_vector_volumes = unproject_heatmaps(style_vector.unsqueeze(1),  
+                                                             proj_matricies_batch, 
+                                                             coord_volumes, 
+                                                             volume_aggregation_method=self.volume_aggregation_method,
+                                                             vol_confidences=vol_confidences
+                                                             )
+            elif self.spade_broadcasting_type == 'interpolate':
+                style_vector_volumes = F.interpolate(style_vector,
+                                                     size=(self.volume_size,self.volume_size,self.volume_size), 
+                                                     mode='trilinear')
+            else:
+                raise KeyError('Unknown spade_broadcasting_type')
 
-        if self.spade_broadcasting_type == 'unprojecting':
-                style_vector_volumes = unproject_heatmaps(style_vector.unsqueeze(1),  
-                                                         proj_matricies_batch, 
-                                                         coord_volumes, 
-                                                         volume_aggregation_method=self.volume_aggregation_method,
-                                                         vol_confidences=vol_confidences
-                                                         )
-        elif self.spade_broadcasting_type == 'interpolate':
-            style_vector_volumes = F.interpolate(style_vector,
-                                                 size=(self.volume_size,self.volume_size,self.volume_size), 
-                                                 mode='trilinear')
-        else:
-            raise KeyError('Unknown spade_broadcasting_type')
-
+        if debug:
+            set_trace()      
         ##########################
         # VOLUMES FEEDING TO V2V #   
         ##########################         
@@ -422,6 +452,8 @@ class VolumetricTemporalAdaINNet(nn.Module):
                                                                          coord_volumes,
                                                                          softmax=self.volume_softmax)    
 
+        if debug:
+            set_trace()
         decoded_features = None
         if self.use_style_decoder:
             if self.style_decoder_type == 'v2v':
@@ -444,7 +476,9 @@ class VolumetricTemporalAdaINNet(nn.Module):
             lstm_keypoints_3d = lstm_keypoints_3d.view(batch_size, time, *lstm_keypoints_3d.shape[1:])
             vol_keypoints_3d = [vol_keypoints_3d, lstm_keypoints_3d]
             # torch.cat([vol_keypoints_3d.unsqueeze(1),lstm_keypoints_3d],1)
-            
+
+        if debug:
+            set_trace()      
         return [vol_keypoints_3d,
                 features_for_loss if self.use_style_decoder else None,
                 volumes,
@@ -452,7 +486,7 @@ class VolumetricTemporalAdaINNet(nn.Module):
                 None, # cuboids
                 coord_volumes,
                 base_points,
-                style_vector,
+                [style_vector, style_vector_me] if return_me_vector else style_vector,
                 unproj_features,
                 decoded_features
                 ]

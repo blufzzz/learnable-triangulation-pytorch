@@ -1,0 +1,6 @@
+#!/bin/bash
+export CUDA_VISIBLE_DEVICES=$1
+python train.py \
+--logdir=../logs/resnet_50_3d \
+--config=./experiments/human36m/train/human36m_vol_temporal_adain.yaml \
+--experiment_comment='h36_sv32_dist_adain1d-gn-conf-leakyrelu_s2v-R2D-avgpool-4l-RGB-112-512-1e-4_vf64_resnet50-gn_dt-9_dil-1_bs1-1_lr-1e-4_norot_gradclip-1e-2'

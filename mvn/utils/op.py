@@ -75,20 +75,20 @@ def root_centering(keypoints, kind, inverse = False):
     '''
     Makes other keypoints to become root relative, undoes it if inverse = True
     '''    
-    if kind == "human36m":
-        base_joint = 6
-    elif kind == "coco":
-        base_joint = 11
+    assert kind == "human36m"
+    base_joint = 6
 
     n_joints = keypoints.shape[-2]
 
-    keypoints_transformed = keypoints.clone()
-    if inverse:
-        keypoints_transformed[..., torch.arange(n_joints) != base_joint,:] += keypoints_transformed[..., base_joint:base_joint + 1,:]
-    else:
-        keypoints_transformed[..., torch.arange(n_joints) != base_joint,:] -= keypoints_transformed[..., base_joint:base_joint + 1,:]
+    base_joint_mask = torch.zeros_like(keypoints)
+    base_joint_mask[:,torch.arange(n_joints) != base_joint] = keypoints[:,base_joint:base_joint+1].clone().detach()
 
-    return keypoints_transformed
+    if inverse:
+        keypoints = keypoints + base_joint_mask
+    else:
+        keypoints = keypoints - base_joint_mask
+
+    return keypoints
 
 
 def keypoints_to_features(keypoints):

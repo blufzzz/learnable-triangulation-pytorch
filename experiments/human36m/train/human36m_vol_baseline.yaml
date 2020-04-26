@@ -19,8 +19,8 @@ opt:
   n_epochs: 9999
   dump_weights: False
 
-  batch_size: 5
-  val_batch_size: 10
+  batch_size: 1
+  val_batch_size: 1
 
   lr: 0.0001
   process_features_lr: 0.001
@@ -28,7 +28,7 @@ opt:
 
   scale_keypoints_3d: 0.1
 
-  save_model: true
+  save_model: false
   silence: false
 
 model:
@@ -50,7 +50,7 @@ model:
   rotation: false
 
   volume_features_dim: 32
-  volume_size: 64
+  volume_size: 32
   volume_multiplier: 1.0
   volume_softmax: true
   max_cell_size_multiplier: 1.5
@@ -61,7 +61,7 @@ model:
   volume_additional_grid_offsets: false
 
   backbone:
-    name: "resnet152"
+    name: "resnet50"
     style: "simple"
 
     group_norm: false
@@ -69,7 +69,7 @@ model:
     checkpoint: "./data/pose_resnet_4.5_pixels_human36m.pth"
 
     num_joints: 17
-    num_layers: 152
+    num_layers: 50
 
     alg_confidences: false
     vol_confidences: false

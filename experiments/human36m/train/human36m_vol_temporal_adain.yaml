@@ -2,7 +2,7 @@ title: "human36m_vol_temporal_lstm_adain_softmax"
 kind: "human36m"
 vis_freq: 1000
 vis_n_elements: 10
-distributed_train: false
+distributed_train: true
 image_shape: [384, 384]
 visualize: false
 
@@ -16,8 +16,8 @@ opt:
   n_epochs: 9999
   dump_weights: False
 
-  batch_size: 1
-  val_batch_size: 1
+  batch_size: 2
+  val_batch_size: 2
 
   lr: 0.0001
   process_features_lr: 0.001
@@ -27,9 +27,9 @@ opt:
   style_decoder_lr: 0.001
   motion_extractor_lr: 0.0001
   scale_keypoints_3d: 0.1
+
   use_time_weighted_loss: true
   style_decoder_loss_weight: 0.001
-
   style_pose_lstm_loss_weight: 0.1
   style_pose_lstm_decoder_lr: 0.001
 
@@ -54,8 +54,8 @@ model:
   use_style_decoder: false
   style_decoder_type: 'lstm'
   style_decoder_hidden_dim: 128
-  style_pose_lstm_hidden_dim: 64
   use_style_pose_lstm_loss: true
+  style_pose_lstm_hidden_dim: 128
 
   # use_motion_extractor: false
   # motion_extractor_type: 'c3d'
@@ -92,7 +92,7 @@ model:
   transfer_cmu_to_human36m: false
 
   backbone:
-    name: "resnet50"
+    name: "resnet152"
     style: "simple"
 
     group_norm: true
@@ -100,7 +100,7 @@ model:
     checkpoint: "./data/pose_resnet_4.5_pixels_human36m.pth"
 
     num_joints: 17
-    num_layers: 50 #50 #152
+    num_layers: 152 #50 #152
 
     alg_confidences: false
     vol_confidences: false
