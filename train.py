@@ -23,6 +23,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 from tensorboardX import SummaryWriter
 
+from mvn.models.baseline import Baseline
 from mvn.models.triangulation import VolumetricTriangulationNet
 from mvn.models.volumetric_adain import VolumetricTemporalAdaINNet
 from mvn.models.volumetric_lstm import VolumetricTemporalLSTM
@@ -44,7 +45,7 @@ from mvn.datasets import utils as dataset_utils
 from IPython.core.debugger import set_trace
 import matplotlib.pyplot as plt
 
-MAKE_EXPERIMENT_DIR = False
+MAKE_EXPERIMENT_DIR = True
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -223,8 +224,9 @@ def one_epoch(model,
     silence = config.opt.silence if hasattr(config.opt, 'silence') else False
 
     singleview_dataset = config.dataset.singleview if hasattr(config.dataset, 'singleview') else False
+    pivot_type = config.dataset.pivot_type
     pivot_index =  {'first':config.dataset.dt-1,
-                    'intermediate':config.dataset.dt//2}[config.dataset.pivot_type]
+                    'intermediate':config.dataset.dt//2}[pivot_type]
     
     visualize_volumes = config.visualize_volumes if hasattr(config, 'visualize_volumes') else False
     visualize_heatmaps = config.visualize_heatmaps if hasattr(config, 'visualize_heatmaps') else False
@@ -278,7 +280,6 @@ def one_epoch(model,
                 # measure data loading time
                 data_time.update(time.time() - end)
 
-                # print (f'iter = {iter_i}')
                 if batch is None:
                     print("Found None batch at iter {}, continue...".format(iter_i))
                     continue 
@@ -313,7 +314,7 @@ def one_epoch(model,
                     base_points_pred,
                     style_vector,
                     unproj_features,
-                    decoded_features) = model(images_batch, batch, debug=debug) 
+                    decoded_features) = model(images_batch, batch, debug=debug, master=master) 
 
                 else:    
                     (keypoints_3d_pred, 
@@ -326,15 +327,18 @@ def one_epoch(model,
                     
                 batch_size, dt = images_batch.shape[:2]
                 keypoints_3d_binary_validity_gt = (keypoints_3d_validity_gt > 0.0).type(torch.float32)
-                keypoints_shape = keypoints_3d_pred.shape[-2:]           
+                keypoints_shape = keypoints_3d_gt.shape[-2:]
 
+                # print ('ITER:', iter_i,'MASTER:', master, 'KEYPOINTS ID:', keypoints_3d_gt.mean())    
 
+                if debug:
+                    set_trace()
                 ################
                 # MODEL OUTPUT #   
                 ################
                 if use_style_pose_lstm_loss:
                     assert keypoints_per_frame and isinstance(keypoints_3d_pred, list)
-                    
+
                     auxilary_keypoints_3d_gt = keypoints_3d_gt[:,pivot_index+1:]
                     auxilary_keypoints_3d_pred = keypoints_3d_pred[1]
                     auxilary_keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt[:,pivot_index+1:]
@@ -355,7 +359,9 @@ def one_epoch(model,
                         auxilary_keypoints_3d_gt = auxilary_keypoints_3d_gt.view(batch_size, -1, *keypoints_shape)
                         auxilary_keypoints_3d_pred = auxilary_keypoints_3d_pred.view(batch_size, -1, *keypoints_shape)
 
-
+                        
+                if debug:
+                    set_trace()            
                 ##################
                 # CALCULATE LOSS #   
                 ##################
@@ -442,16 +448,35 @@ def one_epoch(model,
 
                 if use_style_decoder:
                     if use_time_weighted_loss:
-                        time_weights = torch.stack([torch.exp(torch.arange(0,(-dt//2)+1, -1, dtype=torch.float)) \
-                                            for i in range(batch_size)]).view(batch_size, -1,1,1,1).to(device) # [bs,(dt//2)-1,1,1,1]
+                        style_decoder_part = config.model.style_decoder_part if hasattr(config.model, 'style_decoder_part') else 'after_pivot'
+                        time_weights = np.exp(np.arange(0,
+                                             (-dt//2)+1 if pivot_type == 'intermediate' else -dt+1,
+                                             -1,
+                                              dtype=np.float))
+
+                        if style_decoder_part == 'before_pivot':
+                            time_weights = time_weights[::-1]
+
+                        time_weights = torch.stack([torch.tensor(time_weights.tolist(), dtype=torch.float) for i in range(batch_size)]).view(batch_size, -1,1,1,1).to(device) # [bs,(dt//2)-1,1,1,1]
                     else:
-                        time_weights = 1.    
+                        time_weights = 1. 
                     style_decoder_loss = torch.norm(decoded_features - features_pred)*time_weights
                     style_decoder_loss = style_decoder_loss.mean()
                     style_decoder_loss_weight = config.opt.style_decoder_loss_weight
                     total_loss += style_decoder_loss * style_decoder_loss_weight
                     metric_dict['style_decoder_loss_weighted'].append(style_decoder_loss.item()*style_decoder_loss_weight)
 
+                if model.pelvis_type !='gt':
+                    base_joint = 6
+                    pelvis_loss_weight = config.opt.pelvis_loss_weight
+                    pelvis_loss = criterion((base_points_pred.unsqueeze(1) - keypoints_3d_gt[:,base_joint:base_joint+1])*scale_keypoints_3d,
+                                                keypoints_3d_binary_validity_gt[:,base_joint:base_joint+1])
+                    pelvis_loss = pelvis_loss_weight*pelvis_loss
+                    total_loss += pelvis_loss
+                    metric_dict['pelvis_loss_weighted'].append(pelvis_loss.item())
+
+                if debug:
+                    set_trace()    
                 ############
                 # BACKWARD #   
                 ############
@@ -475,6 +500,9 @@ def one_epoch(model,
 
                     opt.step()
 
+
+                if debug:
+                    set_trace()    
                 ###########
                 # METRICS #   
                 ###########
@@ -487,7 +515,7 @@ def one_epoch(model,
                 metric_dict['l2'].append(l2.item())
 
                 # base point l2
-                if base_points_pred is not None and not config.model.use_gt_pelvis:
+                if base_points_pred is not None and not config.model.pelvis_type =='gt':
                     base_point_l2_list = []
                     for batch_i in range(base_points_pred.shape[0]):
                         base_point_pred = base_points_pred[batch_i]
@@ -516,6 +544,8 @@ def one_epoch(model,
                     results['keypoints_3d'].append(keypoints_3d_pred.detach().cpu().numpy())
                     results['indexes'].append(batch['indexes'])
                 
+                if debug:    
+                    set_trace()
                 #################
                 # VISUALIZATION #   
                 #################        
@@ -641,7 +671,23 @@ def main(args):
     print("Number of available GPUs: {}".format(torch.cuda.device_count()))
     
     config = cfg.load_config(args.config)
-    is_distributed = init_distributed(args) and config.distributed_train
+
+    ##########################
+    # BACKWARD COMPATIBILITY #
+    ##########################
+
+    if not hasattr(config.model, 'pelvis_type'):
+        if config.model.use_gt_pelvis:
+            config.model.pelvis_type = 'gt'
+        else:
+            raise RuntimeError()  
+
+    if not hasattr(config.model, 'pelvis_space_type'):
+        config.model.pelvis_space_type = 'global'          
+
+    ##########################
+
+    is_distributed = config.distributed_train and init_distributed(args)
     print ('DISTRIBUTER TRAINING' if is_distributed else 'No Distributed training')
     master = True
 
@@ -658,7 +704,7 @@ def main(args):
     save_model = config.opt.save_model if hasattr(config.opt, "save_model") else True
     
     model = {
-        "vol": VolumetricTriangulationNet,
+        "vol": Baseline,
         "vol_temporal_adain":VolumetricTemporalAdaINNet,
         "vol_temporal_grid": VolumetricTemporalGridDeformation,
         "vol_temporal_lstm": VolumetricTemporalLSTM
@@ -696,7 +742,10 @@ def main(args):
                  {'params': model.volume_net.parameters(), \
                             'lr': config.opt.volume_net_lr if \
                             hasattr(config.opt, "volume_net_lr") else config.opt.lr}
-                ],
+                ] +\
+                ([{'params': model.pelvis_regressor.parameters(), \
+                 'lr': config.opt.pelvis_regressor_lr if \
+                 hasattr(config.opt, "pelvis_regressor_lr") else config.opt.lr}] if hasattr(model, 'pelvis_regressor') else []),
                 lr=config.opt.lr
             )
 
@@ -708,7 +757,9 @@ def main(args):
                             hasattr(config.opt, "process_features_lr") else config.opt.lr},
                  {'params': model.volume_net.parameters(), \
                             'lr': config.opt.volume_net_lr if \
-                            hasattr(config.opt, "volume_net_lr") else config.opt.lr}
+                                hasattr(config.opt, "volume_net_lr") else config.opt.lr,
+                            'betas': config.opt.volume_net_betas if \
+                                hasattr(config.opt, "volume_net_betas") else (0.9, 0.999)}
                 ] + \
 
                 ([{'params': model.features_sequence_to_vector.parameters(), \
@@ -735,7 +786,7 @@ def main(args):
                             'lr': config.opt.style_pose_lstm_decoder_lr if \
                             hasattr(config.opt, "style_pose_lstm_decoder_lr") else config.opt.lr}] if \
                             model.use_style_pose_lstm_loss else []),
-                lr=config.opt.lr) 
+                lr=config.opt.lr)
 
         elif config.model.name == "vol_temporal_grid":
             opt = torch.optim.Adam(
@@ -797,6 +848,10 @@ def main(args):
 
         opt_discr = optim.Adam(discriminator.parameters(), lr=config.opt.discr_lr)
 
+    use_scheduler = config.opt.use_scheduler if hasattr(config.opt, 'use_scheduler') else False    
+    if use_scheduler:   
+        scheduler = torch.optim.lr_scheduler.MultiplicativeLR(opt, lr_lambda=[lambda1, lambda2])
+
     # datasets
     print("Loading data...")
     train_dataloader, val_dataloader, train_sampler = setup_dataloaders(config, distributed_train=is_distributed)
@@ -850,6 +905,8 @@ def main(args):
                                           writer=writer,
                                           discriminator=discriminator,
                                           opt_discr=opt_discr)
+            if use_scheduler:
+                scheduler.step()
             # saving    
             if master and save_model:
                 print (f'Saving model at {experiment_dir}...')

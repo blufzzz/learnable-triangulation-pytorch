@@ -1,6 +1,5 @@
 # Reference: https://github.com/dragonbook/V2V-PoseNet-pytorch
 from IPython.core.debugger import set_trace
-from torchvision.models.video.resnet import VideoResNet, BasicBlock, R2Plus1dStem, Conv2Plus1D
 from collections import OrderedDict
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,6 +12,21 @@ ACTIVATION_TYPE = 'LeakyReLU'
 MODULES_REQUIRES_NORMALIZAION = ['Res3DBlock', 'Upsample3DBlock', 'Basic3DBlock']
 ORDINARY_NORMALIZATIONS = ['group_norm', 'batch_norm']
 ADAPTIVE_NORMALIZATION = ['adain', 'spade']
+
+
+def change_stride(model):
+    for child_name, child in model.named_children():
+        if isinstance(child, nn.Conv3d) and (np.array(child.stride) > 1).any():
+            child.stride = (1,1,1)
+        else:
+            change_stride(child)
+
+def convert_relu_to_leakyrelu(model):
+    for child_name, child in model.named_children():
+        if isinstance(child, nn.ReLU):
+            setattr(model, child_name, nn.LeakyReLU())
+        else:
+            convert_relu_to_leakyrelu(child)                 
 
 def convert_bn_to_gn(model):
     for child_name, child in model.named_children():
@@ -35,14 +49,14 @@ class SPADE(nn.Module):
         self.beta = nn.Conv3d(hidden, features_channels, kernel_size=ks, padding=pw)
         self.bn = nn.BatchNorm3d(features_channels, affine=False, track_running_stats=False)
 
-    def forward(self, x, params):
+    def forward(self, x, params, return_all=False):
 
         params = F.interpolate(params, size=x.size()[2:], mode='nearest')
         actv = self.shared(params)
         gamma = self.gamma(actv)
         beta = self.beta(actv)
         out = self.bn(x) * (1 + gamma) + beta
-        return out
+        return (out, (1+gamma), beta) if return_all else out
 
 
 class AdaIN(nn.Module):
@@ -294,7 +308,7 @@ class EncoderDecorder(nn.Module):
     def forward(self, x, params=None, return_intermediate=False):
 
         skip_connections = []
-        intermediate_list = []
+        intermediate_dict = []
 
         for name, module in self.downsampling_dict.items():
             if name.split('_')[0] == 'skip' and self.use_skip_connection:
@@ -302,24 +316,24 @@ class EncoderDecorder(nn.Module):
             else:
                 x = module(x, params=params)
                 if return_intermediate:
-                    intermediate_list.append(x)
+                    intermediate_dict['downsampling_' + name] = x
 
         for name, module in self.bottleneck_dict.items():
             x = module(x, params=params)
             if return_intermediate:
-                intermediate_list.append(x)
+                intermediate_dict['bottleneck_' + name] = x
             
         skip_number = -1    
         for name, module in self.upsampling_dict.items():
             if name.split('_')[0] == 'Res3DBlock' and self.use_skip_connection:
-                x = x + skip_connections[skip_number]
+                x = x + skip_connections['upsampling_' + skip_number]
                 skip_number -= 1
             x = module(x, params=params)
             if return_intermediate:
-                intermediate_list.append(x)      
+                intermediate_dict[name] = x      
 
         if return_intermediate:
-            return x, intermediate_list
+            return x, intermediate_dict
         else:    
             return x                  
 
@@ -365,28 +379,27 @@ class V2VModel(nn.Module):
         self._initialize_weights()
 
     def forward(self, x, params=None, device=None, return_intermediate=False):
-        intermediate_list = []
+        # intermediate_dict = []
         x = self.front_layer(x)
-        if return_intermediate:
-            intermediate_list.append(x)
+        # if return_intermediate:
+        #     intermediate_dict['front_layer'] = x
 
-        
-        if return_intermediate:
-            x, intermediate = self.encoder_decoder(x, params, return_intermediate=return_intermediate)
-            intermediate_list += intermediate
-        else:
-            x = self.encoder_decoder(x, params, return_intermediate=return_intermediate)    
+        # if return_intermediate:
+        #     x, intermediate = self.encoder_decoder(x, params, return_intermediate=return_intermediate)
+        #     intermediate_dict.update(intermediate)
+        # else:
+        x = self.encoder_decoder(x, params, return_intermediate=return_intermediate)    
 
         x = self.back_layer(x)
-        if return_intermediate:
-            intermediate_list.append(x)
+        # if return_intermediate:
+        #     intermediate_dict['back_layer'] = x
 
         x = self.output_layer(x)
 
-        if return_intermediate:
-            return x, intermediate_list
-        else:
-            return x
+        # if return_intermediate:
+        #     return x, intermediate_dict
+        # else:
+        return x
 
     def _initialize_weights(self):
         for m in self.modules():
@@ -398,6 +411,7 @@ class V2VModel(nn.Module):
                 nn.init.xavier_normal_(m.weight)
                 # nn.init.normal_(m.weight, 0, 0.001)
                 nn.init.constant_(m.bias, 0)
+
 
 
 class C3D(nn.Module):
@@ -490,17 +504,18 @@ class C3D(nn.Module):
 class Conv1Plus2D(nn.Module):
     def __init__(self, in_planes, out_planes, kernel_size, time_padding, normalization_type='batch_norm'):
         super().__init__()
+        t, h, w = kernel_size
         self.block = nn.Sequential(        
             nn.ConvTranspose3d(in_planes, 
                     out_planes, 
-                    kernel_size=kernel_size, 
+                    kernel_size=(1, h, w), 
                     stride=(1, 1, 1), 
                     bias=False),
             get_normalization(normalization_type, out_planes),
             nn.ReLU(True),
             nn.Conv3d(out_planes, 
                     out_planes, 
-                    kernel_size=(3, 1, 1), 
+                    kernel_size=(t, 1, 1), 
                     stride=(1, 1, 1), 
                     padding=(time_padding,0,0),
                     bias=False),
@@ -525,57 +540,85 @@ class R2D(nn.Module):
                 upscale_heatmap = False,
                 n_upscale_layers = 3,
                 upscale_heatmap_shape=[96,96],
+                use_time_avg_pooling = False,
+                change_stride_layers = None,
+                load_weights=False
                 ):
 
         super().__init__()
 
         assert n_r2d_layers >= 1
         assert output_volume_dim in [1,2,3]
+        from torchvision.models.video.resnet import VideoResNet,\
+                                                     BasicBlock, \
+                                                     R2Plus1dStem, \
+                                                     Conv2Plus1D
 
+        self.use_time_avg_pooling = use_time_avg_pooling                                             
         self.output_volume_dim = output_volume_dim
         self.n_r2d_layers = n_r2d_layers
         self.style_vector_dim = style_vector_dim
+        self.load_weights = load_weights
         self.normalization_type = normalization_type
         self.output_features = {2:128,
                                 3:256,
                                 4:512}[n_r2d_layers]
 
         if upscale_heatmap: 
-            assert self.output_volume_dim == 2 and n_r2d_layers == 3
-            out_shape = np.array([1, *upscale_heatmap_shape])
-            r2d_shape = np.array([1, 14,14])
-            diff_shape = (out_shape - r2d_shape) 
-            kernel_size = 1 + (diff_shape//n_upscale_layers)
-            kernel_size_residual = 1 + diff_shape%n_upscale_layers
-            assert (diff_shape >= 0).all()
-            hidden_dim = self.output_features // 2
-
             layers = []
-            for i in range(n_upscale_layers):
-                in_planes = self.output_features if i == 0 else hidden_dim
-                out_planes = hidden_dim
-                padding = 1 if i < (n_upscale_layers-1) else 0
-                layers.append(Conv1Plus2D(in_planes, 
-                                          out_planes, 
-                                          kernel_size,
-                                          time_padding=padding))
-                
-            # last block    
-            layers.append(nn.ConvTranspose3d(hidden_dim,
+            if not self.use_time_avg_pooling:
+                ME_SHAPE = [5,28,28]
+                assert self.output_volume_dim == 2 and n_r2d_layers == 3
+                out_shape = np.array([*upscale_heatmap_shape])
+                r2d_shape = np.array(ME_SHAPE[-2:])
+                me_time = ME_SHAPE[0]
+                diff_shape = (out_shape - r2d_shape) 
+                assert (diff_shape >= 0).all()
+                spatial_kernel_size = 1 + (diff_shape//n_upscale_layers)
+                spatial_kernel_size_residual = 1 + diff_shape%n_upscale_layers
+                hidden_dim = self.output_features // 2
+
+                for i in range(n_upscale_layers):
+                    in_planes = self.output_features if i == 0 else hidden_dim
+                    out_planes = hidden_dim
+                    padding = 1 if i < (n_upscale_layers-1) else 0
+                    time_kernel = [me_time] if not padding else [1] 
+                    kernel_size = time_kernel + spatial_kernel_size.tolist()
+                    layers.append(Conv1Plus2D(in_planes, 
+                                              out_planes, 
+                                              kernel_size,
+                                              time_padding=padding))
+                    
+                # last block 
+                kernel_size_residual = [1] + spatial_kernel_size_residual.tolist()
+                layers.append(nn.ConvTranspose3d(hidden_dim,
                                              self.style_vector_dim,
-                                             kernel_size=kernel_size_residual))
-            # layers.append(nn.ReLU()) 
+                                             kernel_size=kernel_size_residual)) 
+            else:
+                layers.append(nn.ConvTranspose3d(self.output_features,
+                                                 self.style_vector_dim,
+                                                 kernel_size=[1,2,2],
+                                                 stride=[1,2,2]))
+                layers.append(nn.AdaptiveAvgPool3d([1, *upscale_heatmap_shape]))
+
+
             self.final_layer = nn.Sequential(*layers)                    
 
         else:
-            x_kernel_size = 1
             if self.output_volume_dim == 2:
-                x_kernel_size = {2:{3:2, 4:2, 5:3, 6:3, 7:4, 8:4, 9:5},
-                                 3:{3:1, 4:1, 5:2, 6:2, 7:2, 8:2, 9:3}}[n_r2d_layers][time]
+                if self.use_time_avg_pooling:
+                    self.final_layer = nn.Sequential(nn.AdaptiveAvgPool3d(output_size=(1, 28, 28)),
+                                                    nn.Conv3d(self.output_features, 
+                                                    self.style_vector_dim, 
+                                                    kernel_size=(1,1,1))
+                                                    )
+                else:
+                    x_kernel_size = {2:{3:2, 4:2, 5:3, 6:3, 7:4, 8:4, 9:5},
+                                     3:{3:1, 4:1, 5:2, 6:2, 7:2, 8:2, 9:3}}[n_r2d_layers][time]
 
-                self.final_layer = nn.Sequential(nn.Conv3d(self.output_features, 
-                                        self.style_vector_dim, 
-                                        kernel_size=(x_kernel_size, 1,1)))    
+                    self.final_layer = nn.Sequential(nn.Conv3d(self.output_features, 
+                                            self.style_vector_dim, 
+                                            kernel_size=(x_kernel_size, 1,1)))    
 
             elif self.output_volume_dim == 1:
                 self.final_layer = nn.Sequential(nn.AdaptiveAvgPool3d(output_size=(1, 1, 1)),
@@ -583,12 +626,14 @@ class R2D(nn.Module):
                                                 self.style_vector_dim, 
                                                 kernel_size=(1,1,1))
                                                 )
-                    
-        weights_path = './data/r2plus1d_34_clip8_ig65m_from_scratch-9bae36ae.pth'
+            else:
+                self.final_layer = nn.Sequential(nn.Conv3d(self.output_features, 
+                                                            self.style_vector_dim, 
+                                                            kernel_size=(1,1,1)))
 
         model = VideoResNet(block=BasicBlock,
                             conv_makers=[Conv2Plus1D] * 4,
-                            layers=[3, 4, 6, 3], # [3,4,6,3]
+                            layers=[3, 4, 6, 3],
                             stem=R2Plus1dStem)
 
         model.layer2[0].conv2[0] = Conv2Plus1D(128, 128, 288) # 128
@@ -600,28 +645,33 @@ class R2D(nn.Module):
                                   *[(f'layer{i}', model._modules[f'layer{i}']) for i in range(1,n_r2d_layers+1)]
                                   ]))
 
-        weights_dict = torch.load(weights_path) # , map_location=device
-        model_dict = self.motion_extractor.state_dict()
-        new_pretrained_state_dict = {}
+        if self.load_weights:
+            weights_path = './data/r2plus1d_34_clip8_ig65m_from_scratch-9bae36ae.pth'
+            print (f'R2D inited by {weights_path}')
+            weights_dict = torch.load(weights_path) # , map_location=device
+            model_dict = self.motion_extractor.state_dict()
+            new_pretrained_state_dict = {}
 
-        for k, v in weights_dict.items():
-            if k in model_dict:
-                new_pretrained_state_dict[k] = weights_dict[k]
+            for k, v in weights_dict.items():
+                if k in model_dict:
+                    new_pretrained_state_dict[k] = weights_dict[k]
 
-        self.motion_extractor.load_state_dict(new_pretrained_state_dict)
+            self.motion_extractor.load_state_dict(new_pretrained_state_dict)
 
-        # We need exact Caffe2 momentum for BatchNorm scaling
-        if normalization_type == 'batch_norm':
-            for m in self.motion_extractor.modules():
-                if isinstance(m, nn.BatchNorm3d):
-                    m.eps = 1e-3
-                    m.momentum = 0.9
-        elif normalization_type == 'group_norm':
-            convert_bn_to_gn(self.motion_extractor)            
+            # We need exact Caffe2 momentum for BatchNorm scaling
+            if normalization_type == 'batch_norm':
+                for m in self.motion_extractor.modules():
+                    if isinstance(m, nn.BatchNorm3d):
+                        m.eps = 1e-3
+                        m.momentum = 0.9
+            elif normalization_type == 'group_norm':
+                convert_bn_to_gn(self.motion_extractor)            
 
-        # x = torch.randn(3,3,5,112,112)
-        # print ('shape:',self.motion_extractor(x).shape , 'capacity:', get_capacity(sefl.motion_extractor))
+        if change_stride_layers is not None:
+            for i in change_stride_layers:
+                change_stride(self.motion_extractor._modules[f'layer{i}'])
 
+        # set_trace()        
     def forward(self, x, return_me_vector=False):
 
         # x: (batch,3,time,112,112)
@@ -630,7 +680,7 @@ class R2D(nn.Module):
         x = self.motion_extractor(x)
         if return_me_vector:
             x_me = x
-        if hasattr(self, 'final_layer'):    
+        if hasattr(self, 'final_layer'): 
             x = self.final_layer(x)
         if self.output_volume_dim == 2:
             x = x.squeeze(-3)

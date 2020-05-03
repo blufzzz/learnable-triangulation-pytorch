@@ -13,7 +13,9 @@ opt:
   volumetric_ce_loss_weight: 0.01
 
   use_bone_length_term: false
-  bone_length_weight: 0.0001
+  bone_length_weight: 0.001
+  pelvis_loss_weight: 1.
+  pelvis_gradient: true
 
   n_objects_per_epoch: 10000
   n_epochs: 9999
@@ -25,6 +27,7 @@ opt:
   lr: 0.0001
   process_features_lr: 0.001
   volume_net_lr: 0.001
+  pelvis_regressor_lr: 0.01
 
   scale_keypoints_3d: 0.1
 
@@ -34,17 +37,15 @@ opt:
 model:
   name: "vol"
   kind: "mpii"
-  volume_aggregation_method: "softmax"
+  volume_aggregation_method: "no_aggregation"
 
   v2v_type: 'v1'
 
   init_weights: false
   checkpoint: ""
-  normalization_type: "batch_norm"
+  normalization_type: "group_norm"
 
-  use_gt_pelvis: true
-  use_precalculated_pelvis: false
-  use_volumetric_pelvis: false
+  pelvis_type: 'v2v'
 
   cuboid_side: 2500.0
   rotation: false
@@ -55,6 +56,7 @@ model:
   volume_softmax: true
   max_cell_size_multiplier: 1.5
 
+
   heatmap_softmax: true
   heatmap_multiplier: 100.0
 
@@ -64,7 +66,7 @@ model:
     name: "resnet50"
     style: "simple"
 
-    group_norm: false
+    group_norm: true
     init_weights: true
     checkpoint: "./data/pose_resnet_4.5_pixels_human36m.pth"
 
@@ -74,8 +76,8 @@ model:
     alg_confidences: false
     vol_confidences: false
     return_heatmaps: false
-    return_bottleneck: false
-    return_features: True
+    return_bottleneck: true
+    return_features: true
 
 dataset:
   kind: "human36m"

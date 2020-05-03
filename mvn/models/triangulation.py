@@ -31,7 +31,7 @@ class VolumetricTriangulationNet(nn.Module):
         self.cuboid_side = config.model.cuboid_side
 
         self.kind = config.model.kind
-        self.use_gt_pelvis = config.model.use_gt_pelvis
+        self.pelvis_type = config.model.pelvis_type
 
         # heatmap
         self.heatmap_softmax = config.model.heatmap_softmax
@@ -89,52 +89,18 @@ class VolumetricTriangulationNet(nn.Module):
         else:
             raise RuntimeError('Unknown v2v_type')                                    
 
-
-    def forward(self, images, batch):
-        device = images.device
-        batch_size, n_views = images.shape[:2]
-
-        # reshape for backbone forward
-        images = images.view(-1, *images.shape[2:])
-
-        # forward backbone
-        _, features, _, vol_confidences, _ = self.backbone(images)
-
-        current_memory = torch.cuda.memory_allocated()
-        
-        # reshape back
-        images = images.view(batch_size, n_views, *images.shape[1:])
-        features = features.view(batch_size, n_views, *features.shape[1:])
-
-        if vol_confidences is not None:
-            vol_confidences = vol_confidences.view(batch_size, n_views, *vol_confidences.shape[1:])
-
-        # calcualte shapes
-        image_shape, features_shape = tuple(images.shape[3:]), tuple(features.shape[3:])
-
-        # norm vol confidences
-        if self.volume_aggregation_method == 'conf_norm':
-            vol_confidences = vol_confidences / vol_confidences.sum(dim=1, keepdim=True)
-
-        # change camera intrinsics
-        new_cameras = deepcopy(batch['cameras'])
-        for view_i in range(n_views):
-            for batch_i in range(batch_size):
-                new_cameras[view_i][batch_i].update_after_resize(image_shape, features_shape)
-
-        proj_matricies = torch.stack([torch.stack([torch.from_numpy(camera.projection) for camera in camera_batch], dim=0) for camera_batch in new_cameras], dim=0).transpose(1, 0)  # shape (batch_size, n_views, 3, 4)
-        proj_matricies = proj_matricies.float().to(device)
+    
+    def build_coord_volumes(self, batch, batch_size, device):
 
         # build coord volumes
         cuboids = []
         base_points = torch.zeros(batch_size, 3, device=device)
         coord_volumes = torch.zeros(batch_size, self.volume_size, self.volume_size, self.volume_size, 3, device=device)
         for batch_i in range(batch_size):
-            # if self.use_precalculated_pelvis:
-            if self.use_gt_pelvis:
+            if self.pelvis_type == 'gt':
                 keypoints_3d = batch['keypoints_3d'][batch_i]
             else:
-                keypoints_3d = batch['pred_keypoints_3d'][batch_i]
+                raise RuntimeError('Wrong pelvis_type')
 
             if self.kind == "coco":
                 base_point = (keypoints_3d[11, :3] + keypoints_3d[12, :3]) / 2
@@ -151,7 +117,9 @@ class VolumetricTriangulationNet(nn.Module):
             cuboids.append(cuboid)
 
             # build coord volume
-            xxx, yyy, zzz = torch.meshgrid(torch.arange(self.volume_size, device=device), torch.arange(self.volume_size, device=device), torch.arange(self.volume_size, device=device))
+            xxx, yyy, zzz = torch.meshgrid(torch.arange(self.volume_size, device=device),
+                                           torch.arange(self.volume_size, device=device),
+                                           torch.arange(self.volume_size, device=device))
             grid = torch.stack([xxx, yyy, zzz], dim=-1).type(torch.float)
             grid = grid.reshape((-1, 3))
 
@@ -189,11 +157,50 @@ class VolumetricTriangulationNet(nn.Module):
 
             coord_volumes[batch_i] = coord_volume
 
+        return coord_volumes, cuboids
+
+
+    def forward(self, images, batch):
+        device = images.device
+        batch_size, n_views = images.shape[:2]
+
+        # reshape for backbone forward
+        images = images.view(-1, *images.shape[2:])
+
+        # forward backbone
+        _, features, _, vol_confidences, _ = self.backbone(images)
+
+        current_memory = torch.cuda.memory_allocated()
+        
+        # reshape back
+        images = images.view(batch_size, n_views, *images.shape[1:])
+        features = features.view(batch_size, n_views, *features.shape[1:])
+
+        if vol_confidences is not None:
+            vol_confidences = vol_confidences.view(batch_size, n_views, *vol_confidences.shape[1:])
+
+        # calcualte shapes
+        image_shape, features_shape = tuple(images.shape[3:]), tuple(features.shape[3:])
+
+        # norm vol confidences
+        if self.volume_aggregation_method == 'conf_norm':
+            vol_confidences = vol_confidences / vol_confidences.sum(dim=1, keepdim=True)
+
+        # change camera intrinsics
+        new_cameras = deepcopy(batch['cameras'])
+        for view_i in range(n_views):
+            for batch_i in range(batch_size):
+                new_cameras[view_i][batch_i].update_after_resize(image_shape, features_shape)
+
+        proj_matricies = torch.stack([torch.stack([torch.from_numpy(camera.projection) for camera in camera_batch], dim=0) for camera_batch in new_cameras], dim=0).transpose(1, 0)  # shape (batch_size, n_views, 3, 4)
+        proj_matricies = proj_matricies.float().to(device)
+
+        coord_volumes, cuboids = self.build_coord_volumes(batch, batch_size, device)
+
         # process features before unprojecting
         features = features.view(-1, *features.shape[2:])
         features = self.process_features(features)
         features = features.view(batch_size, n_views, *features.shape[1:])
-
         # lift to volume
         volumes = op.unproject_heatmaps(features, 
                                         proj_matricies, 
@@ -212,4 +219,10 @@ class VolumetricTriangulationNet(nn.Module):
 
         vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
 
-        return vol_keypoints_3d, features, volumes, vol_confidences, cuboids, coord_volumes, base_points
+        return [vol_keypoints_3d,
+               features, 
+               volumes, 
+               vol_confidences, 
+               cuboids, 
+               coord_volumes, 
+               base_points]

@@ -557,36 +557,35 @@ class FeaturesEncoder_Bottleneck(nn.Module):
                                               stride=2),
                                       get_normalization(normalization_type,
                                                            self.C * self.multiplier, n_groups=n_groups, dimension=2),
-                                      nn.ReLU(),
+                                      nn.LeakyReLU(),
                                       nn.Conv2d(self.C * self.multiplier, 
                                                 self.C * self.multiplier//2, 
                                                 kernel_size=3, 
                                                 stride=1),
                                       get_normalization(normalization_type,
                                                            self.C * self.multiplier//2, n_groups=n_groups, dimension=2),
-                                      nn.ReLU(),
+                                      nn.LeakyReLU(),
                                       nn.Conv2d(self.C * self.multiplier//2,
                                                 self.C * self.multiplier//4, 
                                                 kernel_size=3, 
                                                 stride=1),
                                       get_normalization(normalization_type,
                                                            self.C * self.multiplier//4, n_groups=n_groups, dimension=2),
-                                      nn.ReLU(),
+                                      nn.LeakyReLU(),
                                       nn.Conv2d(self.C * self.multiplier//4,
                                                 self.C * self.multiplier//4, kernel_size=1),
                                       get_normalization(normalization_type,
                                                            self.C * self.multiplier//4, n_groups=n_groups, dimension=2),
-                                      nn.ReLU()
+                                      nn.LeakyReLU()
                                     )
         
         self.linear = nn.Linear(self.C * self.multiplier//4, output_features_dim)
-        self.activation = nn.ReLU()
+        self.activation = nn.LeakyReLU()
         
     def forward(self, x):
         batch_size = x.shape[0]
         x = self.features(x)
         x = x.view(batch_size, -1)
         x = self.linear(x)
-        x = self.activation(x)
         return x          
         

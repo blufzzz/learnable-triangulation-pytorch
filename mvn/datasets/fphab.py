@@ -15,15 +15,18 @@ import trimesh
 from matplotlib import pyplot as plt
 from PIL import Image
 
-CAM_EXTR = np.array(
-    [[0.999988496304, -0.00468848412856, 0.000982563360594, 25.7],
-     [0.00469115935266, 0.999985218048, -0.00273845880292, 1.22],
-     [-0.000969709653873, 0.00274303671904, 0.99999576807, 3.902],
-     [0, 0, 0, 1]])
+t = np.array([[25.7], 
+              [1.22], 
+              [3.902]])
 
-CAM_INTR = np.array([[1395.749023, 0, 935.732544],
-                     [0, 1395.749268, 540.681030], 
-                     [0, 0, 1]])
+R = np.array(
+    [[0.999988496304, -0.00468848412856, 0.000982563360594],
+     [0.00469115935266, 0.999985218048, -0.00273845880292],
+     [-0.000969709653873, 0.00274303671904, 0.99999576807]])
+
+K = np.array([[1395.749023, 0,           935.732544],
+              [0,           1395.749268, 540.681030], 
+              [0,           0,           1]])
 
 
 REORDER_IDX = np.array([
@@ -50,7 +53,7 @@ class FPHAB(Dataset):
 
         self.root = root
         self.table_path = os.path.join(self.root, table_name)
-        self.table = np.load(self.table_path).item()
+        self.table = np.load(self.table_path, allow_pickle=True).item()
                 
         # how much there are consecutive frames in the sequence
         self.dt = kwargs['dt']
@@ -86,14 +89,22 @@ class FPHAB(Dataset):
         frame_idx = shot['frame_idx'] 
         seq_idx = shot['seq_idx']
         keypoints = shot['keypoints']
+        retval_camera = Camera(R, t, K)
 
         image_path = os.path.join(self.root, subject, action, seq_idx, 'color',
                                  'color_{:04d}.jpeg'.format(frame_idx + offset))
-
         image = cv2.imread(image_path)
-        image = 2*((image / 255.0) - 0.5) # cast to pixes values to [-1,1] range from [0,255]    
 
-        retval_camera = Camera(R, t, K) # TODO: create Camera object
+        if self.image_shape is not None:
+            # resize
+            image_shape_before_resize = image.shape[:2]
+            image = resize_image(image, self.image_shape)
+            retval_camera.update_after_resize(image_shape_before_resize, self.image_shape)
+
+        if self.norm_image:
+            image = normalize_image(image)
+        else:    
+            image = 2*((image / 255.0) - 0.5) # cast to pixes values to [-1,1] range from [0,255]    
 
         return image, keypoints, retval_camera
 

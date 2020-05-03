@@ -15,24 +15,35 @@ def get_coord_volumes(kind,
                         cuboid_side, 
                         volume_size, 
                         device, 
-                        keypoints = None,
-                        batch_size = None,
-                        dt = None
+                        keypoints=None,
+                        batch_size=None,
+                        dt=None,
+                        max_rotation_angle=np.pi/4 #2 * np.pi
                         ):
     
         use_default_basepoint = keypoints is None
-        bs_dt = (batch_size, dt) if use_default_basepoint else keypoints.shape[:-2]
+        if use_default_basepoint:
+            if dt is not None:
+                bs_dt = (batch_size, dt)
+            else:
+                bs_dt = (batch_size,)    
+        else:
+            bs_dt = keypoints.shape[:-2]
+
         sides = torch.tensor([cuboid_side, cuboid_side, cuboid_side], dtype=torch.float).to(device)
 
         # default base_points are the coordinate's origins
         base_points = torch.zeros((*bs_dt, 3), dtype=torch.float).to(device)
         
         if not use_default_basepoint:    
-            # get root (pelvis) from keypoints   
-            if kind == "coco":
-                base_points = (keypoints[...,11, :3] + keypoints[...,12, :3]) / 2
-            elif kind == "mpii":
-                base_points = keypoints[..., 6, :3] 
+            # get root (pelvis) from keypoints
+            if keypoints.shape[-2] == 1: 
+                base_points = keypoints.squeeze(-2)
+            else:   
+                if kind == "coco":
+                    base_points = (keypoints[...,11, :3] + keypoints[...,12, :3]) / 2
+                elif kind == "mpii":
+                    base_points = keypoints[..., 6, :3] 
 
         position = base_points - sides / 2
 
@@ -45,12 +56,13 @@ def get_coord_volumes(kind,
                                          torch.arange(volume_size, device=device))
         grid = torch.stack([xxx, yyy, zzz], dim=-1).type(torch.float)
         grid = grid.view((-1, 3))
-        grid = grid.view(*[1]*len(bs_dt), *grid.shape).repeat(*keypoints.shape[:-2], *[1]*len(grid.shape))
+        grid = grid.view(*[1]*len(bs_dt), *grid.shape).repeat(*bs_dt, *[1]*len(grid.shape))
 
-        grid[..., 0] = position[..., 0].unsqueeze(-1) + (sides[0] / (volume_size - 1)) * grid[..., 0]
-        grid[..., 1] = position[..., 1].unsqueeze(-1) + (sides[1] / (volume_size - 1)) * grid[..., 1]
-        grid[..., 2] = position[..., 2].unsqueeze(-1) + (sides[2] / (volume_size - 1)) * grid[..., 2]
-        
+        grid_coord = torch.zeros_like(grid)
+        grid_coord[..., 0] = position[..., 0].unsqueeze(-1) + (sides[0] / (volume_size - 1)) * grid[..., 0]
+        grid_coord[..., 1] = position[..., 1].unsqueeze(-1) + (sides[1] / (volume_size - 1)) * grid[..., 1]
+        grid_coord[..., 2] = position[..., 2].unsqueeze(-1) + (sides[2] / (volume_size - 1)) * grid[..., 2]
+
         if kind == "coco":
             axis = [0, 1, 0]  # y axis
         elif kind == "mpii":
@@ -59,15 +71,16 @@ def get_coord_volumes(kind,
         # random rotation
         if training and rotation:    
             
-            center = torch.tensor(base_points).type(torch.float).to(device).unsqueeze(-2)
-            grid = grid - center
-            grid = torch.stack([volumetric.rotate_coord_volume(coord_grid,\
-                                np.random.uniform(0.0, 2 * np.pi), axis) for coord_grid in grid])
-            grid = grid + center
+            center = base_points.clone().detach().unsqueeze(-2)
+            grid_coord = grid_coord - center
+            grid_coord = torch.stack([volumetric.rotate_coord_volume(coord_grid,\
+                                np.random.uniform(-max_rotation_angle,
+                                                     max_rotation_angle), axis) for coord_grid in grid_coord])
+            grid_coord = grid_coord + center
 
-        grid = grid.view(*bs_dt, volume_size, volume_size, volume_size, 3)
+        grid_coord = grid_coord.view(*bs_dt, volume_size, volume_size, volume_size, 3)
     
-        return grid, cuboids, base_points
+        return grid_coord, cuboids, base_points
 
 
 def root_centering(keypoints, kind, inverse = False):
