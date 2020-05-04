@@ -745,7 +745,11 @@ def main(args):
                 ] +\
                 ([{'params': model.pelvis_regressor.parameters(), \
                  'lr': config.opt.pelvis_regressor_lr if \
-                 hasattr(config.opt, "pelvis_regressor_lr") else config.opt.lr}] if hasattr(model, 'pelvis_regressor') else []),
+                 hasattr(config.opt, "pelvis_regressor_lr") else config.opt.lr}] if hasattr(model, 'pelvis_regressor') else []) +\
+
+                ([{'params': model.style_vector, \
+                 'lr': config.opt.style_vector_lr if \
+                 hasattr(config.opt, "style_vector_lr") else config.opt.lr}] if hasattr(model, 'style_vector') else []),
                 lr=config.opt.lr
             )
 

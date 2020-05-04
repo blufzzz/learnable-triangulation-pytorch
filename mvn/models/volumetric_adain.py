@@ -86,9 +86,11 @@ class VolumetricTemporalAdaINNet(nn.Module):
         if self.use_style_decoder:
             self.style_decoder_type = config.model.style_decoder_type if hasattr(config.model, 'style_decoder_type') else 'v2v'
 
+
         self.use_style_pose_lstm_loss = config.model.use_style_pose_lstm_loss if hasattr(config.model, 'use_style_pose_lstm_loss') else False
 
         self.use_motion_extractor = config.model.use_motion_extractor if hasattr(config.model, 'use_motion_extractor') else False
+        self.use_me_for_style_pose = config.model.use_me_for_style_pose if hasattr(config.model, 'use_me_for_style_pose') else False
         if self.use_motion_extractor:   
             self.motion_extractor_type = config.model.motion_extractor_type
             self.motion_extractor_from = config.model.motion_extractor_from
@@ -122,17 +124,28 @@ class VolumetricTemporalAdaINNet(nn.Module):
         # DEFINE TEMPORAL FEATURE ECTRACTION #   
         ######################################
         if self.use_style_pose_lstm_loss:
-            assert self.f2v_type == 'v2v'
-            time_dim = self.dt//2
-            style_shape = {'v2v':[time_dim,24,24]}[self.f2v_type]
-            hidden_dim = config.model.style_pose_lstm_hidden_dim if hasattr(config.model, 'style_pose_lstm_hidden_dim') else 128
+            assert self.temporal_condition_type == 'spade'
             assert self.pivot_type == 'intermediate' and self.keypoints_per_frame
+
+            time_dim = self.dt//2
+            style_shape = None
+            self.upscale_style_for_SPL = config.model.upscale_style_for_SPL if \
+                                            hasattr(config.model, 'upscale_style_for_SPL') else True
+
+            if self.use_me_for_style_pose:
+                assert self.upscale_style_for_SPL                                
+            if self.upscale_style_for_SPL:
+                style_shape = {'v2v':[time_dim,24,24],
+                                'r2d':[5, 28, 28]}[self.f2v_type] # dt=9
+
+
+            hidden_dim = config.model.style_pose_lstm_hidden_dim if hasattr(config.model, 'style_pose_lstm_hidden_dim') else 128
             self.style_pose_lstm_loss_decoder = StylePosesLSTM(self.style_vector_dim,
-                                                                style_shape,
+                                                                style_shape=style_shape,
+                                                                upscale_style=self.upscale_style_for_SPL,
                                                                 pose_space=self.num_joints,
                                                                 hidden_dim=hidden_dim,
                                                                 volume_size=self.volume_size, 
-                                                                time=style_shape[0], 
                                                                 n_layers=3)
 
         if self.use_motion_extractor:
@@ -265,6 +278,7 @@ class VolumetricTemporalAdaINNet(nn.Module):
                 debug=False,
                 master=True):
 
+        return_me_vector = self.use_me_for_style_pose
         device = images_batch.device
         batch_size, dt = images_batch.shape[:2]
         image_shape = images_batch.shape[-2:]
@@ -275,10 +289,10 @@ class VolumetricTemporalAdaINNet(nn.Module):
         process_first_half_of_images = self.use_style_pose_lstm_loss and not decode_second_part
         process_only_pivot_image = self.use_motion_extractor and self.motion_extractor_from == 'rgb'
 
-        if process_first_half_of_images:
+        if process_only_pivot_image:
+            images_batch = images_batch[:,self.pivot_index]
+        elif process_first_half_of_images:
             images_batch = images_batch[:,:self.pivot_index+1].contiguous()
-        elif process_only_pivot_image:
-            images_batch = images_batch[:,self.pivot_index]   
 
         ######################
         # FEATURE ECTRACTION #   
@@ -528,7 +542,14 @@ class VolumetricTemporalAdaINNet(nn.Module):
         if self.use_style_pose_lstm_loss:
             time=lstm_coord_volumes.shape[1]
             assert time == dt//2
-            lstm_volumes = self.style_pose_lstm_loss_decoder(style_vector, volumes, time=time)
+            if not self.upscale_style_for_SPL:
+                lstm_volumes = self.style_pose_lstm_loss_decoder(style_vector_volumes, volumes, time=time)
+            else:
+                if self.use_me_for_style_pose:
+                    lstm_volumes = self.style_pose_lstm_loss_decoder(style_vector_me, volumes, time=time)
+                else:    
+                    lstm_volumes = self.style_pose_lstm_loss_decoder(style_vector, volumes, time=time)
+
             lstm_volumes = lstm_volumes.view(-1, *lstm_volumes.shape[2:])
             lstm_coord_volumes = lstm_coord_volumes.view(-1, *lstm_coord_volumes.shape[2:])
             lstm_keypoints_3d, _ = integrate_tensor_3d_with_coordinates(lstm_volumes * self.volume_multiplier,

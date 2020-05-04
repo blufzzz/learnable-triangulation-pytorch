@@ -14,6 +14,14 @@ ORDINARY_NORMALIZATIONS = ['group_norm', 'batch_norm']
 ADAPTIVE_NORMALIZATION = ['adain', 'spade']
 
 
+def registed_forward_hook(model):
+    for child_name, child in model.named_children():
+        if isinstance(child, nn.Conv3d) and (np.array(child.stride) > 1).any():
+            child.stride = (1,1,1)
+        else:
+            change_stride(child)
+
+
 def change_stride(model):
     for child_name, child in model.named_children():
         if isinstance(child, nn.Conv3d) and (np.array(child.stride) > 1).any():
@@ -326,11 +334,11 @@ class EncoderDecorder(nn.Module):
         skip_number = -1    
         for name, module in self.upsampling_dict.items():
             if name.split('_')[0] == 'Res3DBlock' and self.use_skip_connection:
-                x = x + skip_connections['upsampling_' + skip_number]
+                x = x + skip_connections[skip_number]
                 skip_number -= 1
             x = module(x, params=params)
             if return_intermediate:
-                intermediate_dict[name] = x      
+                intermediate_dict['upsampling_' + name] = x      
 
         if return_intermediate:
             return x, intermediate_dict
@@ -348,6 +356,8 @@ class V2VModel(nn.Module):
                  temporal_condition_type=None):
 
         super().__init__()
+
+        # self.style_vector = 
 
         self.style_vector_channels = style_vector_dim #config.style_vector_dim if hasattr(config, 'style_vector_dim') else None
         
@@ -671,7 +681,6 @@ class R2D(nn.Module):
             for i in change_stride_layers:
                 change_stride(self.motion_extractor._modules[f'layer{i}'])
 
-        # set_trace()        
     def forward(self, x, return_me_vector=False):
 
         # x: (batch,3,time,112,112)

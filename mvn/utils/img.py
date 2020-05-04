@@ -6,6 +6,7 @@ import torch
 
 # IMAGENET_MEAN, IMAGENET_STD = np.array([0.485, 0.456, 0.406]), np.array([0.229, 0.224, 0.225])
 IMAGENET_MEAN, IMAGENET_STD = np.array([0.406, 0.456, 0.485]), np.array([0.225, 0.224, 0.229]) # BGR
+# mean=[0.43216, 0.394666, 0.37645], std=[0.22803, 0.22145, 0.216989]
 
 def crop_image(image, bbox):
     """Crops area from image specified as bbox. Always returns area of size as bbox filling missing parts with zeros

@@ -14,8 +14,6 @@ opt:
 
   use_bone_length_term: false
   bone_length_weight: 0.001
-  pelvis_loss_weight: 1.
-  pelvis_gradient: true
 
   n_objects_per_epoch: 10000
   n_epochs: 9999
@@ -27,7 +25,7 @@ opt:
   lr: 0.0001
   process_features_lr: 0.001
   volume_net_lr: 0.001
-  pelvis_regressor_lr: 0.01
+  style_vector_lr: 0.001
 
   scale_keypoints_3d: 0.1
 
@@ -45,7 +43,12 @@ model:
   checkpoint: ""
   normalization_type: "group_norm"
 
-  pelvis_type: 'v2v'
+  style_vector_parameter: true
+  style_vector_dim: 64
+
+  use_gt_pelvis: true
+  use_precalculated_pelvis: false
+  use_volumetric_pelvis: false
 
   cuboid_side: 2500.0
   rotation: false
@@ -76,8 +79,8 @@ model:
     alg_confidences: false
     vol_confidences: false
     return_heatmaps: false
-    return_bottleneck: true
-    return_features: true
+    return_bottleneck: false
+    return_features: True
 
 dataset:
   kind: "human36m"

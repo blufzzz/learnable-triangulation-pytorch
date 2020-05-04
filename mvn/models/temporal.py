@@ -72,11 +72,11 @@ class StylePosesLSTM(nn.Module):
 
     def __init__(self, 
                 style_vector_dim,
-                style_shape, 
+                style_shape=None,
+                upscale_style=False, 
                 pose_space=17, 
                 hidden_dim=128, 
                 volume_size=32, 
-                time=5, 
                 n_layers=3):
 
         super().__init__()
@@ -86,26 +86,43 @@ class StylePosesLSTM(nn.Module):
         self.volume_size = volume_size
         self.n_layers = n_layers
         self.style_shape = style_shape
+        self.upscale_style = upscale_style
 
-        hidden_shape = np.array([volume_size,volume_size,volume_size]) 
-        diff_shape = (hidden_shape - style_shape) 
-        kernel_size = 1 + (diff_shape//n_layers)
-        kernel_size_residual = 1 + diff_shape%n_layers
-        assert (diff_shape > 0).all()
+        if upscale_style:
+            hidden_shape = np.array([volume_size,volume_size,volume_size]) 
+            diff_shape = (hidden_shape - style_shape) 
+            kernel_size = 1 + (diff_shape//n_layers)
+            kernel_size_residual = 1 + diff_shape%n_layers
+            assert (diff_shape > 0).all()
 
-        layers = []
-        for i in range(n_layers):
-            layers.append(nn.ConvTranspose3d(style_vector_dim if i==0 else hidden_dim//2,
-                                             hidden_dim//2,
-                                             kernel_size=kernel_size))
-            layers.append(nn.LeakyReLU())
-            layers.append(nn.GroupNorm(32, hidden_dim//2))
-            
-        # last block    
-        layers.append(nn.ConvTranspose3d(hidden_dim//2,
-                                         hidden_dim,
-                                         kernel_size=kernel_size_residual))
-        layers.append(nn.LeakyReLU())    
+            layers = []
+            for i in range(n_layers):
+                layers.append(nn.ConvTranspose3d(style_vector_dim if i==0 else hidden_dim//2,
+                                                 hidden_dim//2,
+                                                 kernel_size=kernel_size))
+                layers.append(nn.LeakyReLU())
+                layers.append(nn.GroupNorm(32, hidden_dim//2))
+                
+            # last block    
+            layers.append(nn.ConvTranspose3d(hidden_dim//2,
+                                             hidden_dim,
+                                             kernel_size=kernel_size_residual))
+            layers.append(nn.LeakyReLU())    
+
+        else:
+            layers = []
+            for i in range(n_layers):
+                layers.append(nn.Conv3d(style_vector_dim if i==0 else hidden_dim//2,
+                                                 hidden_dim//2,
+                                                 kernel_size=3, padding=1))
+                layers.append(nn.LeakyReLU())
+                layers.append(nn.GroupNorm(32, hidden_dim//2))
+            # last block    
+            layers.append(nn.Conv3d(hidden_dim//2,
+                                             hidden_dim,
+                                             kernel_size=1))
+            layers.append(nn.LeakyReLU())     
+
 
         self.style2cell_state = nn.Sequential(*layers)
         

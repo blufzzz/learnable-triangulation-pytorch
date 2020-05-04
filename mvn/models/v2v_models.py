@@ -114,9 +114,15 @@ class V2VModel_v1(nn.Module):
                        volume_size, 
                        normalization_type='batch_norm', 
                        temporal_condition_type=None, 
+                       style_vector_parameter=False,
+                       style_vector_shape=None,
                        style_vector_dim=None):
 
             super().__init__()
+
+            self.style_vector_parameter = style_vector_parameter
+            if self.style_vector_parameter:
+                self.style_vector = nn.Parameter(torch.randn(*style_vector_shape)) 
 
             self.style_vector_channels = style_vector_dim 
 
@@ -146,6 +152,10 @@ class V2VModel_v1(nn.Module):
             self._initialize_weights()
 
     def forward(self, x, params=None):
+
+        if self.style_vector_parameter:
+            params = self.style_vector
+
         x = self.front_layer1(x, params)
         x = self.front_layer2(x, params)
         x = self.front_layer3(x, params)

@@ -2,7 +2,7 @@ title: "human36m_vol_temporal_lstm_adain_softmax"
 kind: "human36m"
 vis_freq: 1000
 vis_n_elements: 10
-distributed_train: true
+distributed_train: false
 image_shape: [384, 384]
 visualize: false
 
@@ -21,14 +21,15 @@ opt:
 
   lr: 0.0001
   process_features_lr: 0.001
-  volume_net_lr: 0.001
-  features_sequence_to_vector_lr: 0.001
-  encoder_lr: 0.001
+  volume_net_lr: 0.0001
   style_decoder_lr: 0.001
-  motion_extractor_lr: 0.0001
+  motion_extractor_lr: 0.001
   scale_keypoints_3d: 0.1
+
   use_time_weighted_loss: true
   style_decoder_loss_weight: 0.001
+  style_pose_lstm_loss_weight: 0.1
+  style_pose_lstm_decoder_lr: 0.001
 
   save_model: true
   silence: false
@@ -45,21 +46,30 @@ model:
   encoded_feature_space: 256
   upscale_bottleneck: false # True only with encoder_type='backbone' and '2d f2v'
 
-  f2v_type: 'v2v'
+  f2v_type: 'r2d'
   f2v_normalization_type: 'group_norm'
   
-  use_style_decoder: true
-  style_decoder_type: 'v2v'
-  style_decoder_part: 'before_pivot'
+  use_style_decoder: false
+  style_decoder_type: 'lstm'
+  style_decoder_hidden_dim: 128
+  style_pose_lstm_hidden_dim: 128
+  use_style_pose_lstm_loss: true
+  upscale_style_for_SPL: false
 
-  use_motion_extractor: false
-  motion_extractor_type: 'c3d'
-  motion_extractor_path: './data/c3d.pickle'
+
+  use_motion_extractor: true
+  motion_extractor_type: 'r2d'
+  n_r2d_layers: 3
+  resize_images_for_me: true
+  images_me_target_size: [112,112]
   motion_extractor_from: 'rgb'
-  poolings: 5 # max: 5. rgb - 5, features - 3
-  n_layers: 3 
+  upscale_me_heatmap: true
+  n_upscale_layers: 1
+  change_stride_layers: [3]
+  use_time_avg_pooling: true
+  use_me_for_style_pose: false
 
-
+  # HERE
   f2v_intermediate_channels: 512
   style_vector_dim: 64
 
@@ -67,21 +77,19 @@ model:
   v2v_normalization_type: 'group_norm'
   volume_aggregation_method: "no_aggregation"
   temporal_condition_type: 'spade' 
-  spade_broadcasting_type: 'interpolate' #'unprojecting'
-  volume_features_dim: 64
+  spade_broadcasting_type: 'unprojecting' #'unprojecting'
+  volume_features_dim: 128
   include_pivot: false 
   style_grad_for_backbone: false
 
   init_weights: false
   checkpoint: ""
 
-  use_gt_pelvis: true
-  use_precalculated_pelvis: false
-  use_volumetric_pelvis: false
+  pelvis_type: 'gt'
 
   cuboid_side: 2500
   cuboid_multiplier: 1.0
-  rotation: false
+  rotation: true
 
   volume_size: 32
   volume_multiplier: 1.0
@@ -90,7 +98,7 @@ model:
   transfer_cmu_to_human36m: false
 
   backbone:
-    name: "resnet50"
+    name: "resnet152"
     style: "simple"
 
     group_norm: true
@@ -98,12 +106,12 @@ model:
     checkpoint: "./data/pose_resnet_4.5_pixels_human36m.pth"
 
     num_joints: 17
-    num_layers: 50 #50 #152
+    num_layers: 152 #50 #152
 
     alg_confidences: false
     vol_confidences: false
     return_heatmaps: false
-    return_bottleneck: false
+    return_bottleneck: true
 
   v2v_configuration:
 
@@ -137,23 +145,6 @@ model:
     skip_block_type: 'Res3DBlock'
     skip_block_adain: false
 
-    #               # first should be Res3DBlock
-    # downsampling: [{'module_type': 'Res3DBlock', 'params':[256,128], 'adain': false},
-    #               {'module_type': 'Pool3DBlock', 'params': [[1,2,2]], 'adain': false}, # pool
-    #               {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
-    #               {'module_type': 'Pool3DBlock', 'params': [[1,2,2]], 'adain': false}, # pool
-    #               {'module_type': 'Res3DBlock', 'params':[128,256], 'adain': false},
-    #               {'module_type': 'Pool3DBlock', 'params': [[1,2,2]], 'adain': false} # pool
-    #               ]
-
-    # bottleneck: [{'module_type': 'Res3DBlock', 'params': [256,256], 'adain': false} ] 
-
-    # upsampling: [{'module_type': 'Res3DBlock', 'params':[256,128], 'adain': false},
-    #               {'module_type': 'Res3DBlock', 'params':[128,64], 'adain': false},
-    #               {'module_type': 'Res3DBlock', 'params':[64,64], 'adain': false}]
-    #               # last should be Res3DBlock
-    #               # out 32x(dt-1)x12x12 
-
                       # first should be Res3DBlock
     downsampling: [{'module_type': 'Res3DBlock', 'params':[256,128], 'adain': false},
                   {'module_type': 'Pool3DBlock', 'params': [[1,2,2]], 'adain': false}, # pool
@@ -169,32 +160,32 @@ model:
                   # last should be Res3DBlock
                   # out 32x(dt-1)x12x12 
 
-  style_decoder_configuration:
+  # style_decoder_configuration:
 
-    use_skip_connection: false
-    skip_block_type: 'Res3DBlock'
-    skip_block_adain: false
+  #   use_skip_connection: false
+  #   skip_block_type: 'Res3DBlock'
+  #   skip_block_adain: false
 
-                      # first should be Res3DBlock
-    downsampling: [{'module_type': 'Res3DBlock', 'params':[64,64], 'adain': false}]
+  #                     # first should be Res3DBlock
+  #   downsampling: [{'module_type': 'Res3DBlock', 'params':[64,64], 'adain': false}]
 
-    bottleneck: [{'module_type': 'Res3DBlock', 'params': [64,128], 'adain': false} ] 
+  #   bottleneck: [{'module_type': 'Res3DBlock', 'params': [64,128], 'adain': false} ] 
 
-    upsampling: [{'module_type': 'Upsample3DBlock', 'params': [128,128,[1,2,2],[1,2,2]], 'adain': false}, # pool
-                 # {'module_type': 'Upsample3DBlock', 'params': [128,128,[1,2,2],[1,2,2]], 'adain': false}, # pool
-                 {'module_type': 'Res3DBlock', 'params': [128,128], 'adain': false},
-                 {'module_type': 'Upsample3DBlock', 'params': [128,256,[1,2,2],[1,2,2]], 'adain': false} # pool
-                ]
-                  # last should be Res3DBlock
-                  # out 32x(dt-1)x96x96                
+  #   upsampling: [{'module_type': 'Upsample3DBlock', 'params': [128,128,[1,2,2],[1,2,2]], 'adain': false}, # pool
+  #                # {'module_type': 'Upsample3DBlock', 'params': [128,128,[1,2,2],[1,2,2]], 'adain': false}, # pool
+  #                {'module_type': 'Res3DBlock', 'params': [128,128], 'adain': false},
+  #                {'module_type': 'Upsample3DBlock', 'params': [128,256,[1,2,2],[1,2,2]], 'adain': false} # pool
+  #               ]
+  #                 # last should be Res3DBlock
+  #                 # out 32x(dt-1)x96x96                
 
 dataset:
   kind: "human36m"
-  dt: 6
-  dilation: 3
+  dt: 19
+  dilation: 1
   singleview: true
-  pivot_type: 'first'
-  keypoints_per_frame: false
+  pivot_type: 'intermediate'
+  keypoints_per_frame: true
 
   train:
     h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"

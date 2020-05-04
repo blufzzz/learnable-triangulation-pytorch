@@ -59,6 +59,7 @@ class Baseline(nn.Module):
         # modules
         config.model.backbone.alg_confidences = False
         config.model.backbone.vol_confidences = False
+        self.style_vector_parameter = config.model.style_vector_parameter if hasattr(config.model,'style_vector_parameter') else False
 
 
         if self.volume_aggregation_method.startswith('conf'):
@@ -82,10 +83,21 @@ class Baseline(nn.Module):
         v2v_output_dim = self.num_joints + 3 if self.volume_additional_grid_offsets else self.num_joints
 
         if self.v2v_type == 'v1':    
+            
+            style_vector_dim = config.model.style_vector_dim if self.style_vector_parameter else None
+            batch_size = config.opt.batch_size
+            assert batch_size == config.opt.val_batch_size
+            self.style_vector_shape = [batch_size, style_vector_dim, self.volume_size, self.volume_size, self.volume_size] if \
+                                         self.style_vector_parameter else None
+
             self.volume_net = V2VModel_v1(self.volume_features_dim, 
                                           v2v_output_dim, 
                                           self.volume_size,
-                                          normalization_type = config.model.normalization_type)
+                                          style_vector_parameter = self.style_vector_parameter,
+                                          style_vector_shape = self.style_vector_shape,
+                                          style_vector_dim = style_vector_dim,
+                                          normalization_type = config.model.normalization_type,
+                                          temporal_condition_type = 'spade' if self.style_vector_parameter else None)
 
         elif self.v2v_type == 'conf':
             self.volume_net = V2VModel(self.volume_features_dim,
