@@ -82,7 +82,7 @@ class Baseline(nn.Module):
 
         v2v_output_dim = self.num_joints + 3 if self.volume_additional_grid_offsets else self.num_joints
 
-        if self.v2v_type == 'v1':    
+        if self.v2v_type == 'v1':     
             
             style_vector_dim = config.model.style_vector_dim if self.style_vector_parameter else None
             batch_size = config.opt.batch_size

@@ -2,10 +2,12 @@ import numpy as np
 import pickle
 import random
 from collections import defaultdict
-import subprocess
-
+import sys
 import torch
 from torch import nn
+import torch.nn.functional as F
+import os
+
 
 from mvn.models import pose_resnet, pose_hrnet
 from time import time
@@ -13,13 +15,15 @@ from mvn.utils.op import get_coord_volumes, unproject_heatmaps, integrate_tensor
 from mvn.utils.multiview import update_camera
 from mvn.utils.misc import get_capacity, description
 from mvn.utils import volumetric
-from mvn.models.v2v import V2VModel
+from mvn.models.v2v import V2VModel, R2D, SqueezeLayer
 from mvn.models.v2v_models import V2VModel_v1
 from mvn.models.temporal import Seq2VecRNN,\
                                 Seq2VecCNN, \
                                 Seq2VecRNN2D, \
                                 Seq2VecCNN2D, \
-                                get_encoder
+                                get_encoder, \
+                                FeatureDecoderLSTM, \
+                                StylePosesLSTM
 
 from pytorch_convolutional_rnn.convolutional_rnn import Conv3dLSTM
 from IPython.core.debugger import set_trace
@@ -33,11 +37,12 @@ class VolumetricTemporalLSTM(nn.Module):
         self.kind = config.model.kind
         self.num_joints = config.model.backbone.num_joints
         self.dt  = config.dataset.dt
+        self.keypoints_per_frame = config.dataset.keypoints_per_frame if \
+                                         hasattr(config.dataset, 'keypoints_per_frame') else True
+        assert keypoints_per_frame
 
         self.pivot_index =  {'first':self.dt-1,
                             'intermediate':self.dt//2}[config.dataset.pivot_type]
-
-        assert config.dataset.pivot_type == 'first'
 
         self.aux_indexes = list(range(self.dt))
         self.aux_indexes.remove(self.pivot_index)                    
@@ -54,27 +59,27 @@ class VolumetricTemporalLSTM(nn.Module):
         self.rotation = config.model.rotation
 
         # pelvis
-        self.use_precalculated_pelvis = config.model.use_precalculated_pelvis
-        self.use_gt_pelvis = config.model.use_gt_pelvis
-        self.use_volumetric_pelvis = config.model.use_volumetric_pelvis
-
-        assert self.use_precalculated_pelvis or self.use_gt_pelvis, 'One of the flags "use_<...>_pelvis" should be True'
+        self.pelvis_type = config.model.pelvis_type if \
+                            hasattr(config.model, 'pelvis_type') else 'gt'
 
         # transfer
-        self.transfer_cmu_to_human36m = config.model.transfer_cmu_to_human36m
+        self.transfer_cmu_to_human36m = config.model.transfer_cmu_to_human36m if \
+                                        hasattr(config.model, 'transfer_cmu_to_human36m') else False
 
         self.v2v_type = config.model.v2v_type
         self.v2v_normalization_type = config.model.v2v_normalization_type
         self.include_pivot = config.model.include_pivot
-        
-        # modules dimensions
+         
+        # before v2v
         self.lstm_on_feature_volumes = config.model.lstm_on_feature_volumes if \
                                        hasattr(config.model, 'lstm_on_feature_volumes') else False
 
+        # after v2v                               
         self.lstm_on_pose_volumes = config.model.lstm_on_pose_volumes if \
                                     hasattr(config.model, 'lstm_on_pose_volumes') else True
 
         self.volume_features_dim = config.model.volume_features_dim
+
         self.lstm_in_channels = config.model.lstm_in_channels
         self.lstm_out_channels = config.model.lstm_out_channels
         self.lstm_bidirectional = config.model.lstm_bidirectional
@@ -85,7 +90,6 @@ class VolumetricTemporalLSTM(nn.Module):
         self.epn_normalization_type = config.model.entangle_processing_normalization_type
         self.evaluate_only_last_volume = config.model.evaluate_only_last_volume
         self.use_final_processing = (self.lstm_out_channels != self.num_joints) and not self.disentangle
-
 
         # modules
         self.backbone = pose_resnet.get_pose_net(config.model.backbone,
@@ -201,7 +205,7 @@ class VolumetricTemporalLSTM(nn.Module):
 
         volumes = self.volume_net(volumes) 
         volumes = volumes.view(batch_size, dt, *volumes.shape[1:]) 
-        rnn_volumes, _ = self.lstm3d(volumes, None)
+        rnn_volumes, _ = self.lstm3d(volumes, None) 
 
         if self.disentangle:
             rnn_volumes = rnn_volumes.view(-1, *rnn_volumes.shape[2:])
@@ -222,7 +226,7 @@ class VolumetricTemporalLSTM(nn.Module):
             volumes = self.final_processing(volumes)   
             volumes = volumes.view(batch_size, dt, *volumes.shape[1:])  
 
-        if self.evaluate_only_last_volume:
+        if self.evaluate_only_last_volume: 
             # take all stuff for the last volume
             volumes = volumes[:,-1,...]
             if self.keypoints_for_each_frame:

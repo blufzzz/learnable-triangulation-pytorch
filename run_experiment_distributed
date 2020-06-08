@@ -1,9 +1,9 @@
 #!/bin/bash
-srun -p TitanBlack --gres=gpu:2 --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-04 \
+srun -p TitanBlack --gres=gpu:2 --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch \
 python -m torch.distributed.launch --nproc_per_node=2 --master_port=2345 train.py \
---logdir=../logs/resnet_50_3d \
+--logdir=../logs/final_model \
 --config=./experiments/human36m/train/human36m_vol_temporal_adain.yaml \
---experiment_comment='h36_sv32_dist_spade3d-128-interpolate-gn-bn-conf-LR-vf128_s2v-v2v-gn-64_SPL-lstm-w1e-1_EXP-weight_F-C0-256_R152-gn-nostylegrad_dt-9-inter_dil-3_bs1-1_lr-1e-4_rot_gradclip-1e-2'
+--experiment_comment='h36_sv32_dist_spade3d-HALF-h64-unproject-gn-bn-conf-MAX-leakyrelu_s2v-R2D-lr1e-4-upscale-1-avg-RGB-112-64_vf64_resnet152-1e-4-gn_dt-5_dil-1_bs2-1_lr1e-4_rot_gradclip-1e-2'
 
 
 # #!/bin/bash

@@ -1,12 +1,12 @@
 #!/bin/bash
 srun -p TitanBlack --gres=gpu --exclusive --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-03 \
 python train.py \
---logdir=../logs/resnet_50_3d \
---config=./experiments/human36m/train/human36m_vol_temporal_adain.yaml \
---experiment_comment='h36_sv32_dist_spade3d-128-interpolate-gn-bn-conf-LR-vf128_R2D-lr1e-3-upscale-1-avg-RGB-112-64_SPL-lstm-w1e-1_EXP-weight_F-C0-256_R152-gn-nostylegrad_dt-11-inter_dil-3_bs1-1_lr-1e-4_rot_gradclip-1e-2'
+--logdir=../logs/resnet_50/adain_1d \
+--config=./experiments/human36m/train/human36m_vol_baseline.yaml \
+--experiment_comment='h36_sv32_dist_Baseline-GN_V2V-conf-vf64-lr1e-3_BACK-resnet50-GN_dt-1_dil-1_bs1-1'
 
+#h36_sv32_dist_AdaIN-MLP-all-GN_S2S-cnn-1024-1024-1024-GN-lr1e-3_V2V-conf-vf32-lr1e-3_E-C4-1024-group_BACK-resnet50-GN-nostylegrad_dt-12_dil-3-1-1@05.06.2020-16:15:03
 # --experiment_comment='h36_sv32_dist_spade3d-HALF-h128-unproject-gn-bn-conf-leakyrelu_s2v-R2D-lr1e-5-upscale-1-avg-RGB-112-64_vf64_resnet50-1e-4-gn_dt-10_dil-1_bs1-1_lr5e-4-b1-0.8_norot_gradclip-1e-2'
-
 # --logdir=../logs/resnet_50/baseline \
 # --config=./experiments/human36m/train/human36m_vol_baseline.yaml \
 # --experiment_comment='h36_sv32_dist_resnet50-gn_bottleneck-camera-space-1e-1_v2v-v1-gn-no-aggr_1-1_lr-1e-4'

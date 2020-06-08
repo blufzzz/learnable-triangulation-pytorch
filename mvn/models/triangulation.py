@@ -13,6 +13,8 @@ from mvn.utils import op, multiview, img, misc, volumetric
 from mvn.models import pose_resnet, pose_hrnet
 from mvn.models.v2v import V2VModel
 from mvn.models.v2v_models import V2VModel_v1
+from IPython.core.debugger import set_trace
+
 
 
 class VolumetricTriangulationNet(nn.Module):
@@ -34,8 +36,6 @@ class VolumetricTriangulationNet(nn.Module):
         self.pelvis_type = config.model.pelvis_type
 
         # heatmap
-        self.heatmap_softmax = config.model.heatmap_softmax
-        self.heatmap_multiplier = config.model.heatmap_multiplier
         self.backbone_features_dim = config.model.backbone.backbone_features_dim if \
                                         hasattr(config.model.backbone, 'backbone_features_dim') else 256
         self.volume_features_dim = config.model.volume_features_dim
@@ -82,10 +82,14 @@ class VolumetricTriangulationNet(nn.Module):
                                           normalization_type = config.model.normalization_type)
 
         elif self.v2v_type == 'conf':
+            self.v2v_normalization_type = config.model.v2v_normalization_type
             self.volume_net = V2VModel(self.volume_features_dim,
                                        v2v_output_dim,
-                                       self.volume_size,
-                                       config=config.model)
+                                       v2v_normalization_type=self.v2v_normalization_type,
+                                       config=config.model.v2v_configuration,
+                                       style_vector_dim=None,
+                                       params_evolution = False,
+                                       temporal_condition_type=None)
         else:
             raise RuntimeError('Unknown v2v_type')                                    
 
@@ -157,7 +161,7 @@ class VolumetricTriangulationNet(nn.Module):
 
             coord_volumes[batch_i] = coord_volume
 
-        return coord_volumes, cuboids
+        return coord_volumes, cuboids, base_points
 
 
     def forward(self, images, batch):
@@ -195,7 +199,7 @@ class VolumetricTriangulationNet(nn.Module):
         proj_matricies = torch.stack([torch.stack([torch.from_numpy(camera.projection) for camera in camera_batch], dim=0) for camera_batch in new_cameras], dim=0).transpose(1, 0)  # shape (batch_size, n_views, 3, 4)
         proj_matricies = proj_matricies.float().to(device)
 
-        coord_volumes, cuboids = self.build_coord_volumes(batch, batch_size, device)
+        coord_volumes, cuboids, base_points = self.build_coord_volumes(batch, batch_size, device)
 
         # process features before unprojecting
         features = features.view(-1, *features.shape[2:])
@@ -218,7 +222,7 @@ class VolumetricTriangulationNet(nn.Module):
             coord_volumes = coord_volumes + grid_offsets
 
         vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
-
+        # set_trace()
         return [vol_keypoints_3d,
                features, 
                volumes, 

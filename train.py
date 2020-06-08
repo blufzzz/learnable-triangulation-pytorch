@@ -293,7 +293,7 @@ def one_epoch(model,
                 proj_matricies_batch) = dataset_utils.prepare_batch(batch, device)
 
                 heatmaps_pred, keypoints_2d_pred, cuboids_pred, base_points_pred = None, None, None, None
-
+                torch.cuda.empty_cache()
                 if config.model.name == 'vol_temporal_grid':
                     (keypoints_3d_pred, 
                     features_pred, 
@@ -329,7 +329,9 @@ def one_epoch(model,
                 keypoints_3d_binary_validity_gt = (keypoints_3d_validity_gt > 0.0).type(torch.float32)
                 keypoints_shape = keypoints_3d_gt.shape[-2:]
 
-                # print ('ITER:', iter_i,'MASTER:', master, 'KEYPOINTS ID:', keypoints_3d_gt.mean())    
+                # print ('ITER:', iter_i,'MASTER:', master, 'KEYPOINTS ID:', keypoints_3d_gt.mean())
+                if hasattr(model, 'style_vector_parameter'):
+                    metric_dict['style_vector_parameter_variance'].append(model.style_vector_parameter.data.var().item())
 
                 if debug:
                     set_trace()
@@ -339,9 +341,9 @@ def one_epoch(model,
                 if use_style_pose_lstm_loss:
                     assert keypoints_per_frame and isinstance(keypoints_3d_pred, list)
 
-                    auxilary_keypoints_3d_gt = keypoints_3d_gt[:,pivot_index+1:]
-                    auxilary_keypoints_3d_pred = keypoints_3d_pred[1]
-                    auxilary_keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt[:,pivot_index+1:]
+                    auxilary_keypoints_3d_gt = keypoints_3d_gt[:,pivot_index+1:].contiguous()
+                    auxilary_keypoints_3d_pred = keypoints_3d_pred[1].contiguous()
+                    auxilary_keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt[:,pivot_index+1:].contiguous()
 
                     keypoints_3d_gt = keypoints_3d_gt[:,pivot_index]
                     keypoints_3d_pred = keypoints_3d_pred[0]
@@ -359,7 +361,6 @@ def one_epoch(model,
                         auxilary_keypoints_3d_gt = auxilary_keypoints_3d_gt.view(batch_size, -1, *keypoints_shape)
                         auxilary_keypoints_3d_pred = auxilary_keypoints_3d_pred.view(batch_size, -1, *keypoints_shape)
 
-                        
                 if debug:
                     set_trace()            
                 ##################
@@ -466,7 +467,7 @@ def one_epoch(model,
                     total_loss += style_decoder_loss * style_decoder_loss_weight
                     metric_dict['style_decoder_loss_weighted'].append(style_decoder_loss.item()*style_decoder_loss_weight)
 
-                if model.pelvis_type !='gt':
+                if config.model.pelvis_type !='gt':
                     base_joint = 6
                     pelvis_loss_weight = config.opt.pelvis_loss_weight
                     pelvis_loss = criterion((base_points_pred.unsqueeze(1) - keypoints_3d_gt[:,base_joint:base_joint+1])*scale_keypoints_3d,
@@ -549,8 +550,8 @@ def one_epoch(model,
                 #################
                 # VISUALIZATION #   
                 #################        
-                if master and MAKE_EXPERIMENT_DIR:
-                    if n_iters_total % config.vis_freq == 0 and visualize:
+                if master and MAKE_EXPERIMENT_DIR and (n_iters_total % config.vis_freq == 0 and visualize):
+                    try:
                         vis_kind = config.kind
                         if (transfer_cmu_to_human36m):
                             vis_kind = "coco"
@@ -600,25 +601,32 @@ def one_epoch(model,
                                 plt.close('all')    
                                 writer.add_image(f"{name}/diff_hist/{batch_i}", hist_image.transpose(2, 0, 1), global_step=n_iters_total)
 
-                    # measure elapsed time
-                    batch_time.update(time.time() - end)
-                    end = time.time()
+                    except Exception as e:
+                        print ('Exception:', str(e), 'Failed to save writer')
+                        
+                # measure elapsed time
+                batch_time.update(time.time() - end)
+                end = time.time()
 
-                    # dump to tensorboard per-iter loss/metric stats
-                    if is_train:
+                # dump to tensorboard per-iter loss/metric stats
+                if is_train and MAKE_EXPERIMENT_DIR:
+                    try:
                         for title, value in metric_dict.items():
                             writer.add_scalar(f"{name}/{title}", value[-1], n_iters_total)
 
-                    # dump to tensorboard per-iter time stats
-                    writer.add_scalar(f"{name}/batch_time", batch_time.avg, n_iters_total)
-                    writer.add_scalar(f"{name}/data_time", data_time.avg, n_iters_total)
+                        # dump to tensorboard per-iter time stats
+                        writer.add_scalar(f"{name}/batch_time", batch_time.avg, n_iters_total)
+                        writer.add_scalar(f"{name}/data_time", data_time.avg, n_iters_total)
 
-                    # dump to tensorboard per-iter stats about sizes
-                    writer.add_scalar(f"{name}/batch_size", batch_size, n_iters_total)
-                    writer.add_scalar(f"{name}/n_views", dt, n_iters_total)
+                        # dump to tensorboard per-iter stats about sizes
+                        writer.add_scalar(f"{name}/batch_size", batch_size, n_iters_total)
+                        writer.add_scalar(f"{name}/n_views", dt, n_iters_total)
 
-                    n_iters_total += 1
-                    batch_start_time = time.time()
+                    except Exception as e:
+                        print ('Exception:', str(e), 'Failed to save writer')
+
+                n_iters_total += 1
+                            
 
     # calculate evaluation metrics
     if master:
@@ -634,19 +642,27 @@ def one_epoch(model,
 
             except Exception as e:
                 print("Failed to evaluate. Reason: ", e)
-            
-            if MAKE_EXPERIMENT_DIR:
-                checkpoint_dir = os.path.join(experiment_dir, "checkpoints", "{:04}".format(epoch))
-                os.makedirs(checkpoint_dir, exist_ok=True)
 
-                # dump results
-                with open(os.path.join(checkpoint_dir, "results.pkl"), 'wb') as fout:
-                    pickle.dump(results, fout)
+            if MAKE_EXPERIMENT_DIR:
+                try:
+                    checkpoint_dir = os.path.join(experiment_dir, "checkpoints", "{:04}".format(epoch))
+                    os.makedirs(checkpoint_dir, exist_ok=True)
+
+                    # dump results
+                    with open(os.path.join(checkpoint_dir, "results.pkl"), 'wb') as fout:
+                        pickle.dump(results, fout)
+                except Exception as e:
+                    print ('Exception:', str(e), 'Failed to save writer')        
+                            
 
         # dump to tensorboard per-epoch stats
         if MAKE_EXPERIMENT_DIR:
-            for title, value in metric_dict.items():
-                writer.add_scalar(f"{name}/{title}_epoch", np.mean(value), epoch)
+            try:
+                for title, value in metric_dict.items():
+                    writer.add_scalar(f"{name}/{title}_epoch", np.mean(value), epoch)
+            except Exception as e:
+                print ('Exception:', str(e), 'Failed to save writer')             
+                       
 
     return n_iters_total
 
@@ -704,19 +720,12 @@ def main(args):
     save_model = config.opt.save_model if hasattr(config.opt, "save_model") else True
     
     model = {
-        "vol": Baseline,
+        "vol_refined_baseline": Baseline,
+        "vol": VolumetricTriangulationNet,
         "vol_temporal_adain":VolumetricTemporalAdaINNet,
         "vol_temporal_grid": VolumetricTemporalGridDeformation,
         "vol_temporal_lstm": VolumetricTemporalLSTM
     }[config.model.name](config, device=device).to(device)
-
-
-
-
-    if config.model.init_weights:
-        state_dict = torch.load(config.model.checkpoint)['model_state']
-        model.load_state_dict(state_dict, strict=True)
-        print("Successfully loaded pretrained weights for whole model")
 
     # criterion
     criterion_class = {
@@ -728,7 +737,12 @@ def main(args):
     if config.opt.criterion == "MSESmooth":
         criterion = criterion_class(config.opt.mse_smooth_threshold)
     else:
-        criterion = criterion_class()    
+        criterion = criterion_class()
+
+    if config.model.init_weights:
+        state_dict = torch.load(config.model.checkpoint)['model_state']
+        model.load_state_dict(state_dict, strict=True)
+        print("LOADED PRE-TRAINED MODEL!!!")        
 
     # optimizer
     opt = None
@@ -765,6 +779,16 @@ def main(args):
                             'betas': config.opt.volume_net_betas if \
                                 hasattr(config.opt, "volume_net_betas") else (0.9, 0.999)}
                 ] + \
+
+                ([{'params': model.encoder.parameters(), \
+                            'lr': config.opt.encoder_lr if \
+                            hasattr(config.opt, "encoder_lr") else config.opt.lr}] if \
+                            hasattr(model, 'encoder') else []) + \
+
+                ([{'params': model.style_vector_parameter, \
+                            'lr': config.opt.style_vector_parameter_lr if \
+                            hasattr(config.opt, "style_vector_parameter_lr") else config.opt.lr}] if \
+                            hasattr(model, 'style_vector_parameter') else []) + \
 
                 ([{'params': model.features_sequence_to_vector.parameters(), \
                             'lr': config.opt.features_sequence_to_vector_lr if \
@@ -839,6 +863,12 @@ def main(args):
         else:
             raise RuntimeError('Unknown config.model.name')
 
+    load_optimizer = config.model.load_optimizer if hasattr(config.model, 'load_optimizer') else False
+    if config.model.init_weights and load_optimizer:
+        state_dict = torch.load(config.model.checkpoint)['opt_state']
+        opt.load_state_dict(state_dict, strict=True)
+        print("LOADED PRE-TRAINED OPTIMIZER!!!")
+
     # use_temporal_discriminator
     opt_discr, discriminator = None, None
     if use_temporal_discriminator:
@@ -870,7 +900,7 @@ def main(args):
     if is_distributed:
         model = DistributedDataParallel(model, device_ids=[device])
 
-    
+    torch.cuda.empty_cache()
     if not args.eval:
         # train loop
         n_iters_total_train, n_iters_total_val = 0, 0

@@ -41,14 +41,13 @@ class FeatureDecoderLSTM(nn.Module):
         
         self.hidden2feature = nn.Conv2d(hidden_dim, feature_space, kernel_size=1)
 
-    def forward(self, style_vector, init_feature_map, time=5):
+    def forward(self, style_vector, init_feature_map, device, time=5):
         
-        hx_init = torch.zeros(1, self.hidden_dim, 96, 96).cuda()
+        hx_init = torch.zeros(1, self.hidden_dim, 96, 96).to(device)
         cx_init = self.style2cell_state(style_vector).squeeze(2)
         # set_trace()
         output = []
         for i in range(time):
-            
             if i == 0:
                 hx, cx = self.lstm_cell(init_feature_map, (hx_init, cx_init))
             else:
@@ -133,13 +132,14 @@ class StylePosesLSTM(nn.Module):
         
         self.hidden2feature = nn.Conv3d(hidden_dim, pose_space, kernel_size=1)
 
-    def forward(self, style_vector, init_pose, time=5):
+    def forward(self, style_vector, init_pose, device, time=5):
         
-        hx_init = torch.zeros(1, 
-                                self.hidden_dim,
-                                self.volume_size, 
-                                self.volume_size, 
-                                self.volume_size).cuda()
+        batch_size = style_vector.shape[0]
+        hx_init = torch.zeros(batch_size, 
+                            self.hidden_dim,
+                            self.volume_size, 
+                            self.volume_size, 
+                            self.volume_size).to(device)
 
         cx_init = self.style2cell_state(style_vector)
         output = []
@@ -250,7 +250,7 @@ class Res1DBlock(nn.Module):
         res = self.res_branch(x)
         skip = self.skip_con(x)
         
-        return F.relu(res + skip, True)
+        return F.leaky_relu(res + skip, True)
 
 
 class Seq2VecRNN2D(nn.Module):
@@ -372,10 +372,10 @@ class Seq2VecCNN(nn.Module):
 
             blocks.append(nn.Sequential(nn.Conv1d(intermediate_channels, intermediate_channels, kernel_size=3, padding=1),
                                         get_normalization(normalization_type, intermediate_channels, n_groups=n_groups, dimension=1),
-                                        nn.ReLU(True),
+                                        nn.LeakyReLU(True),
                                         nn.Conv1d(intermediate_channels, intermediate_channels, kernel_size=3, padding=1),
                                         get_normalization(normalization_type, intermediate_channels, n_groups=n_groups, dimension=1),
-                                        nn.ReLU(True)
+                                        nn.LeakyReLU(True)
                                         ))
         
         self.blocks = nn.Sequential(*blocks)    

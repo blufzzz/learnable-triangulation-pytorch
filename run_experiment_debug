@@ -1,6 +1,0 @@
-#!/bin/bash
-srun -p TitanBlack --gres=gpu --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-05 gdb python
-# python3.6 train.py \
-# --logdir=../logs/resnet_50_3d \
-# --config=./experiments/human36m/train/human36m_vol_temporal_adain.yaml \
---experiment_comment='debug'
