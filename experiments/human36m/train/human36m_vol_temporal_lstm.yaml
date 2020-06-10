@@ -12,7 +12,7 @@ opt:
   use_volumetric_ce_loss: true
   volumetric_ce_loss_weight: 0.01
 
-  use_temporal_discriminator: true
+  use_temporal_discriminator: false
   adversarial_temporal_criterion: 'vanilla'
   adversarial_temporal_loss_weight: 0.01
   adversarial_generator_iters: 5
@@ -28,10 +28,7 @@ opt:
   lr: 0.0001
   process_features_lr: 0.001
   volume_net_lr: 0.001
-  lstm3d_lr: 0.001
-  final_processing_lr: 0.001
-  discr_lr: 0.001
-  entangle_processing_net_lr: 0.001
+  lstm3d_feature_volumes_lr: 0.001
 
   scale_keypoints_3d: 0.1
 
@@ -46,13 +43,14 @@ model:
   name: "vol_temporal_lstm"
   kind: "mpii"
 
-  lstm_in_channels: 32
-  lstm_out_channels: 32
-  lstm_bidirectional: false
-  lstm_layers: 1
+  lstm_on_feature_volumes: true
+  lstm_on_pose_volumes: false
+  
+  lstm_bidirectional_features: false
+  lstm_layers_features: 1
   evaluate_only_last_volume: false
 
-  disentangle: true
+  disentangle: false
   entangle_processing_type: 'stack'
   entangle_processing_normalization_type: 'group_norm'
 
@@ -66,10 +64,7 @@ model:
   init_weights: false
   checkpoint: ""
 
-  use_gt_pelvis: true
-  use_precalculated_pelvis: false
-  use_volumetric_pelvis: false
-
+  pelvis_type: 'gt'
   cuboid_side: 2500
   cuboid_multiplier: 1.0
   rotation: false

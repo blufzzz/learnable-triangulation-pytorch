@@ -370,8 +370,6 @@ class VolumetricTemporalAdaINNet(nn.Module):
         else:
             images_batch_for_features = images_batch    
 
-        # if master:
-        #     set_trace()  
 
         ######################
         # FEATURE ECTRACTION #   
@@ -424,12 +422,13 @@ class VolumetricTemporalAdaINNet(nn.Module):
         proj_matricies_batch = update_camera(batch, batch_size, image_shape, features_shape, dt, device)
         proj_matricies_batch = proj_matricies_batch[:,self.pivot_index,...].unsqueeze(1) # pivot camera 
 
+        # set_trace()
         ###############################
         # TEMPORAL FEATURE ECTRACTION #   
         ###############################
         if self.use_motion_extractor:
             if self.motion_extractor_from == 'rgb':
-                aux_images = images_batch[:,:self.pivot_index].contiguous()
+                aux_images = images_batch if self.include_pivot else images_batch[:,self.aux_indexes].contiguous()
                 if self.resize_images_for_me:
                     aux_images = F.interpolate(aux_images.view(-1, 3, *image_shape),size=self.images_me_target_size,  mode='bilinear')
                     aux_images = aux_images.view(batch_size, -1, 3, *self.images_me_target_size)
@@ -596,6 +595,8 @@ class VolumetricTemporalAdaINNet(nn.Module):
             lstm_keypoints_3d = lstm_keypoints_3d.view(batch_size, time, *lstm_keypoints_3d.shape[1:])
             vol_keypoints_3d = [vol_keypoints_3d, lstm_keypoints_3d]
 
+        # set_trace()
+            
         style_output = None
         if return_me_vector:
             style_output = [style_vector, style_vector_me]

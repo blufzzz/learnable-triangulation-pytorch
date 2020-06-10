@@ -92,7 +92,7 @@ def root_centering(keypoints, kind, inverse = False):
     base_joint = 6
 
     n_joints = keypoints.shape[-2]
-
+    
     base_joint_mask = torch.zeros_like(keypoints)
     base_joint_mask[:,torch.arange(n_joints) != base_joint] = keypoints[:,base_joint:base_joint+1].clone().detach()
 
@@ -223,7 +223,7 @@ def unproject_heatmaps(heatmaps,
 
     # TODO: speed up this this loop
     for batch_i in range(batch_size):
-        coord_volume = coord_volumes[batch_i//fictive_views] if (fictive_views is not None) else coord_volumes[batch_i] 
+        coord_volume = coord_volumes[batch_i//fictive_views] if fictive_views is not None else coord_volumes[batch_i] 
         grid_coord = coord_volume.reshape((-1, 3))
 
         volume_batch_to_aggregate = torch.zeros(n_views, n_joints, *volume_shape, device=device)

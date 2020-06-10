@@ -232,7 +232,7 @@ class Res1DBlock(nn.Module):
         self.res_branch = nn.Sequential(
             nn.Conv1d(in_planes, out_planes, kernel_size=kernel_size, padding=pad),
             get_normalization(normalization_type, out_planes, n_groups=n_groups, dimension=1),
-            nn.ReLU(True),
+            nn.LeakyReLU(True),
             nn.Conv1d(out_planes, out_planes, kernel_size=kernel_size),
             get_normalization(normalization_type, out_planes, n_groups=n_groups, dimension=1)
         )

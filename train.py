@@ -45,7 +45,7 @@ from mvn.datasets import utils as dataset_utils
 from IPython.core.debugger import set_trace
 import matplotlib.pyplot as plt
 
-MAKE_EXPERIMENT_DIR = True
+MAKE_EXPERIMENT_DIR = False
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -846,11 +846,16 @@ def main(args):
                             hasattr(config.opt, "process_features_lr") else config.opt.lr},
                  {'params': model.volume_net.parameters(), \
                             'lr': config.opt.volume_net_lr if \
-                            hasattr(config.opt, "volume_net_lr") else config.opt.lr},
-                 {'params': model.lstm3d.parameters(), \
+                            hasattr(config.opt, "volume_net_lr") else config.opt.lr}]+ \
+
+                ([{'params': model.lstm3d.parameters(), \
                             'lr': config.opt.lstm3d_lr if \
-                            hasattr(config.opt, "lstm3d_lr") else config.opt.lr},
-                ]+ \
+                            hasattr(config.opt, "lstm3d_lr") else config.opt.lr}] if \
+                            hasattr(model, 'lstm3d') else []) + \
+                ([{'params': model.lstm3d_feature_volumes.parameters(), \
+                            'lr': config.opt.lstm3d_feature_volumes_lr if \
+                            hasattr(config.opt, "lstm3d_feature_volumes_lr") else config.opt.lr}] if \
+                            hasattr(model, 'lstm3d_feature_volumes') else []) + \
                 ([{'params':model.entangle_processing_net.parameters(), \
                             'lr': config.opt.entangle_processing_net_lr if \
                             hasattr(config.opt, "entangle_processing_net_lr") else config.opt.lr}] if \
