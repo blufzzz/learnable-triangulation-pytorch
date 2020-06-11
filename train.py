@@ -45,7 +45,7 @@ from mvn.datasets import utils as dataset_utils
 from IPython.core.debugger import set_trace
 import matplotlib.pyplot as plt
 
-MAKE_EXPERIMENT_DIR = False
+MAKE_EXPERIMENT_DIR = True
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -239,16 +239,19 @@ def one_epoch(model,
     bone_length_weight = config.opt.bone_length_weight if hasattr(config.opt, 'bone_length_weight') else None
     keypoints_per_frame = config.dataset.keypoints_per_frame if hasattr(config.dataset, 'keypoints_per_frame') else False
 
+    lstm_output = config.model.name == 'vol_temporal_lstm'
+
     use_style_decoder = config.model.use_style_decoder if hasattr(config.model, 'use_style_decoder') else False
     decoder_loss_with_next_features = config.model.decoder_loss_with_next_features if hasattr(config.model, 'decoder_loss_with_next_features') else True
     use_time_weighted_loss = config.opt.use_time_weighted_loss if hasattr(config.opt, 'use_time_weighted_loss') else False
 
     use_style_pose_lstm_loss = config.model.use_style_pose_lstm_loss if hasattr(config.model, 'use_style_pose_lstm_loss') else False
-    if use_style_pose_lstm_loss:
-        style_pose_lstm_loss_weight = config.opt.style_pose_lstm_loss_weight if hasattr(config.opt, 'style_pose_lstm_loss_weight') else 0.1
+    if use_style_pose_lstm_loss or lstm_output:
+        style_pose_lstm_loss_weight = config.opt.style_pose_lstm_loss_weight if hasattr(config.opt, 'style_pose_lstm_loss_weight') else 1.
+        aux_lstm_VCE_loss_weight = config.opt.aux_lstm_VCE_loss_weight if hasattr(config.opt, 'aux_lstm_VCE_loss_weight') else 1.
 
     if use_temporal_discriminator:
-        assert (discriminator is not None) and (opt_discr is not None) and (not model.evaluate_only_last_volume)
+        assert (discriminator is not None) and (opt_discr is not None)
         adversarial_temporal_criterion = {'vanilla':GAN_loss(),
                                           'lsgan':LSGAN_loss()}[config.opt.adversarial_temporal_criterion]
         adversarial_temporal_loss_weight = config.opt.adversarial_temporal_loss_weight
@@ -284,9 +287,7 @@ def one_epoch(model,
                     print("Found None batch at iter {}, continue...".format(iter_i))
                     continue 
 
-                debug = False #(iter_i >= 23) 
-                if debug:
-                    set_trace()   
+                debug = False    
                 (images_batch, 
                 keypoints_3d_gt, 
                 keypoints_3d_validity_gt, 
@@ -333,8 +334,6 @@ def one_epoch(model,
                 if hasattr(model, 'style_vector_parameter'):
                     metric_dict['style_vector_parameter_variance'].append(model.style_vector_parameter.data.var().item())
 
-                if debug:
-                    set_trace()
                 ################
                 # MODEL OUTPUT #   
                 ################
@@ -349,11 +348,36 @@ def one_epoch(model,
                     keypoints_3d_pred = keypoints_3d_pred[0]
                     keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt[:,pivot_index]
 
+                # [X_t-dt,...,X_t]    
+                if lstm_output:
+                    assert keypoints_per_frame
+
+                    auxilary_keypoints_3d_gt = keypoints_3d_gt[:,:pivot_index].contiguous()
+                    auxilary_keypoints_3d_pred =  keypoints_3d_pred[:,:pivot_index]
+                    auxilary_keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt[:,:pivot_index].contiguous()
+
+                    keypoints_3d_gt = keypoints_3d_gt[:,pivot_index]
+                    keypoints_3d_pred = keypoints_3d_pred[:,pivot_index]
+                    keypoints_3d_binary_validity_gt = keypoints_3d_binary_validity_gt[:,pivot_index]
+
                 if singleview_dataset:
                     coord_volumes_pred = coord_volumes_pred - base_points_pred.unsqueeze(1).unsqueeze(1).unsqueeze(1)
                     keypoints_3d_gt = op.root_centering(keypoints_3d_gt, config.kind)
                     keypoints_3d_pred = op.root_centering(keypoints_3d_pred, config.kind)
-                    if use_style_pose_lstm_loss:
+                    if use_style_pose_lstm_loss or lstm_output:
+
+                        # need to extract aux. volumes for temporal weighted VCE loss
+                        if lstm_output:
+                            coord_volumes_pred = coord_volumes_pred.view(batch_size, dt, *coord_volumes_pred.shape[-4:])
+                            volumes_pred = volumes_pred.view(batch_size, dt, *volumes_pred.shape[-4:])
+
+                            aux_coord_volumes_pred = coord_volumes_pred[:,:pivot_index].contiguous()
+                            aux_volumes_pred = volumes_pred[:,:pivot_index].contiguous()
+                            
+                            coord_volumes_pred = coord_volumes_pred[:,pivot_index]
+                            volumes_pred = volumes_pred[:,pivot_index]
+
+
                         auxilary_keypoints_3d_gt = op.root_centering(auxilary_keypoints_3d_gt.view(-1, *keypoints_shape),
                                                                      config.kind)
                         auxilary_keypoints_3d_pred = op.root_centering(auxilary_keypoints_3d_pred.view(-1, *keypoints_shape), 
@@ -361,26 +385,30 @@ def one_epoch(model,
                         auxilary_keypoints_3d_gt = auxilary_keypoints_3d_gt.view(batch_size, -1, *keypoints_shape)
                         auxilary_keypoints_3d_pred = auxilary_keypoints_3d_pred.view(batch_size, -1, *keypoints_shape)
 
-                if debug:
-                    set_trace()            
                 ##################
                 # CALCULATE LOSS #   
                 ##################
                 # MSE\MAE loss
                 total_loss = 0.0
-                loss = criterion((keypoints_3d_pred  - keypoints_3d_gt)*scale_keypoints_3d,
-                                 keypoints_3d_binary_validity_gt)
+                loss = criterion((keypoints_3d_pred  - keypoints_3d_gt)*scale_keypoints_3d,keypoints_3d_binary_validity_gt)
 
                 total_loss += loss
                 metric_dict[f'{config.opt.criterion}'].append(loss.item())
 
                 # lstm temporal pose-style loss
-                if use_style_pose_lstm_loss:
+                if use_style_pose_lstm_loss or lstm_output:
                     if use_time_weighted_loss:
-                        future_keypoints_loss_weight = torch.stack([torch.exp(torch.arange(0,(-dt//2)+1, -1, dtype=torch.float)) \
+                        if use_style_pose_lstm_loss:
+                            future_keypoints_loss_weight = torch.stack([torch.exp(torch.arange(0,(-dt//2)+1, -1, dtype=torch.float)) \
                                                                     for i in range(batch_size)]).view(batch_size, -1,1,1).to(device)
+                        elif lstm_output: 
+                            future_keypoints_loss_weight = torch.stack([torch.exp(torch.arange((-dt)+1,0, 1, dtype=torch.float)) \
+                                                                    for i in range(batch_size)]).view(batch_size, -1,1,1).to(device)
+                        else:
+                            raise RuntimeError('Unrecognized type of `time_weighted_loss` usage')    
                     else:
-                        future_keypoints_loss_weight = 1.    
+                        future_keypoints_loss_weight = 1.
+
                     # check auxilary_keypoints_3d_pred grad_fn
                     pose_lstm_diff = (auxilary_keypoints_3d_gt - auxilary_keypoints_3d_pred)*scale_keypoints_3d*future_keypoints_loss_weight
                     validity = auxilary_keypoints_3d_binary_validity_gt.view(-1, *auxilary_keypoints_3d_binary_validity_gt.shape[-2:])
@@ -405,7 +433,6 @@ def one_epoch(model,
                 use_volumetric_ce_loss = config.opt.use_volumetric_ce_loss
                 if use_volumetric_ce_loss:
                     volumetric_ce_criterion = VolumetricCELoss()
-
                     loss = volumetric_ce_criterion(coord_volumes_pred, 
                                                     volumes_pred, 
                                                     keypoints_3d_gt, 
@@ -414,6 +441,18 @@ def one_epoch(model,
 
                     weight = config.opt.volumetric_ce_loss_weight
                     total_loss += weight * loss
+
+                    if lstm_output and use_time_weighted_loss:
+                        future_keypoints_loss_weight = future_keypoints_loss_weight.expand(*auxilary_keypoints_3d_binary_validity_gt.shape)
+                        # pass squeezed tensors
+                        loss = volumetric_ce_criterion(aux_coord_volumes_pred.view(-1, *aux_coord_volumes_pred.shape[2:]), 
+                                                        aux_volumes_pred.view(-1, *aux_volumes_pred.shape[2:]), 
+                                                        auxilary_keypoints_3d_gt.view(-1, *auxilary_keypoints_3d_gt.shape[2:]), 
+                                                        future_keypoints_loss_weight.view(-1, *future_keypoints_loss_weight.shape[2:]))
+
+                        total_loss += aux_lstm_VCE_loss_weight * loss
+                        metric_dict['aux_lstm_VCE_loss'].append(loss.item())    
+
 
                 # temporal adversarial loss        
                 if use_temporal_discriminator: 
@@ -476,8 +515,6 @@ def one_epoch(model,
                     total_loss += pelvis_loss
                     metric_dict['pelvis_loss_weighted'].append(pelvis_loss.item())
 
-                if debug:
-                    set_trace()    
                 ############
                 # BACKWARD #   
                 ############
@@ -502,8 +539,6 @@ def one_epoch(model,
                     opt.step()
 
 
-                if debug:
-                    set_trace()    
                 ###########
                 # METRICS #   
                 ###########
@@ -545,8 +580,6 @@ def one_epoch(model,
                     results['keypoints_3d'].append(keypoints_3d_pred.detach().cpu().numpy())
                     results['indexes'].append(batch['indexes'])
                 
-                if debug:    
-                    set_trace()
                 #################
                 # VISUALIZATION #   
                 #################        

@@ -93,7 +93,6 @@ class VolumetricTemporalLSTM(nn.Module):
         self.entangle_processing_type = config.model.entangle_processing_type
         self.epn_normalization_type = config.model.entangle_processing_normalization_type
 
-        self.evaluate_only_last_volume = config.model.evaluate_only_last_volume
         self.use_final_processing = self.lstm_on_pose_volumes and (self.lstm_out_channels != self.num_joints) and not self.disentangle
 
         # modules
@@ -204,53 +203,48 @@ class VolumetricTemporalLSTM(nn.Module):
                                      coord_volumes, 
                                      volume_aggregation_method=self.volume_aggregation_method,
                                      vol_confidences=vol_confidences,
-                                     fictive_views=dt if (self.evaluate_only_last_volume and not self.keypoints_for_each_frame) else None # TODO: get rid of that shit
+                                     fictive_views=None
                                      )
-
         if self.lstm_on_feature_volumes:
-            volumes = volumes.view(batch_size, dt, *volumes.shape[1:])
+            volumes = volumes.view(batch_size, dt, *volumes.shape[-4:])
             volumes, _ = self.lstm3d_feature_volumes(volumes, None)
+            volumes = volumes.view(batch_size*dt, *volumes.shape[-4:])
 
-        volumes = volumes.view(batch_size*dt, *volumes.shape[-4:])
         volumes = self.volume_net(volumes) 
-        volumes = volumes.view(batch_size, dt, *volumes.shape[-4:])
+        # squeezed
 
         if self.lstm_on_pose_volumes:
+            # unqueezed
+            volumes = volumes.view(batch_size, dt, *volumes.shape[-4:])
             rnn_volumes, _ = self.lstm3d(volumes, None) 
             if self.disentangle:
-                rnn_volumes = rnn_volumes.view(-1, *rnn_volumes.shape[2:])
-                volumes = volumes.view(-1, *volumes.shape[2:])
                 
                 if self.entangle_processing_type == 'stack':
-                    volumes = torch.cat([volumes, rnn_volumes], 1)
+                    volumes = torch.cat([volumes, rnn_volumes], 2)
                 else: #self.entangle_processing_type == 'sum':
                     volumes = volumes + rnn_volumes
-                
+                volumes = volumes.view(-1, *volumes.shape[-4:])    
                 volumes = self.entangle_processing_net(volumes)
-                volumes = volumes.view(batch_size, dt, *volumes.shape[1:])
+                # squeezed
             else:
-                volumes = rnn_volumes    
+                volumes = rnn_volumes
+                volumes = volumes.view(batch_size*dt, *volumes.shape[-4:])  
+                # squeezed    
 
         if self.use_final_processing:
-            volumes = volumes.view(-1, *volumes.shape[2:])     
+            volumes = volumes.view(-1, *volumes.shape[-4:])     
             volumes = self.final_processing(volumes)   
-            volumes = volumes.view(batch_size, dt, *volumes.shape[1:])  
-
-        if self.evaluate_only_last_volume: 
-            # take all stuff for the last volume
-            volumes = volumes[:,-1,...]
-            if self.keypoints_for_each_frame:
-                coord_volumes = coord_volumes.view(batch_size, dt, *coord_volumes.shape[1:])[:,-1,...]
-                base_points = base_points[:,-1,...]
-        else:
-            volumes = volumes.view(-1, *volumes.shape[-4:])  
-            base_points = base_points.view(-1, *base_points.shape[-1:])  
+            # squeezed    
 
         # integral 3d
-        vol_keypoints_3d, volumes = integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier,
-                                                                            coord_volumes,
-                                                                            softmax=self.volume_softmax)
-        set_trace()
+        vol_keypoints_3d, volumes = integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
+        volumes = volumes.view(batch_size, dt, *volumes.shape[-4:])
+        vol_keypoints_3d = vol_keypoints_3d.view(batch_size, dt, *vol_keypoints_3d.shape[-2:]) 
+
+        coord_volumes = coord_volumes.view(batch_size*dt, *coord_volumes.shape[-4:]) 
+        base_points = base_points.view(batch_size*dt, *base_points.shape[-1:]) 
+
+
         return (vol_keypoints_3d,
                 None, # features
                 volumes,
