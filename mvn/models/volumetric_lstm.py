@@ -26,6 +26,7 @@ from mvn.models.temporal import Seq2VecRNN,\
                                 StylePosesLSTM
 
 from pytorch_convolutional_rnn.convolutional_rnn import Conv3dLSTM
+from mvn.models.e3d_lstm import E3DLSTM
 from IPython.core.debugger import set_trace
 
 
@@ -66,7 +67,8 @@ class VolumetricTemporalLSTM(nn.Module):
         self.v2v_type = config.model.v2v_type
         self.v2v_normalization_type = config.model.v2v_normalization_type
         self.include_pivot = config.model.include_pivot
-         
+        
+        self.lstm_type = config.model.lstm_type if hasattr(config.model, 'lstm_type') else 'C3DLSTM' 
         # before v2v
         self.lstm_on_feature_volumes = config.model.lstm_on_feature_volumes if \
                                        hasattr(config.model, 'lstm_on_feature_volumes') else False
@@ -83,6 +85,7 @@ class VolumetricTemporalLSTM(nn.Module):
             self.lstm_out_channels = config.model.lstm_out_channels
             self.lstm_bidirectional = config.model.lstm_bidirectional
             self.lstm_layers = config.model.lstm_layers
+        self.eidetic_lstm_tau = config.model.eidetic_lstm_tau if hasattr(config.model,'eidetic_lstm_tau') else None
 
         # features
         if self.lstm_on_feature_volumes:
@@ -93,28 +96,52 @@ class VolumetricTemporalLSTM(nn.Module):
         self.entangle_processing_type = config.model.entangle_processing_type
         self.epn_normalization_type = config.model.entangle_processing_normalization_type
 
-        self.use_final_processing = self.lstm_on_pose_volumes and (self.lstm_out_channels != self.num_joints) and not self.disentangle
-
         # modules
         self.backbone = pose_resnet.get_pose_net(config.model.backbone,
                                                  device=device,
                                                  strict=True)
         
         if self.lstm_on_pose_volumes:
-            self.lstm3d = Conv3dLSTM(in_channels=self.lstm_in_channels, 
-                                     out_channels=self.lstm_out_channels,
-                                     bidirectional=self.lstm_bidirectional,
-                                     num_layers=self.lstm_layers,
-                                     batch_first=True,
-                                     kernel_size=3)
+            if self.lstm_type == 'C3DLSTM':
+                self.lstm3d = Conv3dLSTM(in_channels=self.lstm_in_channels, 
+                                         out_channels=self.lstm_out_channels,
+                                         bidirectional=self.lstm_bidirectional,
+                                         num_layers=self.lstm_layers,
+                                         batch_first=True,
+                                         kernel_size=3)
+
+            elif self.lstm_type == 'E3DLSTM':
+                self.lstm3d = E3DLSTM(input_shape=[self.lstm_in_channels, 
+                                                    self.volume_size,
+                                                    self.volume_size,
+                                                    self.volume_size],
+                                      hidden_size=self.lstm_out_channels, 
+                                      num_layers = self.lstm_layers, 
+                                      kernel_size=(3, 3, 3),
+                                      tau=self.eidetic_lstm_tau)
+            else:
+                raise RuntimeError('Wrong `lstm_type`') 
+
 
         if self.lstm_on_feature_volumes:
-            self.lstm3d_feature_volumes = Conv3dLSTM(in_channels=self.volume_features_dim, 
-                                                     out_channels=self.volume_features_dim,
-                                                     bidirectional=self.lstm_bidirectional_features,
-                                                     num_layers=self.lstm_layers_features,
-                                                     batch_first=True,
-                                                     kernel_size=3)
+            if self.lstm_type == 'C3DLSTM':
+                self.lstm3d_feature_volumes = Conv3dLSTM(in_channels=self.volume_features_dim, 
+                                                         out_channels=self.volume_features_dim,
+                                                         bidirectional=self.lstm_bidirectional_features,
+                                                         num_layers=self.lstm_layers_features,
+                                                         batch_first=True,
+                                                         kernel_size=3)
+            elif self.lstm_type == 'E3DLSTM':
+                self.lstm3d = E3DLSTM(input_shape=[self.volume_features_dim, 
+                                                    self.volume_size,
+                                                    self.volume_size,
+                                                    self.volume_size],
+                                      hidden_size=64, 
+                                      num_layers = self.lstm_layers, 
+                                      kernel_size=(3, 3, 3),
+                                      tau=self.eidetic_lstm_tau)
+            else:
+                raise RuntimeError('Wrong `lstm_type`') 
 
         if self.disentangle:
             if self.entangle_processing_type == 'stack':
@@ -149,6 +176,7 @@ class VolumetricTemporalLSTM(nn.Module):
 
         self.process_features = nn.Conv2d(256, self.volume_features_dim, 1)
 
+        self.use_final_processing = self.lstm_on_pose_volumes and (self.lstm_out_channels != self.num_joints) and not self.disentangle
         if self.use_final_processing:
             self.final_processing = nn.Conv3d(self.lstm_out_channels, self.num_joints, 1)
 
@@ -216,6 +244,7 @@ class VolumetricTemporalLSTM(nn.Module):
         if self.lstm_on_pose_volumes:
             # unqueezed
             volumes = volumes.view(batch_size, dt, *volumes.shape[-4:])
+            # set_trace()
             rnn_volumes, _ = self.lstm3d(volumes, None) 
             if self.disentangle:
                 

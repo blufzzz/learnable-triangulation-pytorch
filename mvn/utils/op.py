@@ -186,6 +186,14 @@ def integrate_tensor_3d(volumes, softmax=True):
 
     return coordinates, volumes
 
+def softmax_volumes(volumes):
+    batch_size, n_volumes, x_size, y_size, z_size = volumes.shape
+
+    volumes = volumes.reshape((batch_size, n_volumes, -1))
+    volumes = nn.functional.softmax(volumes, dim=2)
+    volumes = volumes.reshape((batch_size, n_volumes, x_size, y_size, z_size))
+    return volumes    
+
 
 def integrate_tensor_3d_with_coordinates(volumes, coord_volumes, softmax=True):
     batch_size, n_volumes, x_size, y_size, z_size = volumes.shape
@@ -200,6 +208,31 @@ def integrate_tensor_3d_with_coordinates(volumes, coord_volumes, softmax=True):
     coordinates = torch.einsum("bnxyz, bxyzc -> bnc", volumes, coord_volumes)
 
     return coordinates, volumes
+
+
+def make_3d_heatmap(coord_volumes, tri_keypoints_3d):
+    coord_volume_unsq = coord_volumes.unsqueeze(1)
+    keypoints_gt_i_unsq = tri_keypoints_3d.unsqueeze(2).unsqueeze(2).unsqueeze(2)
+    dists = torch.sqrt(((coord_volume_unsq - keypoints_gt_i_unsq) ** 2).sum(-1))
+    H = torch.zeros_like(dists)
+
+    for k,w in zip([1,2,3,4],
+                  [3,3,3,3]):
+        n_cells = k**3
+        knn = dists.view(*dists.shape[:-3],-1).topk(n_cells,dim=-1,largest=False)
+        if hasattr(knn, 'values'):
+            radius = knn.values.max(dim=-1)[0].unsqueeze(2).unsqueeze(2).unsqueeze(2)
+        else:
+            # torch 1.0.0 version
+            radius = knn[0].max(dim=-1)[0].unsqueeze(2).unsqueeze(2).unsqueeze(2)
+        mask = dists <= radius
+        # try:
+        #     assert mask.sum() / n_cells == 17
+        # except Exception as e:
+        #     set_trace()
+        H[mask] += w   
+    style_vector_volumes = F.softmax(H.view(*H.shape[:-3], -1),dim=-1).view(*mask.shape)
+    return style_vector_volumes
 
 
 def unproject_heatmaps(heatmaps,

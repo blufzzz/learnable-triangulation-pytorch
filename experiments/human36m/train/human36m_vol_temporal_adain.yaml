@@ -1,9 +1,8 @@
-title: "human36m_vol_softmax"
+title: "human36m_vol_temporal_adain_softmax"
 kind: "human36m"
 vis_freq: 1000
 vis_n_elements: 10
-visalize: false
-distributed_train: false
+distributed_train: true
 image_shape: [384, 384]
 visualize: false
 
@@ -15,80 +14,66 @@ opt:
 
   n_objects_per_epoch: 10000
   n_epochs: 9999
+  dump_weights: False
 
   batch_size: 1
   val_batch_size: 1
 
+  use_style_pose_vce_loss: false
+  use_style_pose_criterion_loss: false
+
   lr: 0.0001
   process_features_lr: 0.001
-  volume_net_lr: 0.001
-  encoder_lr: 0.001
-  motion_extractor_lr: 0.001
-
+  volume_net_lr: 0.0001
   scale_keypoints_3d: 0.1
-  grad_clip: 0.01
+
   save_model: false
   silence: false
+  grad_clip: 0.01
 
 model:
   name: "vol_temporal_adain"
   kind: "mpii"
-  volume_aggregation_method: "no_aggregation"
-  v2v_normalization_type: 'group_norm'
 
-  use_compound_norm: true
-  temporal_condition_type: 'adain_mlp'
-  spade_broadcasting_type: null
-  style_grad_for_backbone: false
-  include_pivot: true
+  encoder_type: "features"
+  encoder_capacity_multiplier: 0
+  encoder_normalization_type: 'group_norm'
+  encoded_feature_space: 256
+  upscale_bottleneck: false # True only with encoder_type='backbone' and '2d f2v'
 
-  use_motion_extractor: true
-  motion_extractor_type: 'r2d'
-  n_r2d_layers: 4
-  resize_images_for_me: true
-  images_me_target_size: [112,112]
-  motion_extractor_from: 'rgb'
-  upscale_me_heatmap: false
-  output_volume_dim: 1
-
-  f2v_type: null
+  f2v_type: 'target_heatmaps'
+  f2v_normalization_type: 'group_norm'
   f2v_intermediate_channels: null
-  f2v_normalization_type: 'batch_norm'
+  style_vector_dim: 17
 
-  encoder_type: null
-  encoder_capacity_multiplier: null
-  encoded_feature_space: null
-  encoder_normalization_type: null
-  upscale_bottleneck: null
-  
-  style_vector_dim: 1024
+  v2v_type: 'conf' # ['v1', 'conf']
+  v2v_normalization_type: 'group_norm'
+  volume_aggregation_method: "no_aggregation"
+  temporal_condition_type: 'spade' 
+  spade_broadcasting_type: 'interpolate' #'unprojecting'
+  volume_features_dim: 64
+  include_pivot: false 
+  style_grad_for_backbone: false
 
-  v2v_type: 'conf'
   init_weights: false
   checkpoint: ""
-  volume_additional_grid_offsets: false
-  max_cell_size_multiplier: null
 
   use_gt_pelvis: true
   use_precalculated_pelvis: false
   use_volumetric_pelvis: false
 
-  cuboid_side: 2500.0
+  cuboid_side: 2500
   cuboid_multiplier: 1.0
   rotation: false
 
-  volume_features_dim: 64
   volume_size: 32
   volume_multiplier: 1.0
   volume_softmax: true
 
-  heatmap_softmax: true
-  heatmap_multiplier: 100.0
-
   transfer_cmu_to_human36m: false
 
   backbone:
-    name: "resnet50"
+    name: "resnet50"  #"resnet50" #"resnet152"
     style: "simple"
 
     group_norm: true
@@ -96,13 +81,12 @@ model:
     checkpoint: "./data/pose_resnet_4.5_pixels_human36m.pth"
 
     num_joints: 17
-    num_layers: 50
+    num_layers: 50 #50 #152
 
     alg_confidences: false
     vol_confidences: false
     return_heatmaps: false
-    return_bottleneck: false
-    return_features: true
+    return_bottleneck: true
 
   v2v_configuration:
 
@@ -131,10 +115,11 @@ model:
                   {'module_type': 'Res3DBlock', 'params':[64,64], 'adain': true}]
                   # last should be Res3DBlock
 
+
 dataset:
   kind: "human36m"
-  dt: 12
-  dilation: 3
+  dt: 11
+  dilation: 1
   singleview: true
   pivot_type: 'first'
 
@@ -157,7 +142,7 @@ dataset:
   val:
     h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"
     labels_path: "/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy"
-    pred_results_path:
+    pred_results_path: 
 
     with_damaged_actions: true
     undistort_images: false

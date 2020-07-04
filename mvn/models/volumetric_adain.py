@@ -89,12 +89,24 @@ class VolumetricTemporalAdaINNet(nn.Module):
         self.params_evolution = config.model.params_evolution if hasattr(config.model, 'params_evolution') else False
         self.style_forward = config.model.style_forward if hasattr(config.model, 'style_forward') else False
 
+        # modules dimensions
+        self.volume_features_dim = config.model.volume_features_dim
+        self.style_vector_dim = config.model.style_vector_dim
+        self.encoded_feature_space = config.model.encoded_feature_space
 
+
+        #####################
+        # ADDITIONAL LOSSES #
+        #####################
         self.use_style_decoder = config.model.use_style_decoder if hasattr(config.model, 'use_style_decoder') else False
         if self.use_style_decoder:
             self.style_decoder_type = config.model.style_decoder_type if hasattr(config.model, 'style_decoder_type') else 'v2v'
 
         self.use_style_pose_lstm_loss = config.model.use_style_pose_lstm_loss if hasattr(config.model, 'use_style_pose_lstm_loss') else False
+        self.use_style_pose_vce_loss =  config.opt.use_style_pose_vce_loss if hasattr(config.opt, 'use_style_pose_vce_loss') else False
+        self.use_style_pose_criterion_loss =  config.opt.use_style_pose_criterion_loss if hasattr(config.opt, 'use_style_pose_criterion_loss') else False
+        if self.use_style_pose_vce_loss or self.use_style_pose_criterion_loss:
+            self.style_to_volumes = nn.Conv3d(self.style_vector_dim, self.num_joints, 1)
 
         self.use_motion_extractor = config.model.use_motion_extractor if hasattr(config.model, 'use_motion_extractor') else False
         if self.use_motion_extractor:   
@@ -102,11 +114,6 @@ class VolumetricTemporalAdaINNet(nn.Module):
             self.motion_extractor_from = config.model.motion_extractor_from
             self.resize_images_for_me = config.model.resize_images_for_me if hasattr(config.model, 'resize_images_for_me') else False
             self.images_me_target_size = config.model.images_me_target_size if hasattr(config.model, 'images_me_target_size') else None
-        
-        # modules dimensions
-        self.volume_features_dim = config.model.volume_features_dim
-        self.style_vector_dim = config.model.style_vector_dim
-        self.encoded_feature_space = config.model.encoded_feature_space
             
         ############
         # BACKBONE #   
@@ -274,10 +281,14 @@ class VolumetricTemporalAdaINNet(nn.Module):
                                                         'interpolate':[self.volume_size,self.volume_size,self.volume_size]}[self.spade_broadcasting_type]
                 self.style_vector_parameter = nn.Parameter(data = torch.randn(self.style_vector_dim, *style_vector_parameter_shape))
                 nn.init.xavier_normal_(self.style_vector_parameter.data)                
+            
+            elif self.f2v_type == 'target_heatmaps':
+                pass
+
             else:
                 raise RuntimeError('Wrong features_sequence_to_vector type')
 
-            if self.f2v_type != 'const' and (not self.use_motion_extractor):
+            if self.f2v_type not in ['const', 'target_heatmaps'] and (not self.use_motion_extractor):
                 self.encoder = get_encoder(self.encoder_type,
                                            config.model.backbone.name,
                                            self.encoded_feature_space,
@@ -359,8 +370,7 @@ class VolumetricTemporalAdaINNet(nn.Module):
         decode_second_part = self.use_style_decoder and (self.style_decoder_part == 'after_pivot')
         decode_first_part = self.use_style_decoder and (self.style_decoder_part == 'before_pivot')
         
-        # FIX
-        process_only_pivot_image = (self.use_motion_extractor and self.motion_extractor_from == 'rgb') or self.f2v_type == 'const'
+        process_only_pivot_image = (self.use_motion_extractor and self.motion_extractor_from == 'rgb') or self.f2v_type in ['const', 'target_heatmaps']
         process_first_half_of_images = self.use_style_pose_lstm_loss and (not decode_second_part)
 
         if process_only_pivot_image:
@@ -398,7 +408,6 @@ class VolumetricTemporalAdaINNet(nn.Module):
                 aux_features = features if self.include_pivot else features[:,aux_indexes_in_output,...].contiguous()
 
                 # set_trace()
-
                 if decode_second_part:
                     # before pivot
                     aux_features = aux_features[:,:dt//2,...].contiguous()
@@ -422,7 +431,26 @@ class VolumetricTemporalAdaINNet(nn.Module):
         proj_matricies_batch = update_camera(batch, batch_size, image_shape, features_shape, dt, device)
         proj_matricies_batch = proj_matricies_batch[:,self.pivot_index,...].unsqueeze(1) # pivot camera 
 
-        # set_trace()
+        ##########
+        # PELVIS #   
+        ##########            
+        if self.pelvis_type =='gt':
+            tri_keypoints_3d = torch.from_numpy(np.array(batch['keypoints_3d'])[...,:3]).type(torch.float).to(device)
+        else:
+            raise RuntimeError('In absence of precalculated pelvis or gt pelvis, self.use_volumetric_pelvis should be True') 
+        
+        #####################
+        # VOLUMES CREATING  #   
+        #####################
+        coord_volumes, _, base_points = get_coord_volumes(self.kind, 
+                                                            self.training, 
+                                                            self.rotation,
+                                                            self.cuboid_side,
+                                                            self.volume_size, 
+                                                            device,
+                                                            keypoints=tri_keypoints_3d
+                                                            )
+
         ###############################
         # TEMPORAL FEATURE ECTRACTION #   
         ###############################
@@ -450,7 +478,7 @@ class VolumetricTemporalAdaINNet(nn.Module):
                                                                          *bottleneck_shape).transpose(1,2))    
             else:
                 raise RuntimeError('Wrong `motion_extractor_from`')    
-        elif self.f2v_type != 'const':    
+        elif self.f2v_type in ['lstm', 'cnn', 'lstm2d', 'cnn2d']:    
             if self.encoder_type == 'backbone':
                 aux_bottleneck = aux_bottleneck if self.style_grad_for_backbone else aux_bottleneck.clone().detach()
                 encoded_features = self.encoder(aux_bottleneck)
@@ -467,8 +495,31 @@ class VolumetricTemporalAdaINNet(nn.Module):
         
         elif self.f2v_type == 'const':
             style_vector = torch.stack([self.style_vector_parameter]*batch_size,0)
+
+        #########################
+        # TARGET HEATMAPS STYLE #
+        #########################
+        elif self.f2v_type == 'target_heatmaps':
+            coord_volume_unsq = coord_volumes.unsqueeze(1)
+            keypoints_gt_i_unsq = tri_keypoints_3d.unsqueeze(2).unsqueeze(2).unsqueeze(2)
+
+            dists = torch.sqrt(((coord_volume_unsq - keypoints_gt_i_unsq) ** 2).sum(-1))
+            H = torch.zeros_like(dists)
+
+            for k,w in zip([1,2,3,4],
+                          [3,3,3,3]):
+                n_cells = k**3
+                knn = dists.view(*dists.shape[:-3],-1).topk(n_cells,dim=-1,largest=False)
+                radius = knn.values.max(dim=-1)[0].unsqueeze(2).unsqueeze(2).unsqueeze(2)
+                mask = dists <= radius
+                # try:
+                #     assert mask.sum() / n_cells == 17
+                # except Exception as e:
+                #     set_trace()
+                H[mask] += w   
+            style_vector = F.softmax(H.view(*H.shape[:-3], -1),dim=-1).view(*mask.shape) 
         else:
-            raise RuntimeError('No tempora feature extractor has been defined!')    
+            raise RuntimeError('No temporal feature extractor has been defined!')
 
         #########
         # DEBUG #   
@@ -482,26 +533,6 @@ class VolumetricTemporalAdaINNet(nn.Module):
                 print ('STYLE_VECTOR_CONST INITED')
             else:
                 style_vector = torch.tensor(self.STYLE_VECTOR_CONST).to(device)
-
-        ##########
-        # PELVIS #   
-        ##########            
-        if self.pelvis_type =='gt':
-            tri_keypoints_3d = torch.from_numpy(np.array(batch['keypoints_3d'])[...,:3]).type(torch.float).to(device)
-        else:
-            raise RuntimeError('In absence of precalculated pelvis or gt pelvis, self.use_volumetric_pelvis should be True') 
-        
-        #####################
-        # VOLUMES CREATING  #   
-        #####################
-        coord_volumes, _, base_points = get_coord_volumes(self.kind, 
-                                                            self.training, 
-                                                            self.rotation,
-                                                            self.cuboid_side,
-                                                            self.volume_size, 
-                                                            device,
-                                                            keypoints=tri_keypoints_3d
-                                                            )
 
         if self.use_style_pose_lstm_loss:
             lstm_coord_volumes = coord_volumes[:,self.pivot_index+1:,...].contiguous()
@@ -539,7 +570,7 @@ class VolumetricTemporalAdaINNet(nn.Module):
                                                      size=(self.volume_size,self.volume_size,self.volume_size), 
                                                      mode='trilinear')
             else:
-                raise KeyError('Unknown spade_broadcasting_type')
+                raise KeyError('Unknown spade_broadcasting_type')        
 
         ########################## 
         # VOLUMES FEEDING TO V2V #   
@@ -602,8 +633,10 @@ class VolumetricTemporalAdaINNet(nn.Module):
             style_output = [style_vector, style_vector_me]
         elif self.style_forward:
             style_output = [style_vector, style_vector_volumes_output]
+        elif self.use_style_pose_vce_loss or self.use_style_pose_criterion_loss:
+            style_output = self.style_to_volumes(style_vector_volumes)
         else:
-            style_output = style_vector
+            style_output = style_vector_volumes
         return [vol_keypoints_3d,
                 features_for_loss if self.use_style_decoder else None,
                 volumes,

@@ -1,13 +1,13 @@
 #!/bin/bash
-srun -p TitanX --gres=gpu --exclusive --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w hpc2 \
-python train.py \
---logdir=../logs/resnet_50/lstm3d_old \
---config=./experiments/human36m/train/human36m_vol_temporal_lstm.yaml \
---experiment_comment='h36_sv32_dist_lstm3d-features-pose-1\1d-1\1l-32-32_v2v-v1-gn_epn-v2v-2l-64-128-64-gn-noskip-stack_resnet50-gn_dt-8_dil-3-1-1_noaggr_eval-all-exptimeweight-1'
+srun -p TitanX --gres=gpu --exclusive --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w hpc3 \
+python train_spade.py \
+--logdir=../logs/spade_resnet_50/spade_debug \
+--config=./experiments/human36m/train/human36m_vol_spade_debug.yaml \
+--experiment_comment='h36_sv32_dist_stack3d-interpolate-gn_S2S-v2v-pretr_V2V-conf-gn-vf64-lr1e-3_dt-1_dil-1-bs1-1' # -only-v2v-trainableq
 
-#h36_sv32_dist_AdaIN-MLP-all-GN_S2S-cnn-1024-1024-1024-GN-lr1e-3_V2V-conf-vf32-lr1e-3_E-C4-1024-group_BACK-resnet50-GN-nostylegrad_dt-12_dil-3-1-1@05.06.2020-16:15:03
-# --experiment_comment='h36_sv32_dist_spade3d-HALF-h128-unproject-gn-bn-conf-leakyrelu_s2v-R2D-lr1e-5-upscale-1-avg-RGB-112-64_vf64_resnet50-1e-4-gn_dt-10_dil-1_bs1-1_lr5e-4-b1-0.8_norot_gradclip-1e-2'
-# --logdir=../logs/resnet_50/baseline \
-# --config=./experiments/human36m/train/human36m_vol_baseline.yaml \
-# --experiment_comment='h36_sv32_dist_resnet50-gn_bottleneck-camera-space-1e-1_v2v-v1-gn-no-aggr_1-1_lr-1e-4'
+# srun -p TitanX --gres=gpu --exclusive --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w hpc3 \
+# python train.py \
+# --logdir=../logs/spade_resnet_50/spade_rnn \
+# --config=./experiments/human36m/train/human36m_vol_temporal_rnn_spade.yaml \
+# --experiment_comment='h36_sv32_dist_spade3d-rnn-128-interpolate-gn_S2S-V2V-PREV_V2V-conf-gn-vf64_dt-6_dil-1-bs1-1_eval-all-exptimeweight-MAE-1-consttimeweight-VCE-1-GT-ALL'
 

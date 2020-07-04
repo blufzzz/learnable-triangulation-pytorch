@@ -2,7 +2,7 @@ title: "human36m_vol_temporal_lstm_adain_softmax"
 kind: "human36m"
 vis_freq: 1000
 vis_n_elements: 10
-distributed_train: true
+distributed_train: false
 image_shape: [384, 384]
 visualize: false
 
@@ -10,11 +10,11 @@ opt:
   criterion: "MAE"
 
   use_volumetric_ce_loss: true
-  volumetric_ce_loss_weight: 0.1
+  volumetric_ce_loss_weight: 0.01
 
   use_time_weighted_loss: true
   style_pose_lstm_loss_weight: 1.
-  aux_lstm_VCE_loss_weight: 1.
+  aux_lstm_VCE_loss_weight: 0.01
 
   use_temporal_discriminator: false
   # adversarial_temporal_criterion: 'vanilla'
@@ -32,35 +32,28 @@ opt:
   lr: 0.0001
   process_features_lr: 0.001
   volume_net_lr: 0.001
-  lstm3d_feature_volumes_lr: 0.001
   lstm3d_lr: 0.001
-  entangle_processing_net_lr: 0.001
+  final_processing_lr: 0.001
 
   scale_keypoints_3d: 0.1
 
   save_model: true
   silence: false
 
-discriminator:
-  intermediate_channels: 1024
-  normalization_type: 'group_norm'
- 
 model:
   name: "vol_temporal_lstm"
   kind: "mpii"
 
-  lstm_on_feature_volumes: true
+  lstm_type: 'C3DLSTM'
+  lstm_on_feature_volumes: false
   lstm_on_pose_volumes: true
-  
-  lstm_bidirectional_features: false
-  lstm_layers_features: 1
 
   lstm_in_channels: 32
-  lstm_out_channels: 32
+  lstm_out_channels: 32  
   lstm_bidirectional: false
   lstm_layers: 1
 
-  disentangle: true
+  disentangle: false
   entangle_processing_type: 'stack'
   entangle_processing_normalization_type: 'group_norm'
 
@@ -103,8 +96,6 @@ model:
 
   epn_configuration:  
     use_skip_connection: false
-    skip_block_adain: false
-    skip_block_type: 'Res3DBlock'
 
                   # first should be Res3DBlock
     downsampling: [{'module_type': 'Res3DBlock', 'params':[64,128], 'adain': false},
@@ -115,7 +106,6 @@ model:
     upsampling: [{'module_type': 'Res3DBlock', 'params':[128,64], 'adain': false},
                 {'module_type': 'Res3DBlock', 'params':[64,64], 'adain': false}]
                   # last should be Res3DBlock
-
 
   v2v_configuration:
 

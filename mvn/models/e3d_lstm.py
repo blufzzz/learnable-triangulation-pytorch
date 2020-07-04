@@ -5,15 +5,14 @@ import operator
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from tqdm import tqdm_notebook
+from IPython.core.debugger import set_trace
 
 
 class E3DLSTM(nn.Module):
     def __init__(self, input_shape, hidden_size, num_layers, kernel_size, tau):
         super().__init__()
 
-        '''
-        input_shape - [in_channels, dt, ]
-        '''
 
         self._tau = tau
         self._cells = []
@@ -27,8 +26,9 @@ class E3DLSTM(nn.Module):
             # Hook to register submodule
             setattr(self, "cell{}".format(i), cell)
 
-    def forward(self, input):
+    def forward(self, input, *args):
         # NOTE (seq_len, batch, input_shape)
+        input = input.transpose(0,1)
         batch_size = input.size(1)
         c_history_states = []
         h_states = []
@@ -37,6 +37,7 @@ class E3DLSTM(nn.Module):
         for step, x in enumerate(input): # x - [batch, *input_shape]
             for cell_idx, cell in enumerate(self._cells):
                 if step == 0:
+                    torch.cuda.empty_cache() # Does it help?
                     c_history, m, h = self._cells[cell_idx].init_hidden(
                         batch_size, self._tau, input.device
                     )
@@ -55,7 +56,7 @@ class E3DLSTM(nn.Module):
             outputs.append(h)
 
         # NOTE Concat along the channels
-        return torch.cat(outputs, dim=1)
+        return torch.stack(outputs, dim=1), None
 
 
 class E3DLSTMCell(nn.Module):
@@ -123,6 +124,8 @@ class E3DLSTMCell(nn.Module):
 
     def forward(self, x, c_history, m, h):
         # Normalized shape for LayerNorm is CxT×H×W
+
+        # My comment: x \in [batch_size,C,H,W,D]
         normalized_shape = list(h.shape[-3:])
 
         def LR(input):

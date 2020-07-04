@@ -28,6 +28,7 @@ from mvn.models.triangulation import VolumetricTriangulationNet
 from mvn.models.volumetric_adain import VolumetricTemporalAdaINNet
 from mvn.models.volumetric_lstm import VolumetricTemporalLSTM
 from mvn.models.volumetric_grid import VolumetricTemporalGridDeformation
+from mvn.models.volumetric_rnn_spade import VolumetricRNNSpade
 from mvn.models.temporal import Seq2VecCNN
 from mvn.models.loss import KeypointsMSELoss, \
                             KeypointsMSESmoothLoss, \
@@ -41,6 +42,7 @@ from mvn.utils import img, multiview, op, vis, misc, cfg
 
 from mvn.datasets.human36m import Human36MTemporalDataset, Human36MMultiViewDataset
 from mvn.datasets import utils as dataset_utils
+from mvn.utils.op import get_coord_volumes, unproject_heatmaps, integrate_tensor_3d_with_coordinates, softmax_volumes
 
 from IPython.core.debugger import set_trace
 import matplotlib.pyplot as plt
@@ -61,7 +63,6 @@ def parse_args():
 
     args = parser.parse_args()
     return args
-
 
 def setup_human36m_dataloaders(config, is_train, distributed_train):
     train_dataloader = None
@@ -160,7 +161,7 @@ def setup_dataloaders(config, is_train=True, distributed_train=False):
     return train_dataloader, val_dataloader, train_sampler
 
 
-def setup_experiment(config, model_name, is_train=True):
+def setup_experiment(config, model_name, args, is_train=True):
     prefix = "" if is_train else "eval_"
 
     if config.title:
@@ -239,13 +240,13 @@ def one_epoch(model,
     bone_length_weight = config.opt.bone_length_weight if hasattr(config.opt, 'bone_length_weight') else None
     keypoints_per_frame = config.dataset.keypoints_per_frame if hasattr(config.dataset, 'keypoints_per_frame') else False
 
-    lstm_output = config.model.name == 'vol_temporal_lstm'
+    lstm_output = config.model.name in ['vol_temporal_lstm', 'vol_rnn_spade']
 
     use_style_decoder = config.model.use_style_decoder if hasattr(config.model, 'use_style_decoder') else False
     decoder_loss_with_next_features = config.model.decoder_loss_with_next_features if hasattr(config.model, 'decoder_loss_with_next_features') else True
     use_time_weighted_loss = config.opt.use_time_weighted_loss if hasattr(config.opt, 'use_time_weighted_loss') else False
-
     use_style_pose_lstm_loss = config.model.use_style_pose_lstm_loss if hasattr(config.model, 'use_style_pose_lstm_loss') else False
+    
     if use_style_pose_lstm_loss or lstm_output:
         style_pose_lstm_loss_weight = config.opt.style_pose_lstm_loss_weight if hasattr(config.opt, 'style_pose_lstm_loss_weight') else 1.
         aux_lstm_VCE_loss_weight = config.opt.aux_lstm_VCE_loss_weight if hasattr(config.opt, 'aux_lstm_VCE_loss_weight') else 1.
@@ -257,6 +258,11 @@ def one_epoch(model,
         adversarial_temporal_loss_weight = config.opt.adversarial_temporal_loss_weight
         adversarial_generator_iters = config.opt.adversarial_generator_iters 
         train_generator_during_critic_iters = config.opt.train_generator_during_critic_iters                               
+    
+    use_style_pose_vce_loss = config.opt.use_style_pose_vce_loss if hasattr(config.opt, 'use_style_pose_vce_loss') else False
+    use_style_pose_criterion_loss = config.opt.use_style_pose_criterion_loss if hasattr(config.opt, 'use_style_pose_criterion_loss') else False
+    style_vce_weight = config.opt.style_vce_weight if use_style_pose_vce_loss else None
+    style_criterion_weight = config.opt.style_criterion_weight if use_style_pose_criterion_loss else None
 
     if is_train:
         model.train()
@@ -391,7 +397,6 @@ def one_epoch(model,
                 # MSE\MAE loss
                 total_loss = 0.0
                 loss = criterion((keypoints_3d_pred  - keypoints_3d_gt)*scale_keypoints_3d,keypoints_3d_binary_validity_gt)
-
                 total_loss += loss
                 metric_dict[f'{config.opt.criterion}'].append(loss.item())
 
@@ -415,7 +420,6 @@ def one_epoch(model,
                     pose_lstm_loss = criterion(pose_lstm_diff.view(-1, *pose_lstm_diff.shape[-2:]), validity)
                     weighted_style_pose_lstm_loss = style_pose_lstm_loss_weight * pose_lstm_loss
                     total_loss += weighted_style_pose_lstm_loss
-
                     metric_dict['style_pose_lstm_loss_weighted'].append(weighted_style_pose_lstm_loss.item())
 
 
@@ -443,18 +447,18 @@ def one_epoch(model,
                     total_loss += weight * loss
 
                     if lstm_output and use_time_weighted_loss:
-                        future_keypoints_loss_weight = future_keypoints_loss_weight.expand(*auxilary_keypoints_3d_binary_validity_gt.shape)
                         # pass squeezed tensors
                         loss = volumetric_ce_criterion(aux_coord_volumes_pred.view(-1, *aux_coord_volumes_pred.shape[2:]), 
                                                         aux_volumes_pred.view(-1, *aux_volumes_pred.shape[2:]), 
                                                         auxilary_keypoints_3d_gt.view(-1, *auxilary_keypoints_3d_gt.shape[2:]), 
-                                                        future_keypoints_loss_weight.view(-1, *future_keypoints_loss_weight.shape[2:]))
+                                                        auxilary_keypoints_3d_binary_validity_gt.view(-1, *auxilary_keypoints_3d_binary_validity_gt.shape[2:]))
 
-                        total_loss += aux_lstm_VCE_loss_weight * loss
+                        total_loss += aux_lstm_VCE_loss_weight * weight * loss
                         metric_dict['aux_lstm_VCE_loss'].append(loss.item())    
 
-
-                # temporal adversarial loss        
+                #############################        
+                # TEMPORAL ADVERSARIAL LOSS #
+                #############################  
                 if use_temporal_discriminator: 
                     keypoints_3d_pred_seq = keypoints_3d_pred.view(batch_size, dt, -1)
                     keypoints_3d_gt_seq = keypoints_3d_gt.view(batch_size, dt, -1)
@@ -485,7 +489,9 @@ def one_epoch(model,
                     metric_dict[f'{config.opt.adversarial_temporal_criterion}_generator_loss'].append(generator_loss.item())
                     metric_dict[f'{config.opt.adversarial_temporal_criterion}_discriminator_loss'].append(discriminator_loss.item())
 
-
+                ######################    
+                # STYLE DECODER LOSS #
+                ######################
                 if use_style_decoder:
                     if use_time_weighted_loss:
                         style_decoder_part = config.model.style_decoder_part if hasattr(config.model, 'style_decoder_part') else 'after_pivot'
@@ -505,6 +511,32 @@ def one_epoch(model,
                     style_decoder_loss_weight = config.opt.style_decoder_loss_weight
                     total_loss += style_decoder_loss * style_decoder_loss_weight
                     metric_dict['style_decoder_loss_weighted'].append(style_decoder_loss.item()*style_decoder_loss_weight)
+
+                ##################    
+                # STYLE VCE LOSS #
+                ##################    
+                if use_style_pose_vce_loss:
+                    volumetric_ce_criterion = VolumetricCELoss()
+                    style_vector_soft = softmax_volumes(style_vector)
+                    loss = volumetric_ce_criterion(coord_volumes_pred, 
+                                                    style_vector_soft, 
+                                                    keypoints_3d_gt, 
+                                                    keypoints_3d_binary_validity_gt)
+                    total_loss += style_vce_weight * loss
+                    metric_dict['style_ce_loss'].append(loss.item())
+
+
+                ########################    
+                # STYLE CRITERION LOSS #
+                ########################
+                if use_style_pose_criterion_loss:
+                    keypoints_3d_style_pred, _ = integrate_tensor_3d_with_coordinates(style_vector * model.volume_multiplier,
+                                                                                      coord_volumes_pred,
+                                                                                      softmax=True)
+                    loss = criterion((keypoints_3d_style_pred  - keypoints_3d_gt)*scale_keypoints_3d, keypoints_3d_binary_validity_gt)
+                    total_loss += style_criterion_weight * loss
+                    metric_dict['style_criterion_loss'].append(loss.item())
+
 
                 if config.model.pelvis_type !='gt':
                     base_joint = 6
@@ -754,6 +786,7 @@ def main(args):
     
     model = {
         "vol_refined_baseline": Baseline,
+        "vol_rnn_spade": VolumetricRNNSpade,
         "vol": VolumetricTriangulationNet,
         "vol_temporal_adain":VolumetricTemporalAdaINNet,
         "vol_temporal_grid": VolumetricTemporalGridDeformation,
@@ -767,14 +800,26 @@ def main(args):
         "MAE": KeypointsMAELoss
     }[config.opt.criterion]
 
-    if config.opt.criterion == "MSESmooth":
+    if config.opt.criterion == "MSESmooth": 
         criterion = criterion_class(config.opt.mse_smooth_threshold)
     else:
-        criterion = criterion_class()
+        criterion = criterion_class() 
 
     if config.model.init_weights:
+        rebuild_dict = config.model.rebuild_dict if hasattr(config.model, 'rebuild_dict') else False
         state_dict = torch.load(config.model.checkpoint)['model_state']
+        if rebuild_dict:
+            model_state_dict = model.state_dict() 
+            for k,v in model_state_dict.items():
+                if k in state_dict.keys():
+                    model_state_dict[k] = v
+                else:
+                    assert 'adaptive_norm' or 'group_norm' in k
+            state_dict = model_state_dict
+            del model_state_dict 
         model.load_state_dict(state_dict, strict=True)
+        del state_dict
+        torch.cuda.empty_cache()
         print("LOADED PRE-TRAINED MODEL!!!")        
 
     # optimizer
@@ -800,6 +845,7 @@ def main(args):
                 lr=config.opt.lr
             )
 
+
         elif config.model.name == "vol_temporal_adain":
             opt = torch.optim.Adam(
                 [{'params': model.backbone.parameters()},
@@ -812,6 +858,11 @@ def main(args):
                             'betas': config.opt.volume_net_betas if \
                                 hasattr(config.opt, "volume_net_betas") else (0.9, 0.999)}
                 ] + \
+
+                ([{'params': model.style_to_volumes.parameters(), \
+                            'lr': config.opt.style_to_volumes_lr if \
+                            hasattr(config.opt, "style_to_volumes_lr") else config.opt.lr}] if \
+                            hasattr(model, 'style_to_volumes') else []) + \
 
                 ([{'params': model.encoder.parameters(), \
                             'lr': config.opt.encoder_lr if \
@@ -849,7 +900,7 @@ def main(args):
                             model.use_style_pose_lstm_loss else []),
                 lr=config.opt.lr)
 
-        elif config.model.name == "vol_temporal_grid":
+        elif config.model.name == "vol_rnn_spade":
             opt = torch.optim.Adam(
                 [{'params': model.backbone.parameters()},
                  {'params': model.process_features.parameters(), \
@@ -857,18 +908,7 @@ def main(args):
                             hasattr(config.opt, "process_features_lr") else config.opt.lr},
                  {'params': model.volume_net.parameters(), \
                             'lr': config.opt.volume_net_lr if \
-                            hasattr(config.opt, "volume_net_lr") else config.opt.lr},
-                 {'params': model.features_sequence_to_vector.parameters(), \
-                            'lr': config.opt.features_sequence_to_vector_lr if \
-                            hasattr(config.opt, "features_sequence_to_vector_lr") else config.opt.lr},
-                 {'params': model.grid_deformator.parameters(), \
-                            'lr': config.opt.grid_deformator_lr if \
-                            hasattr(config.opt, "grid_deformator_lr") else config.opt.lr},
-                ] + \
-                ([{'params':model.auxilary_backbone.parameters(), \
-                            'lr': config.opt.auxilary_backbone_lr if \
-                            hasattr(config.opt, "auxilary_backbone_lr") else config.opt.lr}] if \
-                            model.use_auxilary_backbone else []),
+                            hasattr(config.opt, "volume_net_lr") else config.opt.lr}],
                 lr=config.opt.lr)
             
         elif config.model.name == "vol_temporal_lstm":
@@ -931,7 +971,7 @@ def main(args):
     # experiment
     experiment_dir, writer = None, None
     if master and MAKE_EXPERIMENT_DIR: 
-        experiment_dir, writer = setup_experiment(config, type(model).__name__, is_train=not args.eval)
+        experiment_dir, writer = setup_experiment(config, type(model).__name__, args=args, is_train=not args.eval)
         print ('EXPERIMENT IN LOGDIR:', args.logdir)    
         
     # multi-gpu

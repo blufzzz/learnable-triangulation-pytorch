@@ -79,7 +79,7 @@ class VolumetricTriangulationNet(nn.Module):
             self.volume_net = V2VModel_v1(self.volume_features_dim, 
                                           v2v_output_dim, 
                                           self.volume_size,
-                                          normalization_type = config.model.normalization_type)
+                                          normalization_type = config.model.v2v_normalization_type)
 
         elif self.v2v_type == 'conf':
             self.v2v_normalization_type = config.model.v2v_normalization_type

@@ -62,7 +62,7 @@ class SPADE(nn.Module):
     def __init__(self, 
                 style_vector_channels, 
                 features_channels, 
-                hidden=64, # hidden=128
+                hidden=128, # hidden=128
                 ks=3, 
                 params_evolution=False):
 
@@ -440,7 +440,12 @@ class EncoderDecorder(nn.Module):
         n_ups_blocks = len(self.upsampling_dict)
         for i, (name, module )in enumerate(self.upsampling_dict.items()):
             if name.split('_')[0] == 'Res3DBlock' and self.use_skip_connection:
-                x = x + skip_connections[skip_number]
+                skip_connection = skip_connections[skip_number]
+                if x.shape[-3:] != skip_connection.shape[-3:]:
+                    skip_connection = F.interpolate(skip_connection,
+                                                    size=(x.shape[-3:]), 
+                                                    mode='trilinear')
+                x = x + skip_connection
                 skip_number -= 1
             if params_evolution and i < n_ups_blocks-1:
                 x, params = module(x, params=params, params_evolution=params_evolution)
@@ -482,8 +487,13 @@ class V2VModel(nn.Module):
         self.style_vector_channels = style_vector_dim
         self.use_compound_norm = use_compound_norm
         self.temporal_condition_type = temporal_condition_type
-        self.normalization_type = [v2v_normalization_type, temporal_condition_type] if \
-                                    self.use_compound_norm else temporal_condition_type
+
+        if self.temporal_condition_type is None:
+            self.normalization_type = v2v_normalization_type
+        else:
+            self.normalization_type = [v2v_normalization_type, temporal_condition_type] if \
+                                        self.use_compound_norm else temporal_condition_type
+                                        
         self.nonadaptive_normalization_type = v2v_normalization_type                     
 
         encoder_input_channels = config.downsampling[0]['params'][0]

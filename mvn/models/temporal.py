@@ -157,8 +157,6 @@ class StylePosesLSTM(nn.Module):
         return output
 
 
-        
-
 def get_encoder(encoder_type, 
                 backbone_type,
                 encoded_feature_space, 

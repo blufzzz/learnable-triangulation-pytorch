@@ -31,6 +31,7 @@ class Human36MMultiViewDataset(Dataset):
                  norm_image=True,
                  kind="mpii",
                  undistort_images=False,
+                 only_keypoitns=False,
                  ignore_cameras=[],
                  crop=True,
                  **kwargs
@@ -65,6 +66,7 @@ class Human36MMultiViewDataset(Dataset):
         self.cuboid_side = cuboid_side
         self.kind = kind
         self.undistort_images = undistort_images
+        self.only_keypoitns = only_keypoitns
         self.ignore_cameras = ignore_cameras
         self.crop = crop
         self.retain_every_n_frames_in_test = retain_every_n_frames_in_test
@@ -334,6 +336,7 @@ class Human36MTemporalDataset(Human36MMultiViewDataset):
                  norm_image=True,
                  kind="mpii",
                  undistort_images=False,
+                 only_keypoitns=False,
                  ignore_cameras=[],
                  crop=True,
                  use_equidistant_dataset=True,
@@ -354,6 +357,7 @@ class Human36MTemporalDataset(Human36MMultiViewDataset):
                          norm_image=norm_image,
                          kind=kind,
                          undistort_images=undistort_images,
+                         only_keypoitns=only_keypoitns,
                          ignore_cameras=ignore_cameras,
                          crop=crop,
                          use_equidistant_dataset=use_equidistant_dataset)
