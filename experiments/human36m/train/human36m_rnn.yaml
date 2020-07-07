@@ -1,0 +1,87 @@
+title: "human36m_vol_temporal_adain_softmax"
+kind: "human36m"
+vis_freq: 1000
+vis_n_elements: 10
+distributed_train: false
+image_shape: [384, 384]
+visualize: false
+
+opt:
+  criterion: "MAE"
+
+  n_objects_per_epoch: 10000
+  n_epochs: 9999
+  dump_weights: False
+
+  batch_size: 32
+  val_batch_size: 32  
+
+  scale_keypoints_3d: 0.1
+  
+  use_temporal_discriminator: false
+  use_time_weighted_loss: false
+
+  use_smoothness_criterion: false
+  smoothness_criterion_weight: 0.01
+
+  use_dropout: true
+  droupout_rate: 0.2
+
+  normalize_input: true
+
+  lr: 0.0001
+
+  save_model: true
+  silence: false
+  grad_clip: 0.01
+
+model:
+  
+  hidden_dim: 512
+  num_layers: 2
+  num_joints: 17
+  bidirectional: true
+  layer_norm: false
+
+dataset:
+  kind: "human36m"
+  dt: 6
+  dilation: 1
+  singleview: true
+  pivot_type: 'first'
+  keypoints_per_frame: true
+  only_keypoints: true
+
+  train:
+    h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"
+    labels_path: "/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy"
+    pred_results_path:
+
+    with_damaged_actions: true
+    undistort_images: false
+
+    scale_bbox: 1.0
+
+    shuffle: true
+    randomize_n_views: false
+    min_n_views: null
+    max_n_views: null
+    num_workers: 8
+
+  val:
+    h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"
+    labels_path: "/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy"
+    pred_results_path: 
+
+    with_damaged_actions: true
+    undistort_images: false
+
+    scale_bbox: 1.0
+
+    shuffle: false
+    randomize_n_views: false
+    min_n_views: null
+    max_n_views: null
+    num_workers: 8
+
+    retain_every_n_frames_in_test: 30

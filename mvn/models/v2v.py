@@ -90,6 +90,9 @@ class SPADE(nn.Module):
 
     def forward(self, x, params, params_evolution=False):
 
+        if params is None:
+            return x
+
         batch_size = x.shape[0]
         if params_evolution:
             assert self.params_evolution

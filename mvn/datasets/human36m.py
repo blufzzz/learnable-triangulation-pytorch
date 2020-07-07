@@ -31,7 +31,7 @@ class Human36MMultiViewDataset(Dataset):
                  norm_image=True,
                  kind="mpii",
                  undistort_images=False,
-                 only_keypoitns=False,
+                 only_keypoints=False,
                  ignore_cameras=[],
                  crop=True,
                  **kwargs
@@ -66,7 +66,7 @@ class Human36MMultiViewDataset(Dataset):
         self.cuboid_side = cuboid_side
         self.kind = kind
         self.undistort_images = undistort_images
-        self.only_keypoitns = only_keypoitns
+        self.only_keypoints = only_keypoints
         self.ignore_cameras = ignore_cameras
         self.crop = crop
         self.retain_every_n_frames_in_test = retain_every_n_frames_in_test
@@ -74,7 +74,6 @@ class Human36MMultiViewDataset(Dataset):
         self.test = test
 
         self.labels = np.load(labels_path, allow_pickle=True).item()
-
         self.n_cameras = len(self.labels['camera_names'])
         assert all(camera_idx in range(self.n_cameras) for camera_idx in self.ignore_cameras)
 
@@ -187,23 +186,25 @@ class Human36MMultiViewDataset(Dataset):
         sample = defaultdict(list) # return value
         shot = self.labels['table'][idx]
 
-        for camera_idx, camera_name in enumerate(self.labels['camera_names']):
-            if camera_idx in self.ignore_cameras:
-                continue
+        if not self.only_keypoints:
+            # aggregate images
+            for camera_idx, camera_name in enumerate(self.labels['camera_names']):
+                if camera_idx in self.ignore_cameras:
+                    continue
 
-            unpacked = self._unpack(shot, camera_idx, camera_name)
-            if unpacked is None:
-                continue
-            else:        
-                image, bbox, retval_camera, image_shape_before_resize, image_path = unpacked    
+                unpacked = self._unpack(shot, camera_idx, camera_name)
+                if unpacked is None:
+                    continue
+                else:        
+                    image, bbox, retval_camera, image_shape_before_resize, image_path = unpacked    
 
-            sample['images'].append(image)
-            sample['images_paths'].append(image_path)
-            sample['detections'].append(bbox + (1.0,)) # TODO add real confidences
-            sample['cameras'].append(retval_camera)
-            sample['proj_matrices'].append(retval_camera.projection)
-            if image_shape_before_resize is not None:
-                sample['image_shapes_before_resize'].append(image_shape_before_resize)
+                sample['images'].append(image)
+                sample['images_paths'].append(image_path)
+                sample['detections'].append(bbox + (1.0,)) # TODO add real confidences
+                sample['cameras'].append(retval_camera)
+                sample['proj_matrices'].append(retval_camera.projection)
+                if image_shape_before_resize is not None:
+                    sample['image_shapes_before_resize'].append(image_shape_before_resize)
 
         # 3D keypoints
         # add dummy confidences
@@ -336,7 +337,7 @@ class Human36MTemporalDataset(Human36MMultiViewDataset):
                  norm_image=True,
                  kind="mpii",
                  undistort_images=False,
-                 only_keypoitns=False,
+                 only_keypoints=False,
                  ignore_cameras=[],
                  crop=True,
                  use_equidistant_dataset=True,
@@ -357,7 +358,7 @@ class Human36MTemporalDataset(Human36MMultiViewDataset):
                          norm_image=norm_image,
                          kind=kind,
                          undistort_images=undistort_images,
-                         only_keypoitns=only_keypoitns,
+                         only_keypoints=only_keypoints,
                          ignore_cameras=ignore_cameras,
                          crop=crop,
                          use_equidistant_dataset=use_equidistant_dataset)
@@ -449,29 +450,26 @@ class Human36MTemporalDataset(Human36MMultiViewDataset):
         assert 0 in iterator, 'iterator should contain 0 index for the pivot frame'    
 
         for i in iterator:
-            try:
-                shot = self.labels['table'][pivot_idx+i]
-            except Exception:
-                set_trace()     
-            unpacked = self._unpack(shot, camera_idx, camera_name)
-            if unpacked is None: # we need full sequence
-                return None
-            else:        
+            shot = self.labels['table'][pivot_idx+i]
+
+            if self.keypoints_per_frame:
+                keypoints = np.pad(shot['keypoints'][:self.num_keypoints],((0,0), (0,1)),
+                                        'constant', constant_values=1.0)
+                sample['keypoints_3d'].append(keypoints)
+
+            if not self.only_keypoints:
+                unpacked = self._unpack(shot, camera_idx, camera_name)
+                if unpacked is None: # we need full sequence
+                    return None
+
                 image, bbox, retval_camera, image_shape_before_resize, image_path = unpacked
 
-            if unpacked is not None:    
                 #collect data from different cameras
                 sample['images'].append(image)
                 sample['images_paths'].append(image_path)
                 sample['detections'].append(bbox) 
                 sample['cameras'].append(retval_camera)
                 sample['proj_matrices'].append(retval_camera.projection)
-
-                if self.keypoints_per_frame:
-                    keypoints = np.pad(shot['keypoints'][:self.num_keypoints],((0,0), (0,1)),
-                                             'constant', constant_values=1.0)
-                    sample['keypoints_3d'].append(keypoints)
-                    
                 if image_shape_before_resize is not None:
                     sample['image_shapes_before_resize'].append(image_shape_before_resize)
 

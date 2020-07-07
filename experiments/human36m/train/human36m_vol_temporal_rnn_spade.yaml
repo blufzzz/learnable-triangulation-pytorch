@@ -19,10 +19,19 @@ opt:
   batch_size: 1
   val_batch_size: 1  
 
-  use_time_weighted_loss: false
-  style_pose_lstm_loss_weight: 1.
-  aux_lstm_VCE_loss_weight: 1.
+  use_time_weighted_loss: true
+  use_aux_VCE_loss: true
+  auxilary_criterion_weight: 1.
+  auxilary_VCE_weight: 1.
+  use_smoothness_criterion: false
+  use_temporal_discriminator: false
 
+  # rnn-related
+  rnn_model_lr: 0.0001
+  use_rnn_loss: true
+  rnn_loss_weight: 1.
+
+  # v2v-related
   lr: 0.0001
   process_features_lr: 0.001
   volume_net_lr: 0.0001
@@ -36,7 +45,7 @@ model:
   name: "vol_rnn_spade"
   kind: "mpii"
 
-  v2v_type: 'conf' # ['v1', 'conf']
+  v2v_type: 'conf' 
   v2v_normalization_type: 'group_norm'
   volume_aggregation_method: "no_aggregation"
   temporal_condition_type: 'spade' 
@@ -44,13 +53,17 @@ model:
   volume_features_dim: 64
   include_pivot: false  
   style_grad_for_backbone: false
-  gt_initialization: true
+  gt_initialization: false
   gt_all: false
-
 
   init_weights: true
   checkpoint: "/media/hpc2_storage/ibulygin/logs/spade_resnet_50/spade_rnn/h36_sv32_dist_baseline_v2v-conf-vf64-lr1e-4_resnet50-gn_pf-lr1e-3_bs1-1_lr-1e-4_norot_gradclip-1e-2@23.06.2020-17:54:36/checkpoints/weights.pth"
   rebuild_dict: true
+
+  use_rnn: true
+  rnn:
+    # will be created through separate config in checkpoint_dir
+    experiment_dir: "/media/hpc2_storage/ibulygin/logs/rnn/h36_sv32_dist_lstm-2l-hidden-51-512-bidir_init-randn_input-bn-1_dropout-02_dt-6_dil-1-bs-32-32@07.07.2020-00:31:20"
 
   pelvis_type: 'gt'
 

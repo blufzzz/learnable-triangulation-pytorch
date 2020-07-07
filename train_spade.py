@@ -25,7 +25,7 @@ from mvn.models.volumetric_spade_debug import VolumetricSpadeDebug
 from mvn.models.loss import KeypointsMSELoss, \
                             KeypointsMAELoss, \
                             KeypointsL2Loss, \
-                            VolumetricCELoss
+                            VolumetricCELoss 
 
 from mvn.utils import img, multiview, op, vis, misc, cfg
 

@@ -8,22 +8,16 @@ from torch import nn
 import torch.nn.functional as F
 import os
 
-
 from mvn.models import pose_resnet, pose_hrnet
 from time import time
 from mvn.utils.op import get_coord_volumes, unproject_heatmaps, integrate_tensor_3d_with_coordinates, make_3d_heatmap
 from mvn.utils.multiview import update_camera
 from mvn.utils.misc import get_capacity, description
-from mvn.utils import volumetric
-from mvn.models.v2v import V2VModel, R2D, SqueezeLayer
-from mvn.models.v2v_models import V2VModel_v1
-from mvn.models.temporal import Seq2VecRNN,\
-                                Seq2VecCNN, \
-                                Seq2VecRNN2D, \
-                                Seq2VecCNN2D, \
-                                get_encoder, \
-                                FeatureDecoderLSTM, \
-                                StylePosesLSTM
+from mvn.utils import volumetric, cfg
+from mvn.models.v2v import V2VModel
+from mvn.models.rnn import KeypointsRNNCell
+
+
 
 from IPython.core.debugger import set_trace
 STYLE_VECTOR_CONST = None
@@ -64,8 +58,6 @@ class VolumetricRNNSpade(nn.Module):
         self.v2v_normalization_type = config.model.v2v_normalization_type
         assert self.v2v_normalization_type in ['group_norm','batch_norm']
         self.gt_initialization = config.model.gt_initialization if hasattr(config.model, 'gt_initialization') else False
-        self.gt_all = config.model.gt_all if hasattr(config.model, 'gt_all') else False
-
         self.include_pivot = True
 
         assert self.temporal_condition_type == 'spade'
@@ -82,7 +74,26 @@ class VolumetricRNNSpade(nn.Module):
                                                  strict=True)
         
         print ('Only {} backbone is used...'.format(config.model.backbone.name))
-         
+        
+        #######
+        # RNN #
+        #######
+        self.use_rnn = config.model.use_rnn if hasattr(config.model, 'use_rnn') else False
+        if self.use_rnn:
+            if hasattr(config.model.rnn, 'experiment_dir'):
+                config_rnn = cfg.load_config(os.path.join(config.model.rnn.experiment_dir, 'config.yaml'))
+            else:
+                config_rnn = config.model.rnn
+
+            self.rnn_model = KeypointsRNNCell(config_rnn.model.num_joints*3, 
+                                             config_rnn.model.num_joints*3, 
+                                             hidden_dim=config_rnn.model.hidden_dim, 
+                                             bidirectional=config_rnn.model.bidirectional,
+                                             num_layers=config_rnn.model.num_layers,
+                                             use_dropout=config_rnn.opt.use_dropout,
+                                             droupout_rate=config_rnn.opt.droupout_rate,
+                                             normalize_input=config_rnn.opt.normalize_input,
+                                             layer_norm=config_rnn.model.layer_norm).to(device)
 
         #######
         # V2V #
@@ -106,7 +117,6 @@ class VolumetricRNNSpade(nn.Module):
                                        style_forward=False,
                                        use_compound_norm=use_compound_norm,
                                        temporal_condition_type=self.temporal_condition_type)
-
         
         if self.volume_features_dim != 256:    
             self.process_features = nn.Sequential(nn.Conv2d(256, self.volume_features_dim, 1))
@@ -158,6 +168,7 @@ class VolumetricRNNSpade(nn.Module):
             raise RuntimeError('In absence of precalculated pelvis or gt pelvis, self.use_volumetric_pelvis should be True') 
 
         tri_keypoints_3d = tri_keypoints_3d[...,:3]
+        keypoints_shape = tri_keypoints_3d.shape[-2:]
         #####################
         # VOLUMES CREATING  #   
         #####################
@@ -189,27 +200,49 @@ class VolumetricRNNSpade(nn.Module):
         
         vol_keypoints_3d_list = []
         volumes_list = []
+        rnn_keypoints_list = []
 
-        if self.gt_initialization:
-            style_vector_volumes = make_3d_heatmap(coord_volumes[:,0], tri_keypoints_3d[:,0])
-        else:   
-            style_vector_volumes = torch.ones(batch_size, 
-                                              self.style_vector_dim, 
-                                              self.volume_size, 
-                                              self.volume_size, 
-                                              self.volume_size).to(device) / (self.volume_size**3)
-        for t in range(dt):
+        # if self.gt_initialization:
+        #     style_vector_volumes = make_3d_heatmap(coord_volumes[:,0], tri_keypoints_3d[:,0], use_topk=False)
+        # else:   
+        #     style_vector_volumes = torch.ones(batch_size, 
+        #                                       self.style_vector_dim, 
+        #                                       self.volume_size, 
+        #                                       self.volume_size, 
+        #                                       self.volume_size).to(device) / (self.volume_size**3)
+
+        if self.use_rnn:
+            # FIX: change for layer_norm, see `train_rnn.py`
+            hx = torch.randn(self.rnn_model.num_layers * (2 if self.rnn_model.bidirectional else 1), 
+                            batch_size, 
+                            self.rnn_model.hidden_dim).to(device)
+            cx = torch.randn(self.rnn_model.num_layers * (2 if self.rnn_model.bidirectional else 1),
+                             batch_size, 
+                             self.rnn_model.hidden_dim).to(device)
+            hidden = (hx, cx)
+
+        for t in range(dt): 
             features_volumes_t= unproj_features[:,t,...]
             coord_volumes_t = coord_volumes[:,t,...]
 
-            torch.cuda.empty_cache()         
-            volumes = self.volume_net(features_volumes_t, params=style_vector_volumes)
+            torch.cuda.empty_cache()
+            # get initial observation w\o spade
+            if t==0:
+                volumes = self.volume_net(features_volumes_t, params=None)
+                # volumes
+            else:         
+                volumes = self.volume_net(features_volumes_t, params=style_vector_volumes)
+                # volumes, style_vector_volumes
             vol_keypoints_3d, volumes = integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier,
                                                                              coord_volumes_t,
                                                                              softmax=self.volume_softmax)
-            
-            if self.gt_all:
-                style_vector_volumes = make_3d_heatmap(coord_volumes[:,t+1], tri_keypoints_3d[:,t+1])
+            # vol_keypoints_3d, volumes
+            if self.use_rnn and t < (dt-1):
+                rnn_keypoints, hidden = self.rnn_model(vol_keypoints_3d.view(batch_size, 1, -1), hidden)
+                rnn_keypoints = rnn_keypoints.view(batch_size, *keypoints_shape)
+                style_vector_volumes = make_3d_heatmap(coord_volumes[:,t+1], rnn_keypoints, use_topk=False)
+                rnn_keypoints_list.append(rnn_keypoints)
+                # rnn_keypoints
             else:
                 style_vector_volumes = volumes
                 
@@ -218,13 +251,10 @@ class VolumetricRNNSpade(nn.Module):
 
         vol_keypoints_3d = torch.stack(vol_keypoints_3d_list, 1)
         volumes = torch.stack(volumes_list, 1)
-
-        coord_volumes = coord_volumes.view(batch_size*dt, *coord_volumes.shape[-4:]) 
-        base_points = base_points.view(batch_size*dt, *base_points.shape[-1:]) 
-
+        rnn_keypoints_3d = torch.stack(rnn_keypoints_list, 1)
 
         return (vol_keypoints_3d,
-                None, # features
+                rnn_keypoints_3d, # features
                 volumes,
                 None, # vol_confidences
                 None, # cuboids

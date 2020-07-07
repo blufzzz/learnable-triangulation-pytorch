@@ -210,28 +210,36 @@ def integrate_tensor_3d_with_coordinates(volumes, coord_volumes, softmax=True):
     return coordinates, volumes
 
 
-def make_3d_heatmap(coord_volumes, tri_keypoints_3d):
+def make_3d_heatmap(coord_volumes, tri_keypoints_3d, use_topk=False, pow=2, EPS=1e-5):
+    '''
+    use_topk - non-differentiable way
+    '''
     coord_volume_unsq = coord_volumes.unsqueeze(1)
     keypoints_gt_i_unsq = tri_keypoints_3d.unsqueeze(2).unsqueeze(2).unsqueeze(2)
     dists = torch.sqrt(((coord_volume_unsq - keypoints_gt_i_unsq) ** 2).sum(-1))
-    H = torch.zeros_like(dists)
+    
+    if use_topk:
+        H = torch.zeros_like(dists)
 
-    for k,w in zip([1,2,3,4],
-                  [3,3,3,3]):
-        n_cells = k**3
-        knn = dists.view(*dists.shape[:-3],-1).topk(n_cells,dim=-1,largest=False)
-        if hasattr(knn, 'values'):
-            radius = knn.values.max(dim=-1)[0].unsqueeze(2).unsqueeze(2).unsqueeze(2)
-        else:
-            # torch 1.0.0 version
-            radius = knn[0].max(dim=-1)[0].unsqueeze(2).unsqueeze(2).unsqueeze(2)
-        mask = dists <= radius
-        # try:
-        #     assert mask.sum() / n_cells == 17
-        # except Exception as e:
-        #     set_trace()
-        H[mask] += w   
-    style_vector_volumes = F.softmax(H.view(*H.shape[:-3], -1),dim=-1).view(*mask.shape)
+        for k,w in zip([1,2,3,4],
+                      [3,3,3,3]):
+            n_cells = k**3
+            knn = dists.view(*dists.shape[:-3],-1).topk(n_cells,dim=-1,largest=False)
+            if hasattr(knn, 'values'):
+                radius = knn.values.max(dim=-1)[0].unsqueeze(2).unsqueeze(2).unsqueeze(2)
+            else:
+                # torch 1.0.0 version
+                radius = knn[0].max(dim=-1)[0].unsqueeze(2).unsqueeze(2).unsqueeze(2)
+            mask = dists <= radius
+            # try:
+            #     assert mask.sum() / n_cells == 17
+            # except Exception as e:
+            #     set_trace()
+            H[mask] += w   
+    else:
+        H = 1./(torch.pow(dists,pow) + EPS)
+
+    style_vector_volumes = F.softmax(H.view(*H.shape[:-3], -1),dim=-1).view(*dists.shape)
     return style_vector_volumes
 
 

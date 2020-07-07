@@ -76,6 +76,7 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
     dilation = config.dataset.dilation if hasattr(config.dataset, 'dilation') else 0
     dilation_type = config.dataset.dilation_type if hasattr(config.dataset, 'dilation_type') else 'constant'
     keypoints_per_frame = config.dataset.keypoints_per_frame if hasattr(config.dataset, 'keypoints_per_frame') else False
+    only_keypoints=config.dataset.only_keypoints if hasattr(config.dataset, 'only_keypoints') else False
 
     if is_train:
         # train
@@ -98,6 +99,7 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
             pivot_type = pivot_type,
             dilation_type = dilation_type,
             norm_image=config.dataset.train.norm_image if hasattr(config.dataset.train, "norm_image") else True,
+            only_keypoints = only_keypoints,
             custom_iterator=config.dataset.custom_iterator if hasattr(config.dataset, "custom_iterator") else None
             )
 
@@ -110,6 +112,7 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
             sampler=train_sampler,
             collate_fn=dataset_utils.make_collate_fn(randomize_n_views=config.dataset.train.randomize_n_views,
                                                      min_n_views=config.dataset.train.min_n_views,
+                                                     only_keypoints=only_keypoints,
                                                      max_n_views=config.dataset.train.max_n_views),
             num_workers=config.dataset.train.num_workers,
             worker_init_fn=dataset_utils.worker_init_fn
@@ -135,6 +138,7 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
         pivot_type = pivot_type,
         dilation_type = dilation_type,
         norm_image=config.dataset.val.norm_image if hasattr(config.dataset.val, "norm_image") else True,
+        only_keypoints = only_keypoints,
         custom_iterator=config.dataset.custom_iterator if hasattr(config.dataset, "custom_iterator") else None
         )
 
@@ -144,6 +148,7 @@ def setup_human36m_dataloaders(config, is_train, distributed_train):
         shuffle=config.dataset.val.shuffle,
         collate_fn=dataset_utils.make_collate_fn(randomize_n_views=config.dataset.val.randomize_n_views,
                                                  min_n_views=config.dataset.val.min_n_views,
+                                                 only_keypoints=only_keypoints,
                                                  max_n_views=config.dataset.val.max_n_views),
         num_workers=config.dataset.val.num_workers,
         worker_init_fn=dataset_utils.worker_init_fn

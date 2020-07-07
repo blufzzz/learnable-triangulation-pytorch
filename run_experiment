@@ -1,13 +1,14 @@
 #!/bin/bash
 srun -p TitanX --gres=gpu --exclusive --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w hpc3 \
-python train_spade.py \
---logdir=../logs/spade_resnet_50/spade_debug \
---config=./experiments/human36m/train/human36m_vol_spade_debug.yaml \
---experiment_comment='h36_sv32_dist_stack3d-interpolate-gn_S2S-v2v-pretr_V2V-conf-gn-vf64-lr1e-3_dt-1_dil-1-bs1-1' # -only-v2v-trainableq
+python train_spade_rnn.py \
+--logdir=../logs/spade_resnet_50/spade_rnn \
+--config=./experiments/human36m/train/human36m_vol_temporal_rnn_spade.yaml \
+--experiment_comment='h36_sv32_dist_spade3d-rnn-128-interpolate-gn_S2S-V2V-pretr-RNN-512-bi-init-rand-bn-1_drop02_V2V-conf-gn-vf64_dt-6_dil-1-bs1-1_exptimeweight-AMAE-1_AVCE-1_ARNN-1'
 
-# srun -p TitanX --gres=gpu --exclusive --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w hpc3 \
-# python train.py \
-# --logdir=../logs/spade_resnet_50/spade_rnn \
-# --config=./experiments/human36m/train/human36m_vol_temporal_rnn_spade.yaml \
-# --experiment_comment='h36_sv32_dist_spade3d-rnn-128-interpolate-gn_S2S-V2V-PREV_V2V-conf-gn-vf64_dt-6_dil-1-bs1-1_eval-all-exptimeweight-MAE-1-consttimeweight-VCE-1-GT-ALL'
+# srun -p TitanX --gres=gpu --exclusive --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w hpc2 \
+# python train_rnn.py \
+# --logdir=../logs/rnn \
+# --config=./experiments/human36m/train/human36m_rnn.yaml \
+# --experiment_comment='h36_sv32_dist_lstm-2l-hidden-51-512-bidir_init-randn_input-bn-1_dropout-02_dt-6_dil-1-bs-32-32' 
+
 
