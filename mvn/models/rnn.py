@@ -40,7 +40,7 @@ class KeypointsRNNCell(nn.Module):
         self.output_dim = hidden_dim*2 if bidirectional else hidden_dim
         self.layer_norm = layer_norm
         self.batch_first=True
-        self.normalize_input=normalize_input
+        self.normalize_input=False
 
         self.use_dropout = use_dropout
         if self.use_dropout:
@@ -69,24 +69,22 @@ class KeypointsRNNCell(nn.Module):
 
         self.linear = nn.Linear(self.output_dim, out_planes)
 
-    def forward(self, keypoints, hidden):
+    def forward(self, keypoints, hidden): # mean=None, std=None
         '''
         keypoints - [bs,dt,in_planes]
         hidden - - [dt,bs,in_planes]
         ''' 
         bs, dt = keypoints.shape[:2]
-
         keypoints_input = keypoints.view(bs,dt,-1)
-
-        if self.normalize_input:
-            mean, std = keypoints_input.mean(1).unsqueeze(1), keypoints_input.std(1).unsqueeze(1)
-            keypoints_input = (keypoints_input - mean) / (std + 1e-15)
+        # if self.normalize_input:
+        #     if mean is None or std is None:
+        #         mean, std = keypoints_input.mean(1).unsqueeze(1), keypoints_input.std(1, unbiased=False).unsqueeze(1)
+        #     keypoints_input = (keypoints_input - mean) / (std + 1e-15)
 
         if not self.batch_first:
             keypoints_input = keypoints_input.transpose(1,0)
 
         out, hidden = self.rnn(keypoints_input, hidden)
-        set_trace()
         out = out.contiguous().view(-1, self.output_dim)
         out = self.linear(out)
         
@@ -96,9 +94,8 @@ class KeypointsRNNCell(nn.Module):
         else:
             out = out.view(bs, dt, self.out_planes)
 
-        if self.normalize_input:
-            out = (std*out) + mean
-        set_trace()
+        # if self.normalize_input:
+        #     out = (std*out) + mean
         return out, hidden
 
 

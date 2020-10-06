@@ -43,7 +43,7 @@ from train import parse_args, setup_human36m_dataloaders, setup_dataloaders, set
 from IPython.core.debugger import set_trace
 import matplotlib.pyplot as plt
 
-MAKE_EXPERIMENT_DIR = True
+MAKE_EXPERIMENT_DIR = False
 
 def one_epoch(model,
               criterion, 

@@ -7,6 +7,7 @@ image_shape: [384, 384]
 visualize: false
 
 opt:
+  use_jit: true
   criterion: "MAE"
 
   use_volumetric_ce_loss: true
@@ -17,21 +18,17 @@ opt:
   dump_weights: False
 
   batch_size: 1
-  val_batch_size: 1  
+  val_batch_size: 1
 
   use_time_weighted_loss: true
   use_aux_VCE_loss: true
   auxilary_criterion_weight: 1.
   auxilary_VCE_weight: 1.
+
+  # RNN
   use_smoothness_criterion: false
-  use_temporal_discriminator: false
+  use_rnn_loss: false
 
-  # rnn-related
-  rnn_model_lr: 0.0001
-  use_rnn_loss: true
-  rnn_loss_weight: 1.
-
-  # v2v-related
   lr: 0.0001
   process_features_lr: 0.001
   volume_net_lr: 0.0001
@@ -45,27 +42,26 @@ model:
   name: "vol_rnn_spade"
   kind: "mpii"
 
-  v2v_type: 'conf' 
+  v2v_type: 'conf' # ['v1', 'conf']
   v2v_normalization_type: 'group_norm'
   volume_aggregation_method: "no_aggregation"
   temporal_condition_type: 'spade' 
 
   volume_features_dim: 64
-  include_pivot: false  
+  include_pivot: false 
   style_grad_for_backbone: false
-  gt_initialization: false
-  gt_all: false
 
   init_weights: true
-  checkpoint: "/media/hpc2_storage/ibulygin/logs/spade_resnet_50/spade_rnn/h36_sv32_dist_baseline_v2v-conf-vf64-lr1e-4_resnet50-gn_pf-lr1e-3_bs1-1_lr-1e-4_norot_gradclip-1e-2@23.06.2020-17:54:36/checkpoints/weights.pth"
+  checkpoint: "/media/hpc2_storage/ibulygin/logs/baseline_152_10k/h36_sv32_dist_baseline_v2v-conf-GN_resnet152-GN_bs-5-5_norot_noaggr_VCE-1e-2@11.07.2020-18:02:29/checkpoints/weights.pth"
   rebuild_dict: true
 
-  use_rnn: true
-  rnn:
-    # will be created through separate config in checkpoint_dir
-    experiment_dir: "/media/hpc2_storage/ibulygin/logs/rnn/h36_sv32_dist_lstm-2l-hidden-51-512-bidir_init-randn_input-bn-1_dropout-02_dt-6_dil-1-bs-32-32@07.07.2020-00:31:20"
+  use_rnn: false
+  gt_initialization: false # SHOULD BE FALSE
+  heatmap_from_keypoints: false
 
-  pelvis_type: 'gt'
+  use_gt_pelvis: true
+  use_precalculated_pelvis: false
+  use_volumetric_pelvis: false
 
   cuboid_side: 2500
   cuboid_multiplier: 1.0
@@ -78,7 +74,7 @@ model:
   transfer_cmu_to_human36m: false
 
   backbone:
-    name: "resnet50"  #"resnet50" #"resnet152"
+    name: "resnet152"  #"resnet50" #"resnet152"
     style: "simple"
 
     group_norm: true
@@ -86,12 +82,13 @@ model:
     checkpoint: "./data/pose_resnet_4.5_pixels_human36m.pth"
 
     num_joints: 17
-    num_layers: 50 #50 #152
+    num_layers: 152 #50 #152
 
     alg_confidences: false
     vol_confidences: false
     return_heatmaps: false
-    return_bottleneck: true
+    return_bottleneck: false
+    return_features: true
 
   v2v_configuration:
 

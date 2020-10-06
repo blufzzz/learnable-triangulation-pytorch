@@ -17,8 +17,6 @@ from mvn.utils import volumetric, cfg
 from mvn.models.v2v import V2VModel
 from mvn.models.rnn import KeypointsRNNCell
 
-
-
 from IPython.core.debugger import set_trace
 STYLE_VECTOR_CONST = None
 
@@ -61,6 +59,7 @@ class VolumetricRNNSpade(nn.Module):
         self.include_pivot = True
 
         assert self.temporal_condition_type == 'spade'
+        self.heatmap_from_keypoints = config.model.heatmap_from_keypoints if hasattr(config.model, 'heatmap_from_keypoints') else True
 
         # modules dimensions
         self.volume_features_dim = config.model.volume_features_dim
@@ -195,23 +194,16 @@ class VolumetricRNNSpade(nn.Module):
                                              vol_confidences=None,
                                              fictive_views=None
                                              )
+
         unproj_features = unproj_features.view(batch_size, -1, *unproj_features.shape[-4:])
         coord_volumes = coord_volumes.view(batch_size, -1, *coord_volumes.shape[-4:])
         
         vol_keypoints_3d_list = []
         volumes_list = []
-        rnn_keypoints_list = []
-
-        # if self.gt_initialization:
-        #     style_vector_volumes = make_3d_heatmap(coord_volumes[:,0], tri_keypoints_3d[:,0], use_topk=False)
-        # else:   
-        #     style_vector_volumes = torch.ones(batch_size, 
-        #                                       self.style_vector_dim, 
-        #                                       self.volume_size, 
-        #                                       self.volume_size, 
-        #                                       self.volume_size).to(device) / (self.volume_size**3)
-
+        
+        
         if self.use_rnn:
+            rnn_keypoints_list = []
             # FIX: change for layer_norm, see `train_rnn.py`
             hx = torch.randn(self.rnn_model.num_layers * (2 if self.rnn_model.bidirectional else 1), 
                             batch_size, 
@@ -228,8 +220,11 @@ class VolumetricRNNSpade(nn.Module):
             torch.cuda.empty_cache()
             # get initial observation w\o spade
             if t==0:
-                volumes = self.volume_net(features_volumes_t, params=None)
-                # volumes
+                if self.gt_initialization:
+                    style_vector_volumes = make_3d_heatmap(coord_volumes[:,0], tri_keypoints_3d[:,0], use_topk=False)
+                    volumes = self.volume_net(features_volumes_t, params=style_vector_volumes)
+                else:
+                    volumes = self.volume_net(features_volumes_t, params=None)
             else:         
                 volumes = self.volume_net(features_volumes_t, params=style_vector_volumes)
                 # volumes, style_vector_volumes
@@ -238,20 +233,32 @@ class VolumetricRNNSpade(nn.Module):
                                                                              softmax=self.volume_softmax)
             # vol_keypoints_3d, volumes
             if self.use_rnn and t < (dt-1):
-                rnn_keypoints, hidden = self.rnn_model(vol_keypoints_3d.view(batch_size, 1, -1), hidden)
+                keypoints_3d_prev = tri_keypoints_3d[:,:t+1].contiguous()
+                keypoints_3d_prev = keypoints_3d_prev.view(*keypoints_3d_prev.shape[:2], -1)
+                mean = keypoints_3d_prev.mean(1).unsqueeze(1) # FIX: ZEROS at first iteration
+                std = keypoints_3d_prev.std(1).unsqueeze(1) if t > 0 else 1
+                rnn_keypoints, hidden = self.rnn_model(vol_keypoints_3d.view(batch_size, 1, -1), 
+                                                       hidden,
+                                                       mean=mean,
+                                                       std=std)
                 rnn_keypoints = rnn_keypoints.view(batch_size, *keypoints_shape)
                 style_vector_volumes = make_3d_heatmap(coord_volumes[:,t+1], rnn_keypoints, use_topk=False)
                 rnn_keypoints_list.append(rnn_keypoints)
                 # rnn_keypoints
             else:
-                style_vector_volumes = volumes
+                if self.heatmap_from_keypoints:
+                    style_vector_volumes = make_3d_heatmap(coord_volumes_t, vol_keypoints_3d, use_topk=False)
+                else:
+                    style_vector_volumes = volumes
                 
             volumes_list.append(volumes)
             vol_keypoints_3d_list.append(vol_keypoints_3d)
 
         vol_keypoints_3d = torch.stack(vol_keypoints_3d_list, 1)
         volumes = torch.stack(volumes_list, 1)
-        rnn_keypoints_3d = torch.stack(rnn_keypoints_list, 1)
+        rnn_keypoints_3d = None
+        if self.use_rnn:
+            rnn_keypoints_3d = torch.stack(rnn_keypoints_list, 1)
 
         return (vol_keypoints_3d,
                 rnn_keypoints_3d, # features

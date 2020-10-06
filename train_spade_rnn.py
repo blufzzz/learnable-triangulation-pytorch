@@ -24,7 +24,10 @@ from torch.nn.parallel import DistributedDataParallel
 from tensorboardX import SummaryWriter
 
 from mvn.models.temporal import Seq2VecCNN
+# from mvn.models.volumetric_rnn_spade_CUDA import VolumetricRNNSpade
 from mvn.models.volumetric_rnn_spade import VolumetricRNNSpade
+from mvn.utils.multiview import update_camera
+
 from mvn.models.loss import KeypointsMSELoss, \
                             KeypointsMAELoss, \
                             KeypointsL2Loss, \
@@ -93,6 +96,8 @@ def one_epoch(model,
         adversarial_generator_iters = config.opt.adversarial_generator_iters 
         train_generator_during_critic_iters = config.opt.train_generator_during_critic_iters                               
 
+    use_jit = config.opt.use_jit if hasattr(config.opt, 'use_jit') else False
+
     if is_train:
         model.train()
     else:
@@ -130,18 +135,27 @@ def one_epoch(model,
 
                 heatmaps_pred, keypoints_2d_pred, cuboids_pred, base_points_pred = None, None, None, None
                 torch.cuda.empty_cache()
-
-                (keypoints_3d_pred, 
-                rnn_keypoints_3d, 
-                volumes_pred, 
-                _, 
-                _, 
-                coord_volumes_pred,
-                base_points_pred) = model(images_batch, batch) 
-
                 batch_size, dt = images_batch.shape[:2]
                 keypoints_3d_binary_validity_gt = (keypoints_3d_validity_gt > 0.0).type(torch.float32)
                 keypoints_shape = keypoints_3d_gt.shape[-2:]
+
+                if use_jit:
+                    proj_matricies_batch = update_camera(batch, batch_size, (384,384), (96,96), dt, device)
+                    (keypoints_3d_pred, 
+                    rnn_keypoints_3d, 
+                    volumes_pred, 
+                    coord_volumes_pred,
+                    base_points_pred) = model(images_batch, keypoints_3d_gt, proj_matricies_batch) 
+                else:
+
+                    (keypoints_3d_pred, 
+                    rnn_keypoints_3d, 
+                    volumes_pred, 
+                    _, 
+                    _, 
+                    coord_volumes_pred,
+                    base_points_pred) = model(images_batch, batch) 
+
 
                 ################
                 # MODEL OUTPUT #   
@@ -249,35 +263,36 @@ def one_epoch(model,
                 #############################        
                 # TEMPORAL ADVERSARIAL LOSS #
                 #############################  
-                if use_temporal_discriminator: 
-                    keypoints_3d_pred_seq = keypoints_3d_pred.view(batch_size, dt, -1)
-                    keypoints_3d_gt_seq = keypoints_3d_gt.view(batch_size, dt, -1)
+                # if use_temporal_discriminator: 
+                #     # FIX SLICING!
+                #     keypoints_3d_pred_seq = keypoints_3d_pred.view(batch_size, dt, -1)
+                #     keypoints_3d_gt_seq = keypoints_3d_gt.view(batch_size, dt, -1)
 
-                    # discriminator step, no need gradient flow to generator
-                    discriminator_loss = adversarial_temporal_criterion(discriminator, 
-                                                                        keypoints_3d_pred_seq.clone().detach(), 
-                                                                        keypoints_3d_gt_seq.clone().detach(),
-                                                                        discriminator_loss=True)
+                #     # discriminator step, no need gradient flow to generator
+                #     discriminator_loss = adversarial_temporal_criterion(discriminator, 
+                #                                                         keypoints_3d_pred_seq.clone().detach(), 
+                #                                                         keypoints_3d_gt_seq.clone().detach(),
+                #                                                         discriminator_loss=True)
 
-                    if is_train:
-                        opt_discr.zero_grad()
-                        discriminator_loss.backward()
-                        opt_discr.step()
+                #     if is_train:
+                #         opt_discr.zero_grad()
+                #         discriminator_loss.backward()
+                #         opt_discr.step()
 
-                    # generator step
-                    if is_train: 
-                        discriminator.zero_grad()
-                    generator_loss = adversarial_temporal_criterion(discriminator, 
-                                                                    keypoints_3d_pred_seq,
-                                                                    keypoints_3d_gt_seq,
-                                                                    discriminator_loss=False)
+                #     # generator step
+                #     if is_train: 
+                #         discriminator.zero_grad()
+                #     generator_loss = adversarial_temporal_criterion(discriminator, 
+                #                                                     keypoints_3d_pred_seq,
+                #                                                     keypoints_3d_gt_seq,
+                #                                                     discriminator_loss=False)
                     
-                    # add loss                    
-                    if iter_i%adversarial_generator_iters == 0:
-                        total_loss += generator_loss * adversarial_temporal_loss_weight
+                #     # add loss                    
+                #     if iter_i%adversarial_generator_iters == 0:
+                #         total_loss += generator_loss * adversarial_temporal_loss_weight
 
-                    metric_dict[f'{config.opt.adversarial_temporal_criterion}_generator_loss'].append(generator_loss.item())
-                    metric_dict[f'{config.opt.adversarial_temporal_criterion}_discriminator_loss'].append(discriminator_loss.item())
+                #     metric_dict[f'{config.opt.adversarial_temporal_criterion}_generator_loss'].append(generator_loss.item())
+                #     metric_dict[f'{config.opt.adversarial_temporal_criterion}_discriminator_loss'].append(discriminator_loss.item())
 
                 ############
                 # BACKWARD #   
@@ -305,31 +320,6 @@ def one_epoch(model,
                 ###########
                 # METRICS #   
                 ###########
-                metric_dict['total_loss'].append(total_loss.item())
-
-                l2 = KeypointsL2Loss()(keypoints_3d_pred * scale_keypoints_3d, \
-                                       keypoints_3d_gt * scale_keypoints_3d, \
-                                       keypoints_3d_binary_validity_gt)
-
-                metric_dict['l2'].append(l2.item())
-
-                # base point l2
-                if base_points_pred is not None and not config.model.pelvis_type =='gt':
-                    base_point_l2_list = []
-                    for batch_i in range(base_points_pred.shape[0]):
-                        base_point_pred = base_points_pred[batch_i]
-
-                        if config.model.kind == "coco":
-                            base_point_gt = (keypoints_3d_gt[batch_i, 11, :3] + keypoints_3d_gt[batch_i, 12, :3]) / 2
-                        elif config.model.kind == "mpii":
-                            base_point_gt = keypoints_3d_gt[batch_i, 6, :3]
-
-                        base_point_l2_list.append(torch.sqrt(torch.sum((base_point_pred * scale_keypoints_3d - \
-                                                                        base_point_gt * scale_keypoints_3d) ** 2)).item())
-
-                    base_point_l2 = 0.0 if len(base_point_l2_list) == 0 else np.mean(base_point_l2_list)
-                    metric_dict['base_point_l2'].append(base_point_l2)
-
                 # plot visualization
                 if singleview_dataset:
                     keypoints_3d_gt = op.root_centering(keypoints_3d_gt, config.kind, inverse=True)
@@ -475,7 +465,8 @@ def main(args):
                 if k in state_dict.keys():
                     model_state_dict[k] = v
                 else:
-                    assert 'adaptive_norm' or 'group_norm' in k
+                    print (f'{k} missed')
+                    assert ('adaptive_norm' in k.split('.')) or ('group_norm' in k.split('.'))
             state_dict = model_state_dict
             del model_state_dict 
         model.load_state_dict(state_dict, strict=True)

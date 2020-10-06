@@ -62,7 +62,7 @@ class SPADE(nn.Module):
     def __init__(self, 
                 style_vector_channels, 
                 features_channels, 
-                hidden=128, # hidden=128
+                hidden=64, # hidden=128
                 ks=3, 
                 params_evolution=False):
 
@@ -523,7 +523,7 @@ class V2VModel(nn.Module):
 
         self._initialize_weights()
 
-    def forward(self, x, params=None, device=None):
+    def forward(self, x, params=None):
 
         if self.style_forward:
             global STYLE_FORWARD

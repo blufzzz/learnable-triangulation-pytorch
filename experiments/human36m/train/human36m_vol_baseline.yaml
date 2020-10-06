@@ -10,7 +10,7 @@ opt:
   criterion: "MAE"
 
   use_volumetric_ce_loss: true
-  volumetric_ce_loss_weight: 0.1
+  volumetric_ce_loss_weight: 1.
 
   n_objects_per_epoch: 10000
   n_epochs: 9999
@@ -57,7 +57,7 @@ model:
   transfer_cmu_to_human36m: false
 
   backbone:
-    name: "resnet50"
+    name: "resnet152"
     style: "simple"
 
     group_norm: true
@@ -65,12 +65,13 @@ model:
     checkpoint: "./data/pose_resnet_4.5_pixels_human36m.pth"
 
     num_joints: 17
-    num_layers: 50 #50 #152
+    num_layers: 152 #50 #152
 
     alg_confidences: false
     vol_confidences: false
     return_heatmaps: false
     return_bottleneck: false
+    return_features: true
 
   v2v_configuration:
 

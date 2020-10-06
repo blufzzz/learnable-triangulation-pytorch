@@ -212,7 +212,8 @@ def integrate_tensor_3d_with_coordinates(volumes, coord_volumes, softmax=True):
 
 def make_3d_heatmap(coord_volumes, tri_keypoints_3d, use_topk=False, pow=2, EPS=1e-5):
     '''
-    use_topk - non-differentiable way
+    Creates 3D joints heatmap, given 3d keypoints 
+    use_topk - create in non-differentiable way
     '''
     coord_volume_unsq = coord_volumes.unsqueeze(1)
     keypoints_gt_i_unsq = tri_keypoints_3d.unsqueeze(2).unsqueeze(2).unsqueeze(2)
@@ -224,7 +225,7 @@ def make_3d_heatmap(coord_volumes, tri_keypoints_3d, use_topk=False, pow=2, EPS=
         for k,w in zip([1,2,3,4],
                       [3,3,3,3]):
             n_cells = k**3
-            knn = dists.view(*dists.shape[:-3],-1).topk(n_cells,dim=-1,largest=False)
+            knn = dists.view(*dists.shape[:-3],-1).topk(n_cells, dim=-1, largest=False)
             if hasattr(knn, 'values'):
                 radius = knn.values.max(dim=-1)[0].unsqueeze(2).unsqueeze(2).unsqueeze(2)
             else:
