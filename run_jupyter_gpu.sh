@@ -1,8 +1,5 @@
 #!/bin/bash
-export CUDA_VISIBLE_DEVICES=$1
-var=$(whoami)
-echo $var
-python test_cuda.py
+srun -p TitanBlack --gres=gpu --exclusive --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-02 \
 jupyter notebook \
 --port 6006 \
 --no-browser
