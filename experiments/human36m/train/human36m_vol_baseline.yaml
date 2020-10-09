@@ -8,16 +8,20 @@ visualize: false
 
 opt:
   criterion: "MAE"
+  criterion_weight: 1.
 
   use_volumetric_ce_loss: true
   volumetric_ce_loss_weight: 1.
+
+  use_bone_length_term: false
+  bone_length_weight: 0.
 
   n_objects_per_epoch: 10000
   n_epochs: 9999
   dump_weights: False
 
-  batch_size: 5
-  val_batch_size: 5
+  batch_size: 3
+  val_batch_size: 3
 
   lr: 0.0001
   process_features_lr: 0.001
@@ -78,13 +82,14 @@ model:
     use_skip_connection: true
     skip_block_type: 'Res3DBlock'
     skip_block_adain: false
+    back_layer_output_channels: 256
 
                   # first should be Res3DBlock
-    downsampling: [{'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
+    downsampling: [{'module_type': 'Res3DBlock', 'params':[64,64], 'adain': false},
                   {'module_type': 'Pool3DBlock', 'params': [2], 'adain': false}, # pool
-                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
-                  {'module_type': 'Pool3DBlock', 'params': [2], 'adain': false}, # pool
-                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
+                  # {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
+                  # {'module_type': 'Pool3DBlock', 'params': [2], 'adain': false}, # pool
+                  {'module_type': 'Res3DBlock', 'params':[64,128], 'adain': false},
                   {'module_type': 'Pool3DBlock', 'params':[2], 'adain': false}, # pool
                   {'module_type': 'Res3DBlock', 'params':[128,256], 'adain': false}]
 
@@ -92,13 +97,12 @@ model:
 
     upsampling: [{'module_type': 'Res3DBlock', 'params':[256,128], 'adain': false},
                   {'module_type': 'Upsample3DBlock', 'params': [128, 128, 2, 2], 'adain': false},
+                  # {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
+                  # {'module_type': 'Upsample3DBlock', 'params': [128, 128, 2, 2], 'adain': false},
                   {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
-                  {'module_type': 'Upsample3DBlock', 'params': [128, 128, 2, 2], 'adain': false},
-                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
-                  {'module_type': 'Upsample3DBlock', 'params':[128, 64, 2, 2], 'adain': false},
-                  {'module_type': 'Res3DBlock', 'params':[64,64], 'adain': false}]
+                  {'module_type': 'Upsample3DBlock', 'params':[128, 256, 2, 2], 'adain': false},
+                  {'module_type': 'Res3DBlock', 'params':[256,256], 'adain': false}]
                   # last should be Res3DBlock
-
 
 dataset:
   kind: "human36m"

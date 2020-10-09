@@ -213,7 +213,11 @@ def integrate_tensor_3d_with_coordinates(volumes, coord_volumes, softmax=True):
 def make_3d_heatmap(coord_volumes, tri_keypoints_3d, use_topk=False, pow=2, EPS=1e-5):
     '''
     Creates 3D joints heatmap, given 3d keypoints 
+    coord_volumes: torch Tensor, [bs,dv,dv,dv,3]
+    coord_volumes: torch Tensor, [bs,J,3]
     use_topk - create in non-differentiable way
+    pow - power of the Euclidean distance from each keypoints used to create heatmap
+    EPS - small value to avoid division by zero
     '''
     coord_volume_unsq = coord_volumes.unsqueeze(1)
     keypoints_gt_i_unsq = tri_keypoints_3d.unsqueeze(2).unsqueeze(2).unsqueeze(2)
@@ -328,7 +332,7 @@ def unproject_heatmaps(heatmaps,
             raise ValueError("Unknown volume_aggregation_method: {}".format(volume_aggregation_method))
 
     if volume_aggregation_method == 'no_aggregation':
-            volume_batch = torch.cat(volume_batch, 0)
+        volume_batch = torch.cat(volume_batch, 0)
 
     return volume_batch
 
@@ -361,3 +365,22 @@ def render_points_as_2d_gaussians(points, sigmas, image_shape, normalize=True):
     images = images.reshape(n_points, *image_shape)
 
     return images
+
+
+def compose(coefficients, basis, decomposition_type):
+    '''
+    coefficients: Tensor, [batch_size, n_basis, n_joints, 32,32,32]
+    basis: Tensor, [batch_size, n_basis, n_joints, 32,32,32]
+    '''
+    # set_trace()
+    batch_size = coefficients.shape[0]
+    if decomposition_type == 'svd':
+        T = torch.einsum('bnjxyz,bnjxyz->bjxyz', coefficients, basis.unsqueeze(0).repeat(batch_size,1,1,1,1,1))
+    elif decomposition_type == 'tucker':
+        raise NotImplementedError()
+    else:
+        raise RuntimeError('Wrong `decomposition_type`!')
+    return T
+
+def decompose():
+    pass

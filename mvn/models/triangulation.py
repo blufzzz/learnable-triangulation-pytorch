@@ -12,7 +12,6 @@ from mvn.utils import op, multiview, img, misc, volumetric
 
 from mvn.models import pose_resnet, pose_hrnet
 from mvn.models.v2v import V2VModel
-from mvn.models.v2v_models import V2VModel_v1
 from IPython.core.debugger import set_trace
 
 
@@ -44,26 +43,8 @@ class VolumetricTriangulationNet(nn.Module):
         # transfer
         self.transfer_cmu_to_human36m = config.model.transfer_cmu_to_human36m if hasattr(config.model, "transfer_cmu_to_human36m") else False
 
-        self.volume_additional_grid_offsets = config.model.volume_additional_grid_offsets if \
-                                                 hasattr(config.model, 'volume_additional_grid_offsets') else False
-        if self.volume_additional_grid_offsets:
-            self.cell_size = self.cuboid_side / self.volume_size
-            self.max_cell_size_multiplier = config.model.max_cell_size_multiplier
 
-        # modules
-        config.model.backbone.alg_confidences = False
-        config.model.backbone.vol_confidences = False
-
-
-        if self.volume_aggregation_method.startswith('conf'):
-            config.model.backbone.vol_confidences = True
-
-        if config.model.backbone.name in ['hrnet32', 'hrnet48']:
-            self.backbone = pose_hrnet.get_pose_net(config.model.backbone, device=device)
-        elif config.model.backbone.name in ['resnet152', 'resnet50']:    
-            self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
-        else:
-            raise    
+        self.backbone = pose_resnet.get_pose_net(config.model.backbone, device=device)
 
         if config.model.backbone.return_heatmaps:
             for p in self.backbone.final_layer.parameters():
@@ -73,26 +54,16 @@ class VolumetricTriangulationNet(nn.Module):
             nn.Conv2d(self.backbone_features_dim, self.volume_features_dim, 1)
         )
 
-        v2v_output_dim = self.num_joints + 3 if self.volume_additional_grid_offsets else self.num_joints
+        v2v_output_dim = self.num_joints #if not self.volume_additional_grid_offset else self.num_joints + 3 
 
-        if self.v2v_type == 'v1':    
-            self.volume_net = V2VModel_v1(self.volume_features_dim, 
-                                          v2v_output_dim, 
-                                          self.volume_size,
-                                          normalization_type = config.model.v2v_normalization_type)
-
-        elif self.v2v_type == 'conf':
-            self.v2v_normalization_type = config.model.v2v_normalization_type
-            self.volume_net = V2VModel(self.volume_features_dim,
-                                       v2v_output_dim,
-                                       v2v_normalization_type=self.v2v_normalization_type,
-                                       config=config.model.v2v_configuration,
-                                       style_vector_dim=None,
-                                       params_evolution = False,
-                                       temporal_condition_type=None)
-        else:
-            raise RuntimeError('Unknown v2v_type')                                    
-
+        assert self.v2v_type == 'conf'
+        self.v2v_normalization_type = config.model.v2v_normalization_type
+        self.volume_net = V2VModel(self.volume_features_dim,
+                                   v2v_output_dim,
+                                   v2v_normalization_type=self.v2v_normalization_type,
+                                   config=config.model.v2v_configuration,
+                                   return_bottleneck=False,
+                                   back_layer_output_channels=config.model.v2v_configuration.back_layer_output_channels)
     
     def build_coord_volumes(self, batch, batch_size, device):
 
@@ -172,23 +143,14 @@ class VolumetricTriangulationNet(nn.Module):
         images = images.view(-1, *images.shape[2:])
 
         # forward backbone
-        _, features, _, vol_confidences, _ = self.backbone(images)
+        _, features, _, _, _ = self.backbone(images)
 
-        current_memory = torch.cuda.memory_allocated()
-        
         # reshape back
         images = images.view(batch_size, n_views, *images.shape[1:])
         features = features.view(batch_size, n_views, *features.shape[1:])
 
-        if vol_confidences is not None:
-            vol_confidences = vol_confidences.view(batch_size, n_views, *vol_confidences.shape[1:])
-
         # calcualte shapes
         image_shape, features_shape = tuple(images.shape[3:]), tuple(features.shape[3:])
-
-        # norm vol confidences
-        if self.volume_aggregation_method == 'conf_norm':
-            vol_confidences = vol_confidences / vol_confidences.sum(dim=1, keepdim=True)
 
         # change camera intrinsics
         new_cameras = deepcopy(batch['cameras'])
@@ -210,23 +172,18 @@ class VolumetricTriangulationNet(nn.Module):
                                         proj_matricies, 
                                         coord_volumes, 
                                         volume_aggregation_method=self.volume_aggregation_method, 
-                                        vol_confidences=vol_confidences)
+                                        vol_confidences=None)
 
         # integral 3d
-        volumes = self.volume_net(volumes)
-
-        if self.volume_additional_grid_offsets:
-            grid_offsets = volumes[:,-3:,...].contiguous().transpose(4,1)
-            volumes = volumes[:,:-3,...].contiguous()
-            grid_offsets = grid_offsets.tanh() * self.cell_size * self.max_cell_size_multiplier
-            coord_volumes = coord_volumes + grid_offsets
+        volumes, _ = self.volume_net(volumes)
 
         vol_keypoints_3d, volumes = op.integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier, coord_volumes, softmax=self.volume_softmax)
         # set_trace()
         return [vol_keypoints_3d,
-               features, 
                volumes, 
-               vol_confidences, 
-               cuboids, 
+               None, 
+               None, 
                coord_volumes, 
                base_points]
+
+ 

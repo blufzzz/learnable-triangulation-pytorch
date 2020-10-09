@@ -1,0 +1,168 @@
+title: "human36m_vol_temporal_lstm_adain_softmax"
+kind: "human36m"
+vis_freq: 1000
+vis_n_elements: 10
+distributed_train: false
+image_shape: [384, 384]
+visualize: false
+
+opt:
+  criterion: "MAE"
+  criterion_weight:
+
+  use_volumetric_ce_loss: true
+  volumetric_ce_loss_weight: 1.
+
+  # decomposition
+  coefficients_weight: 1.
+  basis_weight: 1.
+
+  use_bone_length_term: false
+  bone_length_weight: 0.
+
+  n_objects_per_epoch: 10000
+  n_epochs: 9999
+  dump_weights: False
+
+  batch_size: 5
+  val_batch_size: 5
+
+  lr: 0.0001
+  process_features_lr: 0.001
+  volume_net_lr: 0.001
+  basis_net_lr: 0.001
+  scale_keypoints_3d: 0.1
+
+  save_model: true
+  silence: false
+  grad_clip: 0.01
+
+
+model:
+  name: "vol_decomposition" 
+  kind: "mpii"
+
+  use_precalculated_basis: true
+  decomposition_type: svd
+  basis_path: '/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch/basis/heatmaps_3d_euclidean_convgauss_var1'
+  n_basis: 20
+
+  v2v_type: 'conf'
+  v2v_normalization_type: 'group_norm'
+  volume_aggregation_method: "no_aggregation"
+  volume_features_dim: 64
+  include_pivot: true 
+
+  init_weights: false
+  checkpoint: ""
+
+  use_gt_pelvis: true
+  use_precalculated_pelvis: false
+  use_volumetric_pelvis: false
+
+  cuboid_side: 2500
+  cuboid_multiplier: 1.0
+  rotation: false
+
+  volume_size: 32
+  volume_multiplier: 1.0
+  volume_softmax: true
+
+  transfer_cmu_to_human36m: false
+
+  backbone:
+    name: "resnet152"
+    style: "simple"
+
+    group_norm: true
+    init_weights: true
+    checkpoint: "./data/pose_resnet_4.5_pixels_human36m.pth"
+
+    num_joints: 17 
+    num_layers: 152 #50 #152
+
+    alg_confidences: false
+    vol_confidences: false
+    return_heatmaps: false
+    return_bottleneck: false
+    return_features: true
+
+  v2v_configuration:
+
+    use_skip_connection: true
+    skip_block_type: 'Res3DBlock'
+    skip_block_adain: false
+
+                  # first should be Res3DBlock
+    downsampling: [{'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
+                  {'module_type': 'Pool3DBlock', 'params': [2], 'adain': false}, # pool
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
+                  {'module_type': 'Pool3DBlock', 'params': [2], 'adain': false}, # pool
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
+                  {'module_type': 'Pool3DBlock', 'params':[2], 'adain': false}, # pool
+                  {'module_type': 'Res3DBlock', 'params':[128,256], 'adain': false}]
+
+    bottleneck: [{'module_type': 'Res3DBlock', 'params': [256,256], 'adain': false} ] 
+
+    upsampling: [{'module_type': 'Res3DBlock', 'params':[256,128], 'adain': false},
+                  {'module_type': 'Upsample3DBlock', 'params': [128, 128, 2, 2], 'adain': false},
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
+                  {'module_type': 'Upsample3DBlock', 'params': [128, 128, 2, 2], 'adain': false},
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
+                  {'module_type': 'Upsample3DBlock', 'params':[128, 64, 2, 2], 'adain': false},
+                  {'module_type': 'Res3DBlock', 'params':[64,64], 'adain': false}]
+                  # last should be Res3DBlock
+                  
+  basis_heads_configuration:
+
+    upsampling: [{'module_type': 'Res3DBlock', 'params':[256,128], 'adain': false},
+                  {'module_type': 'Upsample3DBlock', 'params': [128, 128, 2, 2], 'adain': false},
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
+                  {'module_type': 'Upsample3DBlock', 'params': [128, 128, 2, 2], 'adain': false},
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
+                  {'module_type': 'Upsample3DBlock', 'params':[128, 64, 2, 2], 'adain': false},
+                  {'module_type': 'Res3DBlock', 'params':[64,64], 'adain': false}]
+                  # last should be Res3DBlock
+
+
+dataset:
+  kind: "human36m"
+  dt: 1
+  dilation: 1
+  singleview: true
+  pivot_type: 'first'
+  keypoints_per_frame: false
+
+  train:
+    h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"
+    labels_path: "/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy"
+    pred_results_path:
+
+    with_damaged_actions: true
+    undistort_images: false
+
+    scale_bbox: 1.0
+
+    shuffle: true
+    randomize_n_views: false
+    min_n_views: null
+    max_n_views: null
+    num_workers: 8
+
+  val:
+    h36m_root: "/media/hpc2_storage/ibulygin/h36m-fetch/processed/"
+    labels_path: "/media/hpc2_storage/ibulygin/human36m-preprocessing/human36m-multiview-labels-GTbboxes.npy"
+    pred_results_path: 
+
+    with_damaged_actions: true
+    undistort_images: false
+
+    scale_bbox: 1.0
+
+    shuffle: false
+    randomize_n_views: false
+    min_n_views: null
+    max_n_views: null
+    num_workers: 8
+
+    retain_every_n_frames_in_test: 30

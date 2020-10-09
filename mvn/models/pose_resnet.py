@@ -206,13 +206,6 @@ class PoseResNet(nn.Module):
         self.inplanes = 64
         self.group_norm = group_norm
         self.n_groups = n_groups
-        self.return_only_features = return_features and \
-                                    (not return_heatmaps) and \
-                                    (not return_bottleneck) and \
-                                    (not alg_confidences) and \
-                                    (not vol_confidences)
-        if self.return_only_features:
-            print ('Backbone returns ONLY features')
 
         self.deconv_with_bias = deconv_with_bias
         (self.num_deconv_layers,
@@ -346,10 +339,7 @@ class PoseResNet(nn.Module):
             x = self.final_layer(x)
             heatmaps = x
         
-        if self.return_only_features:
-            return features
-        else:
-            return heatmaps, features, alg_confidences, vol_confidences, bottleneck
+        return heatmaps, features, alg_confidences, vol_confidences, bottleneck
 
 
 def get_pose_net(config, strict=True, device='cuda:0'):
