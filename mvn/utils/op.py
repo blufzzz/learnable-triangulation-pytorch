@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from mvn.utils.img import to_numpy, to_torch
 from mvn.utils import multiview, volumetric
 from IPython.core.debugger import set_trace
+from tensorly.decomposition import tucker
 
 
 def get_coord_volumes(kind, 
@@ -203,6 +204,9 @@ def integrate_tensor_3d_with_coordinates(volumes, coord_volumes, softmax=True):
         volumes = nn.functional.softmax(volumes, dim=2)
     else:
         volumes = nn.functional.relu(volumes)
+        # normalize
+        S = volumes.sum(-1).unsqueeze(-1)
+        volumes = volumes/S
 
     volumes = volumes.reshape((batch_size, n_volumes, x_size, y_size, z_size))
     coordinates = torch.einsum("bnxyz, bxyzc -> bnc", volumes, coord_volumes)
@@ -210,42 +214,53 @@ def integrate_tensor_3d_with_coordinates(volumes, coord_volumes, softmax=True):
     return coordinates, volumes
 
 
-def make_3d_heatmap(coord_volumes, tri_keypoints_3d, use_topk=False, pow=2, EPS=1e-5):
+def make_3d_heatmap(coord_volumes, tri_keypoints_3d, k=3, kernel_size=5, SIGMA=0.5, return_binary=False):
     '''
     Creates 3D joints heatmap, given 3d keypoints 
     coord_volumes: torch Tensor, [bs,dv,dv,dv,3]
-    coord_volumes: torch Tensor, [bs,J,3]
+    tri_keypoints_3d: torch Tensor, [bs,J,3]
     use_topk - create in non-differentiable way
-    pow - power of the Euclidean distance from each keypoints used to create heatmap
-    EPS - small value to avoid division by zero
     '''
+    
+    batch_size, num_joints = tri_keypoints_3d.shape[:2]
+    device = coord_volumes.device
+
     coord_volume_unsq = coord_volumes.unsqueeze(1)
     keypoints_gt_i_unsq = tri_keypoints_3d.unsqueeze(2).unsqueeze(2).unsqueeze(2)
     dists = torch.sqrt(((coord_volume_unsq - keypoints_gt_i_unsq) ** 2).sum(-1))
+    argmins = dists.view(*dists.shape[:2], -1).argmin(-1)
+    dists_binary = torch.zeros_like(dists)
+
+    for (i,j), indx in np.ndenumerate(to_numpy(argmins)):
+        indx = np.unravel_index(indx, dists.shape[-3:])
+        dists_binary[i,j][indx] = 1.
+
+    if return_binary:
+        return dists_binary
+
+    k = 3
+    SIGMA=0.5
+    covariance = torch.eye(3)*SIGMA
+    mean = torch.zeros(3)
+    kernel_size = 5
+    x = torch.arange(-(kernel_size//2), (kernel_size//2)+1)
+    grid = torch.stack(torch.meshgrid([x,x,x]), dim=-1).type(torch.float).view(-1,3)
+
+    mean_ = mean.unsqueeze(0)
+    kernel = (1./(torch.sqrt(torch.det(covariance))*(np.sqrt(2*np.pi)**k)))*torch.exp((-1/2)*(((grid - mean_)@torch.inverse(covariance))*(grid - mean_)).sum(-1))
+    kernel = kernel/kernel.sum()
+
+    heatmaps_3d = torch.zeros_like(dists_binary)
+    kernel = kernel.view(kernel_size,kernel_size,kernel_size).unsqueeze(0).unsqueeze(0).to(device)
     
-    if use_topk:
-        H = torch.zeros_like(dists)
 
-        for k,w in zip([1,2,3,4],
-                      [3,3,3,3]):
-            n_cells = k**3
-            knn = dists.view(*dists.shape[:-3],-1).topk(n_cells, dim=-1, largest=False)
-            if hasattr(knn, 'values'):
-                radius = knn.values.max(dim=-1)[0].unsqueeze(2).unsqueeze(2).unsqueeze(2)
-            else:
-                # torch 1.0.0 version
-                radius = knn[0].max(dim=-1)[0].unsqueeze(2).unsqueeze(2).unsqueeze(2)
-            mask = dists <= radius
-            # try:
-            #     assert mask.sum() / n_cells == 17
-            # except Exception as e:
-            #     set_trace()
-            H[mask] += w   
-    else:
-        H = 1./(torch.pow(dists,pow) + EPS)
-
-    style_vector_volumes = F.softmax(H.view(*H.shape[:-3], -1),dim=-1).view(*dists.shape)
-    return style_vector_volumes
+    for j in range(num_joints):
+        joint_heatmap = F.conv3d(dists_binary[:,j:j+1], weight=kernel, bias=None, padding=kernel_size//2, stride=1)
+        S = joint_heatmap.view(batch_size, -1).sum(-1)
+        joint_heatmap = joint_heatmap/S.view(batch_size,1,1,1,1)
+        heatmaps_3d[:,j:j+1] = joint_heatmap
+        
+    return heatmaps_3d
 
 
 def unproject_heatmaps(heatmaps,
@@ -372,15 +387,34 @@ def compose(coefficients, basis, decomposition_type):
     coefficients: Tensor, [batch_size, n_basis, n_joints, 32,32,32]
     basis: Tensor, [batch_size, n_basis, n_joints, 32,32,32]
     '''
-    # set_trace()
+    device = coefficients.device
     batch_size = coefficients.shape[0]
     if decomposition_type == 'svd':
+        n_basis = len(basis)
+        coefficients = coefficients.view(batch_size, n_basis, -1, *coefficients.shape[-3:])
         T = torch.einsum('bnjxyz,bnjxyz->bjxyz', coefficients, basis.unsqueeze(0).repeat(batch_size,1,1,1,1,1))
     elif decomposition_type == 'tucker':
-        raise NotImplementedError()
+        coefficients = coefficients.view(batch_size, -1, *coefficients.shape[-3:])
+        T2 = torch.einsum('bjxyz,ji->bixyz', coefficients, basis[0].to(device)) # core by 17x17
+        T3 = torch.einsum('bixyz,xk->bikyz', T2, basis[1].to(device)) # core by 32x32
+        del T2
+        torch.cuda.empty_cache()
+        T4 = torch.einsum('bikyz,yl->biklz', T3, basis[2].to(device)) # core by 32x32
+        del T3
+        torch.cuda.empty_cache()
+        T = torch.einsum('biklz,zm->biklm', T4, basis[3].to(device)) # core by 32x32
+        del T4
     else:
         raise RuntimeError('Wrong `decomposition_type`!')
     return T
 
-def decompose():
-    pass
+def decompose(heatmaps_3d, decomposition_type):
+    if decomposition_type == 'tucker':
+        core, factors = tucker(heatmaps_3d.numpy())
+        coefficients = torch.einsum('bjxyz,nj->njxyz',
+                                    torch.tensor(core).to(device),
+                                    torch.tensor(factors[0]).to(device)) 
+        basis = [torch.tensor(f).to(device) for f in factors[1:]]
+    else:
+        raise NotImplementedError()
+    return coefficients, basis

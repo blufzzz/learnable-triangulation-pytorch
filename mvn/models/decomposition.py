@@ -57,50 +57,64 @@ class VolumetricDecompositionNet(nn.Module):
         # LOAD BASIS #
         ##############
         self.basis_type = config.model.basis_type
-        self.only_basis_coefs = config.model.only_basis_coefs
+        self.only_basis_coefs = config.model.only_basis_coefs if hasattr(config.model, "n_basis") else False
+        self.n_basis = config.model.n_basis if hasattr(config.model, "n_basis") else None
+        
         if self.use_precalculated_basis: 
-            self.n_basis = config.model.n_basis 
-            self.basis = torch.load(config.model.basis_path)[:self.n_basis].to(device)
+            self.basis = torch.load(config.model.basis_path)
+            if self.decomposition_type == 'svd':
+                self.basis = self.basis[:self.n_basis].to(device)
         else:
-            self.n_basis = config.model.n_basis
-            raise NotImplementedError()
+            bottleneck_dim = config.model.v2v_configuration.bottleneck[-1]['params'][-1] 
+            self.basis_net = BasisNet(input_dim=bottleneck_dim,
+                                      volume_size=self.volume_size, 
+                                      n_joints=self.num_joints,
+                                      normalization_type=self.v2v_normalization_type)
+
+        # DELETE THIS
+        self.gt_input = config.model.gt_input if hasattr(config.model, 'gt_input') else False
+
+        ####################
+        # RESIDUAL NETWORK #   
+        ####################
+        self.use_residual_network = config.model.use_residual_network if hasattr(config.model, 'use_residual_network') else False
+        
 
         ############
         # BACKBONE #   
         ############
-        self.backbone = pose_resnet.get_pose_net(config.model.backbone,
-                                                 device=device,
-                                                 strict=True)
-        
-        print ('Only {} backbone is used...'.format(config.model.backbone.name))
+        if not self.gt_input:
+            self.backbone = pose_resnet.get_pose_net(config.model.backbone,
+                                                     device=device,
+                                                     strict=True)
+            if self.volume_features_dim != 256:    
+                self.process_features = nn.Sequential(nn.Conv2d(256, self.volume_features_dim, 1))
+            else:
+                self.process_features = nn.Sequential()
+        else:
+            self.backbone = nn.Sequential()
+            self.process_features = nn.Sequential()
+            
+            print ('Only {} backbone is used...'.format(config.model.backbone.name))
 
         #######
         # V2V #
         #######
         assert self.v2v_type == 'conf'  
         return_bottleneck = not self.use_precalculated_basis
+        if self.decomposition_type == 'tucker':
+            v2v_output_dim = self.num_joints
+        else:
+            v2v_output_dim = self.n_basis if self.only_basis_coefs else self.num_joints*self.n_basis*3
         output_vector = self.basis_type == 'keypoints'
-        self.volume_net = V2VModel(self.volume_features_dim,
-                                   self.n_basis if self.only_basis_coefs else self.num_joints*self.n_basis,
+        self.volume_net = V2VModel(self.num_joints if self.gt_input else self.volume_features_dim,
+                                   v2v_output_dim,
                                    v2v_normalization_type=self.v2v_normalization_type,
                                    config=config.model.v2v_configuration,
                                    return_bottleneck=return_bottleneck,
                                    back_layer_output_channels=config.model.v2v_configuration.back_layer_output_channels,
                                    output_vector=output_vector
-                                   )
-    
-        if self.volume_features_dim != 256:    
-            self.process_features = nn.Sequential(nn.Conv2d(256, self.volume_features_dim, 1))
-        else:
-            self.process_features = nn.Sequential()    
-
-        ###############
-        # BASIS HEADS #
-        ###############
-        if not self.use_precalculated_basis:
-            # last channel from last bottleneck layer
-            bottleneck_dim = config.model.v2v_configuration.bottleneck[-1]['params'][-1] 
-            self.basis_net = BasisNet(input_dim=bottleneck_dim, n_basis=self.n_basis)
+                                   )    
 
         description(self)
 
@@ -118,13 +132,15 @@ class VolumetricDecompositionNet(nn.Module):
         ######################
         # FEATURE ECTRACTION #   
         ######################
-        _, features, _, _, _ = self.backbone(images_batch.view(-1, 3, *image_shape))
-        features = self.process_features(features)
-        features_shape = features.shape[-2:]
-        features_channels = features.shape[1]
-        features = features.view(batch_size, -1, features_channels, *features_shape)
+        if not self.gt_input:
+            _, features, _, _, _ = self.backbone(images_batch.view(-1, 3, *image_shape))
+            features = self.process_features(features)
+            features_shape = features.shape[-2:]
+            features_channels = features.shape[1]
+            features = features.view(-1, fictive_view, features_channels, *features_shape)
 
-        proj_matricies_batch = update_camera(batch, batch_size, image_shape, features_shape, dt, device)
+            proj_matricies_batch = update_camera(batch, batch_size, image_shape, features_shape, dt, device)
+            proj_matricies_batch = proj_matricies_batch.view(-1, fictive_view, *proj_matricies_batch.shape[2:])
         ##########
         # PELVIS #   
         ##########            
@@ -155,22 +171,22 @@ class VolumetricDecompositionNet(nn.Module):
         ###############
         # V2V FORWARD #   
         ###############
-        proj_matricies_batch = proj_matricies_batch.view(-1, fictive_view, *proj_matricies_batch.shape[2:])
-        features = features.view(-1, fictive_view, features_channels, *features_shape)
-
-        # lift each feature-map to distinct volume and aggregate 
-        unproj_features = unproject_heatmaps(features,  
-                                             proj_matricies_batch, 
-                                             coord_volumes_pred, 
-                                             volume_aggregation_method=self.volume_aggregation_method,
-                                             vol_confidences=None,
-                                             fictive_views=None
-                                             )
-
-        unproj_features = unproj_features.squeeze(1) # get rid of the fictive single view
+        if not self.gt_input:
+            # lift each feature-map to distinct volume and aggregate 
+            unproj_features = unproject_heatmaps(features,  
+                                                 proj_matricies_batch, 
+                                                 coord_volumes_pred, 
+                                                 volume_aggregation_method=self.volume_aggregation_method,
+                                                 vol_confidences=None,
+                                                 fictive_views=None
+                                                 )
+            unproj_features = unproj_features.squeeze(1) # get rid of the fictive single view
+        
+        else:
+            unproj_features = make_3d_heatmap(coord_volumes_pred, tri_keypoints_3d)
 
         coefficients, bottleneck = self.volume_net(unproj_features)
-        
+
         if self.use_precalculated_basis:
             basis = self.basis
         else:
@@ -180,16 +196,21 @@ class VolumetricDecompositionNet(nn.Module):
             volumes_pred = None
             if self.only_basis_coefs:
                 coefficients = coefficients.unsqueeze(-1).repeat(1,1,basis.shape[-1])
+            else:
+                coefficients = coefficients.view(batch_size, self.n_basis, self.num_joints*3)
+
             keypoints_3d_pred = torch.einsum('bnj,bnj->bj', coefficients, basis.unsqueeze(0).repeat(batch_size,1,1))
             keypoints_3d_pred = keypoints_3d_pred.view(batch_size, self.num_joints, -1)
-        else:
-            coefficients = coefficients.view(batch_size, self.n_basis, self.num_joints, *coefficients.shape[-3:])
+        
+        elif self.basis_type == 'heatmaps':
             volumes = compose(coefficients, basis, decomposition_type=self.decomposition_type)
+            # check shapes
             keypoints_3d_pred, volumes_pred = integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier,
                                                                                    coord_volumes_pred,
                                                                                    softmax=self.volume_softmax)
+        else:
+            raise RuntimeError('unknown `basis_type`')
 
-        # set_trace()
         return (keypoints_3d_pred, 
                 volumes_pred, 
                 coefficients, # T

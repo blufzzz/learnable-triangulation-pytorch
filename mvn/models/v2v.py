@@ -131,10 +131,42 @@ class Upsample3DBlock(nn.Module):
         x = self.activation(x)
         return x  
 
-class BasisNet(object):
+class BasisNet(nn.Module):
     """docstring for BasisNet"""
-    def __init__(self, arg):
+    def __init__(self, input_dim, volume_size, n_joints, normalization_type):
         super(BasisNet, self).__init__()
+        self.input_dim = input_dim
+        self.volume_size = volume_size
+        self.n_joints = n_joints
+
+        self.resblock_1 = Res3DBlock(input_dim, 256, normalization_type, kernel_size=3, n_groups=32, padding=1)
+        self.pool_block = Pool3DBlock(2)
+        self.resblock_2 = Res3DBlock(256, 1024, normalization_type, kernel_size=3, n_groups=32, padding=1)
+        self.avg_pool = torch.nn.AdaptiveMaxPool3d((1,1,1))
+
+        self.lj = nn.Linear(1024, n_joints**2)
+        self.lx = nn.Linear(1024, volume_size**2)
+        self.ly = nn.Linear(1024, volume_size**2)
+        self.lz = nn.Linear(1024, volume_size**2)
+
+
+    def forward(self, x):
+
+        batch_size = x.shape[0]
+        x = self.resblock_1(x)
+        x = self.pool_block(x)
+        x = self.resblock_2(x)
+        x = self.avg_pool(x).view(batch_size, -1)
+
+        j_ = self.lj(x).view(batch_size, self.n_joints, self.n_joints)
+
+        x_ = self.lx(x).view(batch_size, self.volume_size, self.volume_size)
+        y_ = self.ly(x).view(batch_size, self.volume_size, self.volume_size)
+        z_ = self.lz(x).view(batch_size, self.volume_size, self.volume_size)
+
+        return [j_, x_, y_, z_]
+
+
 
 
 class EncoderDecorder(nn.Module):

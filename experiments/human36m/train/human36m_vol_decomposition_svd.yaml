@@ -43,7 +43,7 @@ model:
 
   use_precalculated_basis: true
   decomposition_type: svd
-  basis_path: '/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch/basis/heatmaps64_3d_euclidean_convgauss_var0.5_kernel5'
+  basis_path: '/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch/basis/heatmaps32_3d_euclidean_convgauss_var0.5_kernel5_Tucker-factors'
   n_basis: 20
 
   v2v_type: 'conf'
@@ -63,7 +63,7 @@ model:
   cuboid_multiplier: 1.0
   rotation: false
 
-  volume_size: 64
+  volume_size: 32
   volume_multiplier: 1.0
   volume_softmax: true
 

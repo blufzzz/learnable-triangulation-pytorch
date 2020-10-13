@@ -225,6 +225,10 @@ def one_epoch(model,
     if (not use_precalculated_basis) and (not is_baseline):
         coefficients_weight = config.opt.coefficients_weight
         basis_weight = config.opt.basis_weight
+
+
+    use_coefs_norm_weight = config.opt.use_coefs_norm_weight if hasattr(config.opt, 'use_coefs_norm_weight') else False
+    coefs_norm_weight = config.opt.coefs_norm_weight if hasattr(config.opt, 'coefs_norm_weight') else None
     
     use_volumetric_ce_loss = config.opt.use_volumetric_ce_loss
     vce_weight = config.opt.volumetric_ce_loss_weight
@@ -302,16 +306,30 @@ def one_epoch(model,
 
                 # decomposition loss
                 if (not use_precalculated_basis) and (not is_baseline):
-                    coefficients_gt, basis_gt = op.decompose(keypoints_3d_gt, type=decomposition_type)
+                    heatmaps_3d = make_3d_heatmap(coord_volumes_pred, keypoints_3d_gt)
+
+                    coefficients_gt, basis_gt = op.decompose(heatmaps_3d, decomposition_type)
+                    coefficients_loss = coefficients_weight*torch.norm(coefficients_gt - coefficients)/coefficients_gt.numel()
+                    set_trace()
                     
-                    coefficients_loss = coefficients_weight*torch.norm(coefficients_gt - coefficients)
-                    basis_loss = basis_weight*torch.norm(basis_gt - basis)
+                    basis_loss = 0
+                    for i in range(len(basis_gt)):
+                        basis_loss += basis_weight*torch.norm(basis_gt[i] - basis[i])/basis[i].numel()
+                    set_trace()
 
                     total_loss += basis_loss
                     total_loss += coefficients_loss
 
                     metric_dict['coefficients_loss'].append(coefficients_loss.item())
                     metric_dict['basis_loss'].append(basis_loss.item())
+
+                # norm weight 
+                if use_coefs_norm_weight:
+                    # 7.4747086 - norm of the core tensor from Tucker decomposition of the PCA 3d-heatmaps
+                    norm_loss = coefs_norm_weight*torch.abs(torch.norm(coefficients) - 7.4747086)
+                    total_loss += norm_loss
+                    metric_dict['norm_loss'].append(norm_loss.item())
+
 
                 # Bone length loss
                 if use_bone_length_term:
@@ -332,6 +350,8 @@ def one_epoch(model,
                                                     keypoints_3d_binary_validity_gt)
                     metric_dict['volumetric_ce_loss'].append(loss.item())
                     total_loss += vce_weight * loss
+
+
 
 
                 ############

@@ -43,7 +43,7 @@ model:
 
   use_precalculated_basis: true
   decomposition_type: svd
-  only_basis_coefs: true
+  only_basis_coefs: false
   basis_type: 'keypoints'
   basis_path: '/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch/basis/3dkeypoints_pca'
   n_basis: 20

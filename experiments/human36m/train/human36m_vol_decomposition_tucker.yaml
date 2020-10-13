@@ -10,8 +10,15 @@ opt:
   criterion: "MAE"
   criterion_weight: 1.
 
+  use_coefs_norm_weight: false
+  coefs_norm_weight: 0.001
+
   use_volumetric_ce_loss: true
   volumetric_ce_loss_weight: 1.
+
+  # decomposition
+  coefficients_weight: 1.
+  basis_weight: 1.
 
   use_bone_length_term: false
   bone_length_weight: 0.
@@ -26,6 +33,7 @@ opt:
   lr: 0.0001
   process_features_lr: 0.001
   volume_net_lr: 0.001
+  basis_net_lr: 0.001
   scale_keypoints_3d: 0.1
 
   save_model: true
@@ -34,8 +42,17 @@ opt:
 
 
 model:
-  name: "vol"
+  name: "vol_decomposition" 
   kind: "mpii"
+
+  use_precalculated_basis: false
+  gt_input: false
+  use_residual_network: true
+  decomposition_type: 'tucker'
+  basis_type: 'heatmaps'
+  only_basis_coefs: false
+  basis_path: null #'/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch/basis/heatmaps64_3d_euclidean_convgauss_var0.5_kernel5_Tucker-factors-normalized'
+  n_basis: null
 
   v2v_type: 'conf'
   v2v_normalization_type: 'group_norm'
@@ -54,22 +71,22 @@ model:
   cuboid_multiplier: 1.0
   rotation: false
 
-  volume_size: 32
+  volume_size: 64
   volume_multiplier: 1.0
-  volume_softmax: true
+  volume_softmax: false 
 
   transfer_cmu_to_human36m: false
 
   backbone:
-    name: "resnet50"
+    name: "resnet152"
     style: "simple"
 
     group_norm: true
     init_weights: true
     checkpoint: "./data/pose_resnet_4.5_pixels_human36m.pth"
 
-    num_joints: 17
-    num_layers: 50 #50 #152
+    num_joints: 17 
+    num_layers: 152 #50 #152
 
     alg_confidences: false
     vol_confidences: false
@@ -87,9 +104,9 @@ model:
                   # first should be Res3DBlock
     downsampling: [{'module_type': 'Res3DBlock', 'params':[64,64], 'adain': false},
                   {'module_type': 'Pool3DBlock', 'params': [2], 'adain': false}, # pool
-                  # {'module_type': 'Res3DBlock', 'params':[64,128], 'adain': false},
-                  # {'module_type': 'Pool3DBlock', 'params': [2], 'adain': false}, # pool
                   {'module_type': 'Res3DBlock', 'params':[64,128], 'adain': false},
+                  {'module_type': 'Pool3DBlock', 'params': [2], 'adain': false}, # pool
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
                   {'module_type': 'Pool3DBlock', 'params':[2], 'adain': false}, # pool
                   {'module_type': 'Res3DBlock', 'params':[128,256], 'adain': false}]
 
@@ -97,13 +114,13 @@ model:
 
     upsampling: [{'module_type': 'Res3DBlock', 'params':[256,128], 'adain': false},
                   {'module_type': 'Upsample3DBlock', 'params': [128, 128, 2, 2], 'adain': false},
-                  # {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
-                  # {'module_type': 'Upsample3DBlock', 'params': [128, 128, 2, 2], 'adain': false},
+                  {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
+                  {'module_type': 'Upsample3DBlock', 'params': [128, 128, 2, 2], 'adain': false},
                   {'module_type': 'Res3DBlock', 'params':[128,64], 'adain': false},
                   {'module_type': 'Upsample3DBlock', 'params':[64, 64, 2, 2], 'adain': false},
                   {'module_type': 'Res3DBlock', 'params':[64,64], 'adain': false}]
                   # last should be Res3DBlock
-
+                  
 dataset:
   kind: "human36m"
   dt: 1
