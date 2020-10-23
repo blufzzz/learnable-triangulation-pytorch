@@ -59,7 +59,7 @@ def make_conv1d_layers(feat_dims, kernel=3, stride=1, padding=1, bnrelu_final=Tr
 def make_deconv_layers(feat_dims, bnrelu_final=True, normalization_type='batch_norm', dim=2):
     layers = []
     for i in range(len(feat_dims)-1):
-        if d == 2:
+        if dim == 2:
             layer = nn.ConvTranspose2d(
                         in_channels=feat_dims[i],
                         out_channels=feat_dims[i+1],
@@ -68,7 +68,7 @@ def make_deconv_layers(feat_dims, bnrelu_final=True, normalization_type='batch_n
                         padding=1,
                         output_padding=0,
                         bias=False)
-        elif d == 3:
+        elif dim == 3:
             layer = nn.ConvTranspose3d(
                         in_channels=feat_dims[i],
                         out_channels=feat_dims[i+1],
@@ -78,7 +78,7 @@ def make_deconv_layers(feat_dims, bnrelu_final=True, normalization_type='batch_n
                         output_padding=0,
                         bias=False)
         else:
-            raise RuntimeError('wrong `d`')
+            raise RuntimeError('wrong `dim`')
         layers.append(layer)
 
         # Do not use BN and ReLU for final estimation
