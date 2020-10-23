@@ -41,6 +41,7 @@ class PoseNet(nn.Module):
         # x axis
         img_feat_x = img_feat_xy.mean((2))
         heatmap_x = self.conv_x(img_feat_x)
+        set_trace()
         coord_x = self.soft_argmax_1d(heatmap_x, x)
         
         # y axis

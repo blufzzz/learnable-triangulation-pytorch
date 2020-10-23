@@ -19,7 +19,7 @@ from sklearn.decomposition import PCA
 from IPython.core.debugger import set_trace
 
 # from mvn.models.image2lixel_common.nets.resnet import ResNetBackbone
-from mvn.models.image2lixel_common.nets.module import PoseNet, Pose2Feat, MeshNet#, ParamRegressor
+from mvn.models.image2lixel_common.nets.module import PoseNet, Pose2Feat, MeshNet #, ParamRegressor
 # from mvn.models.image2lixel_common.nets.loss import CoordLoss, ParamLoss, NormalVectorLoss, EdgeLengthLoss
 # from mvn.models.image2lixel_common.utils.smpl import SMPL
 # from mvn.models.image2lixel_common.utils.mano import MANO
@@ -44,6 +44,12 @@ class I2LModel(nn.Module):
         self.normalization_type = config.model.pose_net_normalization_type
         self.pelvis_type = config.model.pelvis_type if hasattr(config.model, 'pelvis_type') else 'gt'
         self.pose_net = PoseNet(self.num_joints, normalization_type=self.normalization_type)
+        if self.use_meshnet:
+            self.pose2feat = Pose2Feat()
+            self.mesh_backbone = pose_resnet.get_pose_net(config.model.backbone,
+                                                         device=device,
+                                                         strict=True)
+            self.mesh_net = MeshNet()
 
         self.backbone = pose_resnet.get_pose_net(config.model.backbone,
                                                  device=device,
@@ -72,13 +78,27 @@ class I2LModel(nn.Module):
                                             keypoints=tri_keypoints_3d,
                                             batch_size=batch_size,
                                             dt=None,
-                                            return_only_xyz=True,
+                                            return_only_xyz=True, # return only coordinates, not meshgrid
                                             max_rotation_angle=np.pi/4 #2 * np.pi
                                             )
+        base_points = tri_keypoints_3d[..., 6, :3]
         joint_coord_img = self.pose_net(pose_img_feat, coordinates)
 
-        base_points = tri_keypoints_3d[..., 6, :3]
+        if self.use_meshnet:
+            with torch.no_grad():
+                joint_heatmap = self.make_gaussian_heatmap(joint_coord_img.detach())
+            shared_img_feat = self.pose2feat(shared_img_feat, joint_heatmap)
 
+            # meshnet forward
+            _, mesh_img_feat = self.mesh_backbone(shared_img_feat, skip_early=True)
+            mesh_coord_img = self.mesh_net(mesh_img_feat)
+            
+            if self.use_mesh_model:    
+                # joint coordinate outputs from mesh coordinates
+                joint_img_from_mesh = torch.bmm(torch.from_numpy(self.joint_regressor).cuda()[None,:,:].repeat(mesh_coord_img.shape[0],1,1), mesh_coord_img)
+                joint_coord_img = joint_img_from_mesh
+            else:
+                joint_coord_img = mesh_coord_img
 
         return (joint_coord_img, 
                 None, 
@@ -86,7 +106,17 @@ class I2LModel(nn.Module):
                 None,
                 None,
                 base_points)
-       
+
+def make_gaussian_heatmap(self, joint_coord_img):
+        x = torch.arange(cfg.output_hm_shape[2])
+        y = torch.arange(cfg.output_hm_shape[1])
+        z = torch.arange(cfg.output_hm_shape[0])
+        zz,yy,xx = torch.meshgrid(z,y,x)
+        xx = xx[None,None,:,:,:].cuda().float(); yy = yy[None,None,:,:,:].cuda().float(); zz = zz[None,None,:,:,:].cuda().float();
+        
+        x = joint_coord_img[:,:,0,None,None,None]; y = joint_coord_img[:,:,1,None,None,None]; z = joint_coord_img[:,:,2,None,None,None];
+        heatmap = torch.exp(-(((xx-x)/cfg.sigma)**2)/2 -(((yy-y)/cfg.sigma)**2)/2 - (((zz-z)/cfg.sigma)**2)/2)
+        return heatmap
        
 def init_weights(m):
     if type(m) == nn.ConvTranspose2d:

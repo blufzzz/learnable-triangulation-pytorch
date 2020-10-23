@@ -37,7 +37,7 @@ model:
   name: "i2l"
   kind: "mpii"
 
-  # v2v_type: 'conf'
+  use_meshnet: false
   pose_net_normalization_type: 'group_norm'
   # volume_aggregation_method: "no_aggregation"
   # volume_features_dim: 64
@@ -54,14 +54,14 @@ model:
   cuboid_multiplier: 1.0
   rotation: false
 
-  volume_size: 64
+  volume_size: 32
   volume_multiplier: 1.0
   volume_softmax: true
 
   transfer_cmu_to_human36m: false
 
   backbone:
-    name: "resnet152"
+    name: "resnet50"
     style: "simple"
 
     group_norm: true
@@ -69,7 +69,7 @@ model:
     checkpoint: "./data/pose_resnet_4.5_pixels_human36m.pth"
 
     num_joints: 17
-    num_layers: 152 #50 #152
+    num_layers: 50 #50 #152
 
     alg_confidences: false
     vol_confidences: false
