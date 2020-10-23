@@ -121,12 +121,10 @@ class I2LModel(nn.Module):
 
             # interpolate - workaround to match `shared_img_feat` spatial dim
             joint_heatmap = F.interpolate(joint_heatmap, (64,64,64))
-            set_trace()
             shared_img_feat = self.pose2feat(shared_img_feat, joint_heatmap) #[1, 64, 64, 64])
 
-            set_trace()
             # meshnet forward
-            _, mesh_img_feat, _, _, _, _ = self.mesh_backbone(shared_img_feat, skip_early=True)
+            _, _, _, _, mesh_img_feat, _ = self.mesh_backbone(shared_img_feat, skip_early=True)
             set_trace()
             mesh_coord_img = self.mesh_net(mesh_img_feat)
             set_trace()
