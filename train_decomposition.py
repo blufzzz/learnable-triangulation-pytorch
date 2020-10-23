@@ -588,6 +588,7 @@ def main(args):
             )  
 
         elif config.model.name == 'i2l':
+            # pose2feat_lr
             opt = torch.optim.Adam(
                 [{'params': model.backbone.parameters()},
                  {'params': model.pose_net.parameters() ,'lr':config.opt.pose_net_lr}
@@ -599,7 +600,19 @@ def main(args):
                 ([{'params': model.volume_net.parameters(), \
                             'lr': config.opt.volume_net_lr if \
                             hasattr(config.opt, "volume_net_lr") else config.opt.lr}] if
-                            hasattr(model, 'volume_net') else []),
+                            hasattr(model, 'volume_net') else []) + \
+                ([{'params': model.mesh_net.parameters(), \
+                            'lr': config.opt.mesh_net_lr if \
+                            hasattr(config.opt, "mesh_net_lr") else config.opt.lr}] if
+                            hasattr(model, 'mesh_net') else []) + \
+                ([{'params': model.pose2feat.parameters(), \
+                            'lr': config.opt.pose2feat_lr if \
+                            hasattr(config.opt, "pose2feat_lr") else config.opt.lr}] if
+                            hasattr(model, 'pose2feat') else [])+ \
+                ([{'params': model.mesh_backbone.parameters(), \
+                            'lr': config.opt.mesh_backbone_lr if \
+                            hasattr(config.opt, "mesh_backbone_lr") else config.opt.lr}] if
+                            hasattr(model, 'mesh_backbone') else []),
                 lr=config.opt.lr
             )                        
         elif config.model.name == "vol_decomposition":

@@ -25,6 +25,9 @@ opt:
 
   lr: 0.0001
   pose_net_lr: 0.001
+  mesh_net_lr: 0.001
+  pose2feat_lr: 0.001
+  mesh_backbone_lr: 0.001
   scale_keypoints_3d: 0.1
 
   save_model: true
@@ -38,7 +41,7 @@ model:
 
   use_meshnet: true
   use_mesh_model: false
-  sigma: 1. #2.5
+  sigma: 1.25 #2.5
   pose_net_normalization_type: 'group_norm'
   include_pivot: true 
 
