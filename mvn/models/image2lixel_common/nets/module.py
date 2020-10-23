@@ -9,10 +9,21 @@ from mvn.models.image2lixel_common.nets.layer import make_conv_layers, make_deco
 from IPython.core.debugger import set_trace
 
 class PoseNet(nn.Module):
-    def __init__(self, joint_num, volume_size, input_features=256, normalization_type='group_norm'):
+    def __init__(self, 
+                joint_num, 
+                volume_size,
+                return_coords, 
+                joint_independent=True, 
+                rank=1, 
+                input_features=256, 
+                normalization_type='group_norm'):
+
         super(PoseNet, self).__init__()
         self.joint_num = joint_num
         self.normalization_type = normalization_type
+        self.return_coords = return_coords
+        self.rank = rank
+        self.joint_independent = joint_independent
         self.volume_size = volume_size
         if self.volume_size == 32:
             deconv_layers_channels = [2048,256,256]
@@ -21,11 +32,21 @@ class PoseNet(nn.Module):
         else:
             raise RuntimeError('wrong `volume_size`')
 
+        if not return_coords:
+            x_channels = self.joint_num*self.rank if joint_independent else self.rank
+            y_channels = self.joint_num*(self.rank**2) if joint_independent else self.rank**2
+            z_channels = self.joint_num*self.rank if joint_independent else self.rank
+        else:
+            x_channels, y_channels, z_channels = self.joint_num, self.joint_num, self.joint_num
+
         self.deconv = make_deconv_layers(deconv_layers_channels)
-        self.conv_x = make_conv1d_layers([256,self.joint_num], kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type)
-        self.conv_y = make_conv1d_layers([256,self.joint_num], kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type)
+        self.conv_x = make_conv1d_layers([256,x_channels], kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type)
+        self.conv_y = make_conv1d_layers([256,y_channels], kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type)
         self.conv_z_1 = make_conv1d_layers([2048,256*self.volume_size], kernel=1, stride=1, padding=0, normalization_type=normalization_type) # k=3, p=1
-        self.conv_z_2 = make_conv1d_layers([256,self.joint_num], kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type)
+        self.conv_z_2 = make_conv1d_layers([256,z_channels], kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type)
+
+        # if not joint_independent:
+        #     self.conv_j = ...
 
     def soft_argmax_1d(self, heatmap1d, grid=None):
         heatmap1d = F.softmax(heatmap1d, 2)
@@ -40,6 +61,7 @@ class PoseNet(nn.Module):
 
     def forward(self, img_feat, coordinates=None):
 
+        batch_size = img_feat.shape
         x,y,z = None, None, None
         if coordinates is not None:
             x,y,z = coordinates
@@ -49,23 +71,34 @@ class PoseNet(nn.Module):
         # x axis
         img_feat_x = img_feat_xy.mean((2))
         heatmap_x = self.conv_x(img_feat_x)
-        coord_x = self.soft_argmax_1d(heatmap_x, x)
         
         # y axis
         img_feat_y = img_feat_xy.mean((3))
         heatmap_y = self.conv_y(img_feat_y)
-        coord_y = self.soft_argmax_1d(heatmap_y, y)
         
         # z axis
         img_feat_z = img_feat.mean((2,3))[:,:,None]
         img_feat_z = self.conv_z_1(img_feat_z)
         img_feat_z = img_feat_z.view(-1,256,self.volume_size)
         heatmap_z = self.conv_z_2(img_feat_z)
-        coord_z = self.soft_argmax_1d(heatmap_z ,z)
+        
 
-        joint_coord = torch.cat((coord_x, coord_y, coord_z),2)
+        if self.return_coords:
+            coord_x = self.soft_argmax_1d(heatmap_x, x)
+            coord_y = self.soft_argmax_1d(heatmap_y, y)
+            coord_z = self.soft_argmax_1d(heatmap_z ,z)
+            joint_coord = torch.cat((coord_x, coord_y, coord_z),2)
+            return joint_coord
 
-        return joint_coord
+        else:
+            if self.joint_independent:
+                heatmap_x = heatmap_x.view(batch_size, self.joint_num, 1, -1, self.rank)
+                heatmap_y = heatmap_y.view(batch_size, self.joint_num, self.rank, -1, self.rank)
+                heatmap_z = heatmap_x.view(batch_size, self.joint_num, self.rank, -1)
+            else:
+                pass
+
+            return heatmap_x, heatmap_y, heatmap_z
 
 
 class PoseNet3D(nn.Module):
@@ -151,11 +184,11 @@ class Pose2Feat(nn.Module):
         return feat
 
 class MeshNet(nn.Module):
-    def __init__(self, volume_size, vertex_num, normalization_type='group_norm'):
+    def __init__(self, volume_size, vertex_num, return_coords, rank=1, joint_independent=True, normalization_type='group_norm'):
         super(MeshNet, self).__init__()
         self.vertex_num = vertex_num
         self.volume_size = volume_size
-
+        self.return_coords = return_coords
         if self.volume_size == 32:
             deconv_layers_channels = [2048,256,256]
         elif self.volume_size == 64:
@@ -187,7 +220,7 @@ class MeshNet(nn.Module):
             x,y,z = coordinates
 
         img_feat_xy = self.deconv(img_feat)
-        
+
         # x axis
         img_feat_x = img_feat_xy.mean((2))
         heatmap_x = self.conv_x(img_feat_x)
@@ -205,8 +238,15 @@ class MeshNet(nn.Module):
         heatmap_z = self.conv_z_2(img_feat_z) # problm
         coord_z = self.soft_argmax_1d(heatmap_z, z)
 
-        mesh_coord = torch.cat((coord_x, coord_y, coord_z),2)
-        return mesh_coord
+        if self.return_coords:
+            coord_x = self.soft_argmax_1d(heatmap_x, x)
+            coord_y = self.soft_argmax_1d(heatmap_y, y)
+            coord_z = self.soft_argmax_1d(heatmap_z ,z)
+            joint_coord = torch.cat((coord_x, coord_y, coord_z),2)
+            return joint_coord
+
+        else:
+            return heatmap_x, heatmap_y, heatmap_z
 
 class ParamRegressor(nn.Module):
     def __init__(self, joint_num):

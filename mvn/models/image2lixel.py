@@ -52,19 +52,37 @@ class I2LModel(nn.Module):
         self.sigma = config.model.sigma
         self.use_mesh_model = config.model.use_mesh_model
 
+        self.return_coords_posenet = config.model.return_coords_posenet
+        self.return_coords_meshnet = config.model.return_coords_meshnet
+        self.joint_independent_posenet = config.model.joint_independent_posenet
+        self.joint_independent_meshnet = config.model.joint_independent_meshnet
+
+        self.rank = config.model.rank
+
         self.num_joints = config.model.backbone.num_joints
         self.kind = config.model.kind
         assert self.kind == "mpii"
         self.normalization_type = config.model.pose_net_normalization_type
         self.pelvis_type = config.model.pelvis_type if hasattr(config.model, 'pelvis_type') else 'gt'
-        self.pose_net = PoseNet(self.num_joints, self.volume_size, normalization_type=self.normalization_type)
+
+        self.pose_net = PoseNet(self.num_joints, 
+                                self.volume_size, 
+                                return_coords=self.return_coords_posenet,
+                                joint_independent=self.joint_independent_posenet,
+                                rank=self.rank,
+                                normalization_type=self.normalization_type)
         if self.use_meshnet:
             self.pose2feat = Pose2Feat(self.num_joints)
             self.mesh_backbone = pose_resnet.get_pose_net(config.model.backbone,
                                                          device=device,
                                                          strict=True,
                                                          skip_early=True)
-            self.mesh_net = MeshNet(self.volume_size, self.num_joints, normalization_type=self.normalization_type)
+            self.mesh_net = MeshNet(self.volume_size, 
+                                    self.num_joints, 
+                                    return_coords=self.return_coords_meshnet,
+                                    joint_independent=self.joint_independent_posenet,
+                                    rank=self.rank,
+                                    normalization_type=self.normalization_type)
 
         self.backbone = pose_resnet.get_pose_net(config.model.backbone,
                                                  device=device,
@@ -102,6 +120,7 @@ class I2LModel(nn.Module):
         
         # posenet forward
         _, _, _, _, pose_img_feat, shared_img_feat = self.backbone(images_batch.view(-1, 3, *image_shape))
+        return_only_xyz = not (self.return_coords_meshnet or self.return_coords_posenet)
         coordinates = get_coord_volumes(self.kind, 
                                             self.training, 
                                             self.rotation,
@@ -110,12 +129,16 @@ class I2LModel(nn.Module):
                                             self.device, 
                                             keypoints=tri_keypoints_3d,
                                             batch_size=batch_size,
-                                            dt=None,
-                                            return_only_xyz=True, # return only coordinates, not meshgrid
+                                            dt=None, 
+                                            return_only_xyz=return_only_xyz, 
                                             max_rotation_angle=np.pi/4 #2 * np.pi
                                             )
+
         base_points = tri_keypoints_3d[..., 6, :3]
         joint_coord_img = self.pose_net(pose_img_feat, coordinates)
+
+        if not self.return_coords_posenet:
+                volumes = compose(None, joint_coord_img, 'tt', joint_independent=self.joint_independent_posenet)
 
         if self.use_meshnet:
             joint_heatmap = self.make_gaussian_heatmap(joint_coord_img, self.sigma)
@@ -126,7 +149,7 @@ class I2LModel(nn.Module):
 
             # meshnet forward
             _, _, _, _, mesh_img_feat, _ = self.mesh_backbone(shared_img_feat)
-            mesh_coord_img = self.mesh_net(mesh_img_feat)
+            mesh_coord_img = self.mesh_net(mesh_img_feat, coordinates)
             
             if self.use_mesh_model:    
                 # joint coordinate outputs from mesh coordinates
@@ -134,6 +157,9 @@ class I2LModel(nn.Module):
                 joint_coord_img = joint_img_from_mesh
             else:
                 joint_coord_img = mesh_coord_img
+
+                if not self.return_coords_meshnet:
+                    volumes = compose(None, joint_coord_img, 'tt', joint_independent=self.joint_independent_meshnet)
 
 
         return (joint_coord_img, 

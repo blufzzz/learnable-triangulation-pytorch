@@ -5,6 +5,7 @@ python train_decomposition.py \
 --config=./experiments/human36m/train/human36m_vol_image2lixel.yaml \
 --experiment_comment='h36_sv32_dist_Image2Lixel-MeshNet-lr1e-3-imsize256_ResNet-50-lr1e-4_bs1-1_VCE-0_MAE-1_coord_vol'
 
+# 'h36_sv32_dist_Image2Lixel-rank5-JINDP-lr1e-3-imsize256_ResNet-50-lr1e-4_bs1-1_VCE-0_MAE-1_coord_vol'
 # --experiment_comment='h36_sv64_dist_Tucker-Adaptive-Linear-1024_V2V-conf-5rb-bf64-group-vf64-lr1e-3_NoSoftMax_NoCoreNorm_ResNet-152-lr1e-4_bs1-1_VCE-1_MAE-1'
 # --experiment_comment='h36_sv32_dist_baseline_V2V-conf-group-vf64-lr1e-3_ResNet-152-lr1e-4_bs3-3_VCE-1_MAE-1'
 # --experiment_comment='h36_sv32_dist_SVD-precalc-nb20-ks5-v5e-1_V2V-conf-group-vf64-lr1e-3_ResNet-152-lr1e-4_bs3-3_VCE-1_MAE-1'

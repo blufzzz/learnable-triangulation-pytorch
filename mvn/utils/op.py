@@ -391,7 +391,7 @@ def render_points_as_2d_gaussians(points, sigmas, image_shape, normalize=True):
     return images
 
 
-def compose(coefficients, basis, decomposition_type):
+def compose(coefficients, basis, decomposition_type, joint_independent=False):
     '''
     coefficients: Tensor, [batch_size, n_basis, n_joints, 32,32,32]
     basis: Tensor, [batch_size, n_basis, n_joints, 32,32,32]
@@ -420,9 +420,18 @@ def compose(coefficients, basis, decomposition_type):
         batch_size = basis[0].shape[0]
         tensors = []
         for batch in range(batch_size):
-            T = torch.einsum('ja,axb->jxb', basis[0][batch], basis[1][batch])
-            T = torch.einsum('jxb,byc->jxyc', T, basis[2][batch])
-            T = torch.einsum('jxyc,cz->jxyz', T, basis[3][batch])
+            if joint_independent:
+                T = []
+                for joint in range(num_joints):
+                    T_j = torch.einsum('a,axb->jxb', basis[0][batch], basis[1][batch])
+                    T_j = torch.einsum('jxb,byc->jxyc', T_j, basis[2][batch])
+                    T_j = torch.einsum('jxyc,cz->jxyz', T_j, basis[3][batch])
+                    T.append(t)
+                T = torch.stack(T)
+            else:
+                T = torch.einsum('ja,axb->jxb', basis[0][batch], basis[1][batch])
+                T = torch.einsum('jxb,byc->jxyc', T, basis[2][batch])
+                T = torch.einsum('jxyc,cz->jxyz', T, basis[3][batch])
             tensors.append(T)
         T = torch.stack(tensors)
     else:

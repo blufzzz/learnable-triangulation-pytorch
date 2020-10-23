@@ -41,6 +41,11 @@ model:
 
   use_meshnet: true
   use_mesh_model: false
+  return_coords_posenet: true
+  return_coords_meshnet: true
+  joint_independent_posenet: true
+  joint_independent_meshnet: true
+  rank: 1
   sigma: 1.25 #2.5
   pose_net_normalization_type: 'group_norm'
   include_pivot: true 
