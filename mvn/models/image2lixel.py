@@ -48,6 +48,7 @@ class I2LModel(nn.Module):
         self.cuboid_multiplier = config.model.cuboid_multiplier
         self.rotation = config.model.rotation
         self.volume_multiplier = config.model.volume_multiplier
+        self.volume_softmax = config.model.volume_softmax
 
         self.use_meshnet = config.model.use_meshnet
         self.sigma = config.model.sigma
@@ -138,10 +139,9 @@ class I2LModel(nn.Module):
 
         base_points = tri_keypoints_3d[..., 6, :3]
         joint_coord_img = self.pose_net(pose_img_feat, coordinates)
-
+        volumes_pred = None
         if not self.return_coords_posenet:
                 volumes = compose(None, joint_coord_img, 'tt', joint_independent=self.joint_independent_posenet)
-                set_trace()
                 joint_coord_img, volumes_pred = integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier,
                                                                                    coordinates[0],
                                                                                    softmax=self.volume_softmax)
@@ -172,7 +172,7 @@ class I2LModel(nn.Module):
 
 
         return (joint_coord_img, 
-                None, 
+                volumes_pred, 
                 None, 
                 None,
                 None,
