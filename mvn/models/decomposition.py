@@ -184,7 +184,7 @@ class VolumetricDecompositionNet(nn.Module):
         # FEATURE ECTRACTION #   
         ######################
         if not self.gt_input:
-            _, features, _, _, _ = self.backbone(images_batch.view(-1, 3, *image_shape))
+            _, features, _, _, _,_ = self.backbone(images_batch.view(-1, 3, *image_shape))
             features = self.process_features(features)
             features_shape = features.shape[-2:]
             features_channels = features.shape[1]

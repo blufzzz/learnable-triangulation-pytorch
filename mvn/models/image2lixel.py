@@ -45,11 +45,11 @@ class I2LModel(nn.Module):
         self.pelvis_type = config.model.pelvis_type if hasattr(config.model, 'pelvis_type') else 'gt'
         self.pose_net = PoseNet(self.num_joints, self.volume_size, normalization_type=self.normalization_type)
         if self.use_meshnet:
-            self.pose2feat = Pose2Feat()
+            self.pose2feat = Pose2Feat(self.volume_size, self.num_joints)
             self.mesh_backbone = pose_resnet.get_pose_net(config.model.backbone,
                                                          device=device,
                                                          strict=True)
-            self.mesh_net = MeshNet()
+            self.mesh_net = MeshNet(self.volume_size, self.num_joints)
 
         self.backbone = pose_resnet.get_pose_net(config.model.backbone,
                                                  device=device,
@@ -68,7 +68,7 @@ class I2LModel(nn.Module):
             raise RuntimeError('In absence of precalculated pelvis or gt pelvis, self.use_volumetric_pelvis should be True') 
         
         # posenet forward
-        _, _, _, _, pose_img_feat = self.backbone(images_batch.view(-1, 3, *image_shape))
+        _, _, _, _, pose_img_feat, shared_img_feat = self.backbone(images_batch.view(-1, 3, *image_shape))
         coordinates = get_coord_volumes(self.kind, 
                                             self.training, 
                                             self.rotation,
@@ -87,6 +87,8 @@ class I2LModel(nn.Module):
         if self.use_meshnet:
             with torch.no_grad():
                 joint_heatmap = self.make_gaussian_heatmap(joint_coord_img.detach())
+
+            set_trace()
             shared_img_feat = self.pose2feat(shared_img_feat, joint_heatmap)
 
             # meshnet forward

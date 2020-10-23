@@ -36,7 +36,7 @@ model:
   name: "i2l"
   kind: "mpii"
 
-  use_meshnet: false
+  use_meshnet: true
   pose_net_normalization_type: 'group_norm'
   include_pivot: true 
 
@@ -73,6 +73,7 @@ model:
     return_heatmaps: false
     return_bottleneck: true
     return_features: false
+    return_shared_im_features: true
 
 dataset:
   kind: "human36m"

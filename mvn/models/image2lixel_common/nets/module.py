@@ -155,38 +155,55 @@ class MeshNet(nn.Module):
         super(MeshNet, self).__init__()
         self.vertex_num = vertex_num
         self.volume_size = volume_size
-        self.deconv = make_deconv_layers([2048,256,256,256])
+
+         if self.volume_size == 32:
+            deconv_layers_channels = [2048,256,256]
+        elif self.volume_size == 64:
+            deconv_layers_channels = [2048,256,256, 256]
+        else:
+            raise RuntimeError('wrong `volume_size`')
+
+        self.deconv = make_deconv_layers(deconv_layers_channels)
         self.conv_x = make_conv1d_layers([256,self.vertex_num], kernel=1, stride=1, padding=0, bnrelu_final=False)
         self.conv_y = make_conv1d_layers([256,self.vertex_num], kernel=1, stride=1, padding=0, bnrelu_final=False)
         self.conv_z_1 = make_conv1d_layers([2048,256*self.volume_size], kernel=1, stride=1, padding=0) 
         self.conv_z_2 = make_conv1d_layers([256,self.vertex_num], kernel=1, stride=1, padding=0, bnrelu_final=False) 
 
-    def soft_argmax_1d(self, heatmap1d):
+    def soft_argmax_1d(self, heatmap1d, grid=None):
         heatmap1d = F.softmax(heatmap1d, 2)
         heatmap_size = heatmap1d.shape[2]
-        coord = heatmap1d * torch.cuda.comm.broadcast(torch.arange(heatmap_size).type(torch.cuda.FloatTensor), devices=[heatmap1d.device.index])[0]
-        coord = coord.sum(dim=2, keepdim=True)
+        if grid is not None:
+            coord = torch.einsum("bjx, bx -> bj", heatmap1d, grid).unsqueeze(-1)
+        else: 
+            coord = heatmap1d * torch.cuda.comm.broadcast(torch.arange(heatmap_size).type(torch.cuda.FloatTensor), 
+                                                            devices=[heatmap1d.device.index])[0]
+            coord = coord.sum(dim=2, keepdim=True)
         return coord
 
-    def forward(self, img_feat):
+    def forward(self, img_feat, coordinates=None):
+
+        x,y,z = None, None, None
+        if coordinates is not None:
+            x,y,z = coordinates
+
         img_feat_xy = self.deconv(img_feat)
 
         # x axis
         img_feat_x = img_feat_xy.mean((2))
         heatmap_x = self.conv_x(img_feat_x)
-        coord_x = self.soft_argmax_1d(heatmap_x)
+        coord_x = self.soft_argmax_1d(heatmap_x ,x)
         
         # y axis
         img_feat_y = img_feat_xy.mean((3))
         heatmap_y = self.conv_y(img_feat_y)
-        coord_y = self.soft_argmax_1d(heatmap_y)
+        coord_y = self.soft_argmax_1d(heatmap_y, y)
         
         # z axis
         img_feat_z = img_feat.mean((2,3))[:,:,None]
         img_feat_z = self.conv_z_1(img_feat_z)
         img_feat_z = img_feat_z.view(-1,256,self.volume_size)
         heatmap_z = self.conv_z_2(img_feat_z) # problm
-        coord_z = self.soft_argmax_1d(heatmap_z)
+        coord_z = self.soft_argmax_1d(heatmap_z, z)
 
         mesh_coord = torch.cat((coord_x, coord_y, coord_z),2)
         return mesh_coord

@@ -198,7 +198,8 @@ class PoseResNet(nn.Module):
                  vol_confidences=False,
                  return_heatmaps = False,
                  return_bottleneck = False,
-                 return_features = True
+                 return_features = True,
+                 return_shared_im_features = False
                  ):
         super().__init__()
 
@@ -214,6 +215,7 @@ class PoseResNet(nn.Module):
         self.num_deconv_kernels) = num_deconv_layers, num_deconv_filters, num_deconv_kernels
         self.final_conv_kernel = final_conv_kernel
         self.return_bottleneck = return_bottleneck
+        self.return_shared_im_features = return_shared_im_features
 
         self.conv1 = nn.Conv2d(num_input_channels, 64, kernel_size=7, stride=2, padding=3,
                                bias=False)
@@ -308,10 +310,16 @@ class PoseResNet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
+
+        shared_im_features = None
+
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
         x = self.maxpool(x)
+
+        if self.return_shared_im_features:
+            shared_im_features = x
 
         x = self.layer1(x)
         x = self.layer2(x)
@@ -340,8 +348,7 @@ class PoseResNet(nn.Module):
             x = self.final_layer(x)
             heatmaps = x
         
-        return heatmaps, features, alg_confidences, vol_confidences, bottleneck
-
+        return heatmaps, features, alg_confidences, vol_confidences, bottleneck, shared_im_features
 
 def get_pose_net(config, strict=True, device='cuda:0'):
     group_norm = config.group_norm
@@ -364,7 +371,8 @@ def get_pose_net(config, strict=True, device='cuda:0'):
         vol_confidences=config.vol_confidences if hasattr(config, "vol_confidences") else False,
         return_heatmaps=config.return_heatmaps if hasattr(config, "return_heatmaps") else False,
         return_bottleneck =config.return_bottleneck  if hasattr(config, "return_bottleneck") else False,
-        return_features =config.return_features  if hasattr(config, "return_features") else True
+        return_features =config.return_features  if hasattr(config, "return_features") else True,
+        return_shared_im_features = config.return_shared_im_features  if hasattr(config, "return_shared_im_features") else False
     )
 
     if config.init_weights:

@@ -143,7 +143,7 @@ class VolumetricTriangulationNet(nn.Module):
         images = images.view(-1, *images.shape[2:])
 
         # forward backbone
-        _, features, _, _, _ = self.backbone(images)
+        _, features, _, _, _,_ = self.backbone(images)
 
         # reshape back
         images = images.view(batch_size, n_views, *images.shape[1:])
