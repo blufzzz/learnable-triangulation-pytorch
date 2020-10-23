@@ -93,8 +93,9 @@ class I2LModel(nn.Module):
         if self.training:
             # backbones are already inited
             self.pose_net.apply(init_weights)
-            self.pose2feat.apply(init_weights)
-            self.mesh_net.apply(init_weights)
+            if self.use_meshnet:
+                self.pose2feat.apply(init_weights)
+                self.mesh_net.apply(init_weights)
 
 
     def make_gaussian_heatmap(self, joint_coord_img, sigma):
