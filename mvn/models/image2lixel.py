@@ -118,7 +118,7 @@ class I2LModel(nn.Module):
         joint_coord_img = self.pose_net(pose_img_feat, coordinates)
 
         if self.use_meshnet:
-            joint_heatmap = self.make_gaussian_heatmap(joint_coord_img.detach(), self.sigma)
+            joint_heatmap = self.make_gaussian_heatmap(joint_coord_img, self.sigma)
 
             # interpolate - workaround to match `shared_img_feat` spatial dim
             joint_heatmap = F.interpolate(joint_heatmap, (64,64,64))
