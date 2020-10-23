@@ -81,7 +81,6 @@ class PoseNet(nn.Module):
         img_feat_z = self.conv_z_1(img_feat_z)
         img_feat_z = img_feat_z.view(-1,256,self.volume_size)
         heatmap_z = self.conv_z_2(img_feat_z)
-        
 
         if self.return_coords:
             coord_x = self.soft_argmax_1d(heatmap_x, x)

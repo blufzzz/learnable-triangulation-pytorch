@@ -120,7 +120,7 @@ class I2LModel(nn.Module):
         
         # posenet forward
         _, _, _, _, pose_img_feat, shared_img_feat = self.backbone(images_batch.view(-1, 3, *image_shape))
-        return_only_xyz = not (self.return_coords_meshnet or self.return_coords_posenet)
+        return_only_xyz = self.return_coords_meshnet and self.return_coords_posenet
         coordinates = get_coord_volumes(self.kind, 
                                             self.training, 
                                             self.rotation,
