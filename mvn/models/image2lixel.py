@@ -57,6 +57,17 @@ class I2LModel(nn.Module):
 
         description(self)
 
+    def make_gaussian_heatmap(self, joint_coord_img):
+        x = torch.arange(cfg.output_hm_shape[2])
+        y = torch.arange(cfg.output_hm_shape[1])
+        z = torch.arange(cfg.output_hm_shape[0])
+        zz,yy,xx = torch.meshgrid(z,y,x)
+        xx = xx[None,None,:,:,:].cuda().float(); yy = yy[None,None,:,:,:].cuda().float(); zz = zz[None,None,:,:,:].cuda().float();
+        
+        x = joint_coord_img[:,:,0,None,None,None]; y = joint_coord_img[:,:,1,None,None,None]; z = joint_coord_img[:,:,2,None,None,None];
+        heatmap = torch.exp(-(((xx-x)/cfg.sigma)**2)/2 -(((yy-y)/cfg.sigma)**2)/2 - (((zz-z)/cfg.sigma)**2)/2)
+        return heatmap
+
     def forward(self, images_batch, batch):
         device = images_batch.device
         batch_size, dt = images_batch.shape[:2]
@@ -110,16 +121,6 @@ class I2LModel(nn.Module):
                 None,
                 base_points)
 
-def make_gaussian_heatmap(self, joint_coord_img):
-        x = torch.arange(cfg.output_hm_shape[2])
-        y = torch.arange(cfg.output_hm_shape[1])
-        z = torch.arange(cfg.output_hm_shape[0])
-        zz,yy,xx = torch.meshgrid(z,y,x)
-        xx = xx[None,None,:,:,:].cuda().float(); yy = yy[None,None,:,:,:].cuda().float(); zz = zz[None,None,:,:,:].cuda().float();
-        
-        x = joint_coord_img[:,:,0,None,None,None]; y = joint_coord_img[:,:,1,None,None,None]; z = joint_coord_img[:,:,2,None,None,None];
-        heatmap = torch.exp(-(((xx-x)/cfg.sigma)**2)/2 -(((yy-y)/cfg.sigma)**2)/2 - (((zz-z)/cfg.sigma)**2)/2)
-        return heatmap
        
 def init_weights(m):
     if type(m) == nn.ConvTranspose2d:
