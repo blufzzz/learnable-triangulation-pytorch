@@ -84,12 +84,12 @@ def make_deconv_layers(feat_dims, bnrelu_final=True, normalization_type='batch_n
         # Do not use BN and ReLU for final estimation
         if i < len(feat_dims)-2 or (i == len(feat_dims)-2 and bnrelu_final):
             if normalization_type == 'batch_norm':
-                if d == 2:
+                if dim == 2:
                     bn = nn.BatchNorm2d(feat_dims[i+1])
-                elif d == 3:
+                elif dim == 3:
                     bn = nn.BatchNorm3d(feat_dims[i+1])
                 else:
-                    raise RuntimeError('wrong `d`')
+                    raise RuntimeError('wrong `dim`')
                 layers.append(bn)
             elif normalization_type == 'group_norm':
                 layers.append(nn.GroupNorm(32, feat_dims[i+1]))
