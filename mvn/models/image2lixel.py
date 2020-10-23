@@ -140,11 +140,14 @@ class I2LModel(nn.Module):
         base_points = tri_keypoints_3d[..., 6, :3]
         joint_coord_img = self.pose_net(pose_img_feat, coordinates)
         volumes_pred = None
+        if not return_only_xyz:
+            coord_volumes = coordinates[0]
+
         if not self.return_coords_posenet:
                 volumes = compose(None, joint_coord_img, 'tt', joint_independent=self.joint_independent_posenet)
                 joint_coord_img, volumes_pred = integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier,
-                                                                                   coordinates[0],
-                                                                                   softmax=self.volume_softmax)
+                                                                                    coord_volumes,
+                                                                                    softmax=self.volume_softmax)
 
         if self.use_meshnet:
             joint_heatmap = self.make_gaussian_heatmap(joint_coord_img, self.sigma)
@@ -167,7 +170,7 @@ class I2LModel(nn.Module):
                 if not self.return_coords_meshnet:
                     volumes = compose(None, joint_coord_img, 'tt', joint_independent=self.joint_independent_meshnet)
                     joint_coord_img, volumes_pred = integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier,
-                                                                                       coordinates[0],
+                                                                                       coord_volumes,
                                                                                        softmax=self.volume_softmax)
 
 
@@ -175,7 +178,7 @@ class I2LModel(nn.Module):
                 volumes_pred, 
                 None, 
                 None,
-                None,
+                coord_volumes,
                 base_points)
 
        
