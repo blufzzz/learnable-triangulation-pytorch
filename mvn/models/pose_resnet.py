@@ -199,7 +199,8 @@ class PoseResNet(nn.Module):
                  return_heatmaps = False,
                  return_bottleneck = False,
                  return_features = True,
-                 return_shared_im_features = False
+                 return_shared_im_features = False,
+                 skip_early=False
                  ):
         super().__init__()
 
@@ -216,12 +217,14 @@ class PoseResNet(nn.Module):
         self.final_conv_kernel = final_conv_kernel
         self.return_bottleneck = return_bottleneck
         self.return_shared_im_features = return_shared_im_features
+        self.skip_early=skip_early
 
-        self.conv1 = nn.Conv2d(num_input_channels, 64, kernel_size=7, stride=2, padding=3,
-                               bias=False)
-        self.bn1 = nn.GroupNorm(32, 64) if group_norm else nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
-        self.relu = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        if not self.skip_early:
+            self.conv1 = nn.Conv2d(num_input_channels, 64, kernel_size=7, stride=2, padding=3,
+                                   bias=False)
+            self.bn1 = nn.GroupNorm(32, 64) if group_norm else nn.BatchNorm2d(64, momentum=BN_MOMENTUM)
+            self.relu = nn.ReLU(inplace=True)
+            self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(block, 64, layers[0])
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
@@ -309,10 +312,10 @@ class PoseResNet(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def forward(self, x, skip_early=False):
+    def forward(self, x):
 
         shared_im_features = None
-        if not skip_early:
+        if not self.skip_early:
             x = self.conv1(x)
             x = self.bn1(x)
             x = self.relu(x)
@@ -350,7 +353,7 @@ class PoseResNet(nn.Module):
         
         return heatmaps, features, alg_confidences, vol_confidences, bottleneck, shared_im_features
 
-def get_pose_net(config, strict=True, device='cuda:0'):
+def get_pose_net(config, strict=True, skip_early=False, device='cuda:0'):
     group_norm = config.group_norm
     block_class, layers = resnet_spec[config.num_layers]
     if config.style == 'caffe':
@@ -372,7 +375,8 @@ def get_pose_net(config, strict=True, device='cuda:0'):
         return_heatmaps=config.return_heatmaps if hasattr(config, "return_heatmaps") else False,
         return_bottleneck =config.return_bottleneck  if hasattr(config, "return_bottleneck") else False,
         return_features =config.return_features  if hasattr(config, "return_features") else True,
-        return_shared_im_features = config.return_shared_im_features  if hasattr(config, "return_shared_im_features") else False
+        return_shared_im_features = config.return_shared_im_features  if hasattr(config, "return_shared_im_features") else False,
+        skip_early=skip_early
     )
 
     if config.init_weights:

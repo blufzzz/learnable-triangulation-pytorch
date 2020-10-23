@@ -62,7 +62,8 @@ class I2LModel(nn.Module):
             self.pose2feat = Pose2Feat(self.num_joints)
             self.mesh_backbone = pose_resnet.get_pose_net(config.model.backbone,
                                                          device=device,
-                                                         strict=True)
+                                                         strict=True,
+                                                         skip_early=True)
             self.mesh_net = MeshNet(self.volume_size, self.num_joints, normalization_type=self.normalization_type)
 
         self.backbone = pose_resnet.get_pose_net(config.model.backbone,
@@ -125,7 +126,7 @@ class I2LModel(nn.Module):
             shared_img_feat = self.pose2feat(shared_img_feat, joint_heatmap) #[1, 64, 64, 64])
 
             # meshnet forward
-            _, _, _, _, mesh_img_feat, _ = self.mesh_backbone(shared_img_feat, skip_early=True)
+            _, _, _, _, mesh_img_feat, _ = self.mesh_backbone(shared_img_feat)
             mesh_coord_img = self.mesh_net(mesh_img_feat)
             
             if self.use_mesh_model:    
