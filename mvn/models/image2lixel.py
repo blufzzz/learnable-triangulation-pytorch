@@ -50,6 +50,7 @@ class I2LModel(nn.Module):
 
         self.use_meshnet = config.model.use_meshnet
         self.sigma = config.model.sigma
+        self.use_mesh_model = config.model.use_mesh_model
 
         self.num_joints = config.model.backbone.num_joints
         self.kind = config.model.kind
@@ -125,9 +126,7 @@ class I2LModel(nn.Module):
 
             # meshnet forward
             _, _, _, _, mesh_img_feat, _ = self.mesh_backbone(shared_img_feat, skip_early=True)
-            set_trace()
             mesh_coord_img = self.mesh_net(mesh_img_feat)
-            set_trace()
             
             if self.use_mesh_model:    
                 # joint coordinate outputs from mesh coordinates
@@ -136,7 +135,6 @@ class I2LModel(nn.Module):
             else:
                 joint_coord_img = mesh_coord_img
 
-        set_trace()
 
         return (joint_coord_img, 
                 None, 
