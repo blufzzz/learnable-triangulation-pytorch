@@ -396,7 +396,6 @@ def compose(coefficients, basis, decomposition_type, joint_independent=False):
     coefficients: Tensor, [batch_size, n_basis, n_joints, 32,32,32]
     basis: Tensor, [batch_size, n_basis, n_joints, 32,32,32]
     '''
-    device = coefficients.device
     
     if decomposition_type == 'svd':
         n_basis = len(basis)
@@ -404,6 +403,7 @@ def compose(coefficients, basis, decomposition_type, joint_independent=False):
         coefficients = coefficients.view(batch_size, n_basis, -1, *coefficients.shape[-3:])
         T = torch.einsum('bnjxyz,bnjxyz->bjxyz', coefficients, basis.unsqueeze(0).repeat(batch_size,1,1,1,1,1))
     elif decomposition_type == 'tucker':
+        device = coefficients.device
         batch_size = coefficients.shape[0]
         coefficients = coefficients.view(batch_size, -1, *coefficients.shape[-3:])
         T2 = torch.einsum('bjxyz,ji->bixyz', coefficients, basis[0].to(device)) # core by 17x17
