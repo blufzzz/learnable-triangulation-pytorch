@@ -61,7 +61,7 @@ class PoseNet(nn.Module):
 
     def forward(self, img_feat, coordinates=None):
 
-        batch_size = img_feat.shape
+        batch_size = img_feat.shape[0]
         x,y,z = None, None, None
         if coordinates is not None:
             x,y,z = coordinates
@@ -91,8 +91,7 @@ class PoseNet(nn.Module):
 
         else:
             if self.joint_independent:
-                set_trace()
-                heatmap_x = heatmap_x.view(batch_size, self.joint_num, 1, -1, self.rank)
+                heatmap_x = heatmap_x.view(batch_size, self.joint_num, -1, self.rank)
                 heatmap_y = heatmap_y.view(batch_size, self.joint_num, self.rank, -1, self.rank)
                 heatmap_z = heatmap_x.view(batch_size, self.joint_num, self.rank, -1)
             else:
