@@ -151,7 +151,7 @@ class Pose2Feat(nn.Module):
         return feat
 
 class MeshNet(nn.Module):
-    def __init__(self, volume_size, vertex_num):
+    def __init__(self, volume_size, vertex_num, normalization_type='group_norm'):
         super(MeshNet, self).__init__()
         self.vertex_num = vertex_num
         self.volume_size = volume_size
@@ -164,10 +164,10 @@ class MeshNet(nn.Module):
             raise RuntimeError('wrong `volume_size`')
 
         self.deconv = make_deconv_layers(deconv_layers_channels)
-        self.conv_x = make_conv1d_layers([256,self.vertex_num], kernel=1, stride=1, padding=0, bnrelu_final=False)
-        self.conv_y = make_conv1d_layers([256,self.vertex_num], kernel=1, stride=1, padding=0, bnrelu_final=False)
-        self.conv_z_1 = make_conv1d_layers([2048,256*self.volume_size], kernel=1, stride=1, padding=0) 
-        self.conv_z_2 = make_conv1d_layers([256,self.vertex_num], kernel=1, stride=1, padding=0, bnrelu_final=False) 
+        self.conv_x = make_conv1d_layers([256,self.vertex_num], kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type)
+        self.conv_y = make_conv1d_layers([256,self.vertex_num], kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type)
+        self.conv_z_1 = make_conv1d_layers([2048,256*self.volume_size], kernel=1, stride=1, padding=0, normalization_type=normalization_type) 
+        self.conv_z_2 = make_conv1d_layers([256,self.vertex_num], kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type) 
 
     def soft_argmax_1d(self, heatmap1d, grid=None):
         heatmap1d = F.softmax(heatmap1d, 2)
@@ -187,7 +187,7 @@ class MeshNet(nn.Module):
             x,y,z = coordinates
 
         img_feat_xy = self.deconv(img_feat)
-
+        
         # x axis
         img_feat_x = img_feat_xy.mean((2))
         heatmap_x = self.conv_x(img_feat_x)

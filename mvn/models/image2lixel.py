@@ -62,7 +62,7 @@ class I2LModel(nn.Module):
             self.mesh_backbone = pose_resnet.get_pose_net(config.model.backbone,
                                                          device=device,
                                                          strict=True)
-            self.mesh_net = MeshNet(self.volume_size, self.num_joints)
+            self.mesh_net = MeshNet(self.volume_size, self.num_joints, normalization_type=self.normalization_type)
 
         self.backbone = pose_resnet.get_pose_net(config.model.backbone,
                                                  device=device,
