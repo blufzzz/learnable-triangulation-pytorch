@@ -24,14 +24,13 @@ class PoseNet(nn.Module):
         self.deconv = make_deconv_layers(deconv_layers_channels)
         self.conv_x = make_conv1d_layers([256,self.joint_num], kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type)
         self.conv_y = make_conv1d_layers([256,self.joint_num], kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type)
-        self.conv_z_1 = make_conv1d_layers([2048,256*cfg.output_hm_shape[0]], kernel=1, stride=1, padding=0, normalization_type=normalization_type) # k=3, p=1
+        self.conv_z_1 = make_conv1d_layers([2048,256*self.volume_size], kernel=1, stride=1, padding=0, normalization_type=normalization_type) # k=3, p=1
         self.conv_z_2 = make_conv1d_layers([256,self.joint_num], kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type)
 
     def soft_argmax_1d(self, heatmap1d, grid=None):
         heatmap1d = F.softmax(heatmap1d, 2)
         heatmap_size = heatmap1d.shape[2]
         if grid is not None:
-            set_trace()
             coord = torch.einsum("bjx, bx -> bj", heatmap1d, grid).unsqueeze(-1)
         else: 
             coord = heatmap1d * torch.cuda.comm.broadcast(torch.arange(heatmap_size).type(torch.cuda.FloatTensor), 
@@ -46,7 +45,7 @@ class PoseNet(nn.Module):
             x,y,z = coordinates
 
         img_feat_xy = self.deconv(img_feat)
-        
+
         # x axis
         img_feat_x = img_feat_xy.mean((2))
         heatmap_x = self.conv_x(img_feat_x)
@@ -60,12 +59,14 @@ class PoseNet(nn.Module):
         # z axis
         img_feat_z = img_feat.mean((2,3))[:,:,None]
         img_feat_z = self.conv_z_1(img_feat_z)
-        img_feat_z = img_feat_z.view(-1,256,cfg.output_hm_shape[0])
+        img_feat_z = img_feat_z.view(-1,256,self.volume_size)
         heatmap_z = self.conv_z_2(img_feat_z)
-
+        set_trace()
         coord_z = self.soft_argmax_1d(heatmap_z ,z)
 
         joint_coord = torch.cat((coord_x, coord_y, coord_z),2)
+
+        set_trace()
 
         return joint_coord
 
@@ -140,25 +141,27 @@ class PoseNet3D(nn.Module):
 
 
 class Pose2Feat(nn.Module):
-    def __init__(self, joint_num):
+    def __init__(self, volume_size, joint_num):
         super(Pose2Feat, self).__init__()
         self.joint_num = joint_num
-        self.conv = make_conv_layers([64+joint_num*cfg.output_hm_shape[0],64])
+        self.volume_size = volume_size
+        self.conv = make_conv_layers([64+joint_num*self.volume_size,64])
 
     def forward(self, img_feat, joint_heatmap_3d):
-        joint_heatmap_3d = joint_heatmap_3d.view(-1,self.joint_num*cfg.output_hm_shape[0],cfg.output_hm_shape[1],cfg.output_hm_shape[2])
+        joint_heatmap_3d = joint_heatmap_3d.view(-1,self.joint_num*self.volume_size,self.volume_size,self.volume_size)
         feat = torch.cat((img_feat, joint_heatmap_3d),1)
         feat = self.conv(feat)
         return feat
 
 class MeshNet(nn.Module):
-    def __init__(self, vertex_num):
+    def __init__(self, volume_size, vertex_num):
         super(MeshNet, self).__init__()
         self.vertex_num = vertex_num
+        self.volume_size = volume_size
         self.deconv = make_deconv_layers([2048,256,256,256])
         self.conv_x = make_conv1d_layers([256,self.vertex_num], kernel=1, stride=1, padding=0, bnrelu_final=False)
         self.conv_y = make_conv1d_layers([256,self.vertex_num], kernel=1, stride=1, padding=0, bnrelu_final=False)
-        self.conv_z_1 = make_conv1d_layers([2048,256*cfg.output_hm_shape[0]], kernel=1, stride=1, padding=0) 
+        self.conv_z_1 = make_conv1d_layers([2048,256*self.volume_size], kernel=1, stride=1, padding=0) 
         self.conv_z_2 = make_conv1d_layers([256,self.vertex_num], kernel=1, stride=1, padding=0, bnrelu_final=False) 
 
     def soft_argmax_1d(self, heatmap1d):
@@ -184,7 +187,7 @@ class MeshNet(nn.Module):
         # z axis
         img_feat_z = img_feat.mean((2,3))[:,:,None]
         img_feat_z = self.conv_z_1(img_feat_z)
-        img_feat_z = img_feat_z.view(-1,256,cfg.output_hm_shape[0])
+        img_feat_z = img_feat_z.view(-1,256,self.volume_size)
         heatmap_z = self.conv_z_2(img_feat_z) # problm
         coord_z = self.soft_argmax_1d(heatmap_z)
 
