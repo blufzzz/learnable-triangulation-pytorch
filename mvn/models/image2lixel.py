@@ -37,6 +37,7 @@ class I2LModel(nn.Module):
         self.rotation = config.model.rotation
 
         self.use_meshnet = config.model.use_meshnet
+        self.sigma = config.model.sigma
 
         self.num_joints = config.model.backbone.num_joints
         self.kind = config.model.kind
@@ -57,15 +58,22 @@ class I2LModel(nn.Module):
 
         description(self)
 
-    def make_gaussian_heatmap(self, joint_coord_img):
-        x = torch.arange(cfg.output_hm_shape[2])
-        y = torch.arange(cfg.output_hm_shape[1])
-        z = torch.arange(cfg.output_hm_shape[0])
+        if self.training:
+            # backbones are already inited
+            pose_net.apply(init_weights)
+            pose2feat.apply(init_weights)
+            mesh_net.apply(init_weights)
+
+
+    def make_gaussian_heatmap(self, joint_coord_img, sigma):
+        x = torch.arange(self.volume_size)
+        y = torch.arange(self.volume_size)
+        z = torch.arange(self.volume_size) 
         zz,yy,xx = torch.meshgrid(z,y,x)
         xx = xx[None,None,:,:,:].cuda().float(); yy = yy[None,None,:,:,:].cuda().float(); zz = zz[None,None,:,:,:].cuda().float();
         
         x = joint_coord_img[:,:,0,None,None,None]; y = joint_coord_img[:,:,1,None,None,None]; z = joint_coord_img[:,:,2,None,None,None];
-        heatmap = torch.exp(-(((xx-x)/cfg.sigma)**2)/2 -(((yy-y)/cfg.sigma)**2)/2 - (((zz-z)/cfg.sigma)**2)/2)
+        heatmap = torch.exp(-(((xx-x)/sigma)**2)/2 -(((yy-y)/sigma)**2)/2 - (((zz-z)/sigma)**2)/2)
         return heatmap
 
     def forward(self, images_batch, batch):
@@ -98,7 +106,7 @@ class I2LModel(nn.Module):
         set_trace()
         if self.use_meshnet:
             with torch.no_grad():
-                joint_heatmap = self.make_gaussian_heatmap(joint_coord_img.detach())
+                joint_heatmap = self.make_gaussian_heatmap(joint_coord_img.detach(), self.sigma)
 
             set_trace()
             shared_img_feat = self.pose2feat(shared_img_feat, joint_heatmap)
@@ -134,22 +142,3 @@ def init_weights(m):
     elif type(m) == nn.Linear:
         nn.init.normal_(m.weight,std=0.01)
         nn.init.constant_(m.bias,0)
-
-def get_model(vertex_num, joint_num, mode):
-    pose_backbone = ResNetBackbone(cfg.resnet_type)
-    pose_net = PoseNet(joint_num)
-    pose2feat = Pose2Feat(joint_num)
-    mesh_backbone = ResNetBackbone(cfg.resnet_type)
-    mesh_net = MeshNet(vertex_num)
-    param_regressor = ParamRegressor(joint_num)
-
-    if mode == 'train':
-        pose_backbone.init_weights()
-        pose_net.apply(init_weights)
-        pose2feat.apply(init_weights)
-        mesh_backbone.init_weights()
-        mesh_net.apply(init_weights)
-        param_regressor.apply(init_weights)
-   
-    model = Model(pose_backbone, pose_net, pose2feat, mesh_backbone, mesh_net, param_regressor)
-    return model

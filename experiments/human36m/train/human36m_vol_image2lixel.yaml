@@ -37,6 +37,7 @@ model:
   kind: "mpii"
 
   use_meshnet: true
+  sigma: 1. #2.5
   pose_net_normalization_type: 'group_norm'
   include_pivot: true 
 
