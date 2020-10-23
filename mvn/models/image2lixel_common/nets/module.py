@@ -9,11 +9,18 @@ from mvn.models.image2lixel_common.nets.layer import make_conv_layers, make_deco
 from IPython.core.debugger import set_trace
 
 class PoseNet(nn.Module):
-    def __init__(self, joint_num, input_features=256, normalization_type='group_norm'):
+    def __init__(self, joint_num, volume_size, input_features=256, normalization_type='group_norm'):
         super(PoseNet, self).__init__()
         self.joint_num = joint_num
         self.normalization_type = normalization_type
-        self.deconv = make_deconv_layers([2048,256,256,256])
+        if self.volume_size == 32:
+            deconv_layers_channels = [2048,256,256]
+        elif self.volume_size == 64:
+            deconv_layers_channels = [2048,256,256, 256]
+        else:
+            raise RuntimeError('wrong `volume_size`')
+
+        self.deconv = make_deconv_layers(deconv_layers_channels)
         self.conv_x = make_conv1d_layers([256,self.joint_num], kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type)
         self.conv_y = make_conv1d_layers([256,self.joint_num], kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type)
         self.conv_z_1 = make_conv1d_layers([2048,256*cfg.output_hm_shape[0]], kernel=1, stride=1, padding=0, normalization_type=normalization_type) # k=3, p=1
@@ -37,7 +44,7 @@ class PoseNet(nn.Module):
             x,y,z = coordinates
 
         img_feat_xy = self.deconv(img_feat)
-
+        set_trace()
         # x axis
         img_feat_x = img_feat_xy.mean((2))
         heatmap_x = self.conv_x(img_feat_x)

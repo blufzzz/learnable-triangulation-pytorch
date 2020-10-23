@@ -43,7 +43,7 @@ class I2LModel(nn.Module):
         assert self.kind == "mpii"
         self.normalization_type = config.model.pose_net_normalization_type
         self.pelvis_type = config.model.pelvis_type if hasattr(config.model, 'pelvis_type') else 'gt'
-        self.pose_net = PoseNet(self.num_joints, normalization_type=self.normalization_type)
+        self.pose_net = PoseNet(self.num_joints, self.volume_size, normalization_type=self.normalization_type)
         if self.use_meshnet:
             self.pose2feat = Pose2Feat()
             self.mesh_backbone = pose_resnet.get_pose_net(config.model.backbone,
