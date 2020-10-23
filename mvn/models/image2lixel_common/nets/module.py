@@ -31,6 +31,7 @@ class PoseNet(nn.Module):
         heatmap1d = F.softmax(heatmap1d, 2)
         heatmap_size = heatmap1d.shape[2]
         if grid is not None:
+            set_trace()
             coord = torch.einsum("bjx, bx -> bj", heatmap1d, grid).unsqueeze(-1)
         else: 
             coord = heatmap1d * torch.cuda.comm.broadcast(torch.arange(heatmap_size).type(torch.cuda.FloatTensor), 
@@ -45,11 +46,10 @@ class PoseNet(nn.Module):
             x,y,z = coordinates
 
         img_feat_xy = self.deconv(img_feat)
-        set_trace()
+        
         # x axis
         img_feat_x = img_feat_xy.mean((2))
         heatmap_x = self.conv_x(img_feat_x)
-        set_trace()
         coord_x = self.soft_argmax_1d(heatmap_x, x)
         
         # y axis
@@ -89,18 +89,6 @@ class PoseNet3D(nn.Module):
 
         self.G_j_layer = nn.Linear(intermediate_features, joint_num*rank)
         self.G_z_layer = nn.Linear(size*(rank**2), size*rank)
-
-    def soft_argmax_1d(self, heatmap1d, grid=None):
-        heatmap1d = F.softmax(heatmap1d, 2)
-        heatmap_size = heatmap1d.shape[2]
-        if grid is not None:
-            coord = torch.einsum("bjx, bx -> bj", heatmap1d, grid).unsqueeze(-1)
-        else: 
-            coord = heatmap1d * torch.cuda.comm.broadcast(torch.arange(heatmap_size).type(torch.cuda.FloatTensor), 
-                                                            devices=[heatmap1d.device.index])[0]
-            coord = coord.sum(dim=2, keepdim=True)
-        return coord
-
 
     def make_branch(self, input_features, intermediate_features, output_features, rank, kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type='group_norm'):
         layers = []
