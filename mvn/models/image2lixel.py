@@ -47,6 +47,7 @@ class I2LModel(nn.Module):
         self.cuboid_side = config.model.cuboid_side
         self.cuboid_multiplier = config.model.cuboid_multiplier
         self.rotation = config.model.rotation
+        self.volume_multiplier = config.model.volume_multiplier
 
         self.use_meshnet = config.model.use_meshnet
         self.sigma = config.model.sigma
