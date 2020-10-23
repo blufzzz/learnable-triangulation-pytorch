@@ -138,11 +138,10 @@ class PoseNet3D(nn.Module):
 
 
 class Pose2Feat(nn.Module):
-    def __init__(self, volume_size, joint_num):
+    def __init__(self, joint_num):
         super(Pose2Feat, self).__init__()
         self.joint_num = joint_num
-        self.volume_size = volume_size
-        self.conv = make_conv_layers([64+joint_num*self.volume_size,64])
+        self.conv = make_conv_layers([64+joint_num*64,64])
 
     def forward(self, img_feat, joint_heatmap_3d):
         batch_size = joint_heatmap_3d.shape[0] 

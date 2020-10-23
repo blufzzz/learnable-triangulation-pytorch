@@ -58,7 +58,7 @@ class I2LModel(nn.Module):
         self.pelvis_type = config.model.pelvis_type if hasattr(config.model, 'pelvis_type') else 'gt'
         self.pose_net = PoseNet(self.num_joints, self.volume_size, normalization_type=self.normalization_type)
         if self.use_meshnet:
-            self.pose2feat = Pose2Feat(self.volume_size, self.num_joints)
+            self.pose2feat = Pose2Feat(self.num_joints)
             self.mesh_backbone = pose_resnet.get_pose_net(config.model.backbone,
                                                          device=device,
                                                          strict=True)
