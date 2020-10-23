@@ -91,6 +91,7 @@ class PoseNet(nn.Module):
 
         else:
             if self.joint_independent:
+                set_trace()
                 heatmap_x = heatmap_x.view(batch_size, self.joint_num, 1, -1, self.rank)
                 heatmap_y = heatmap_y.view(batch_size, self.joint_num, self.rank, -1, self.rank)
                 heatmap_z = heatmap_x.view(batch_size, self.joint_num, self.rank, -1)

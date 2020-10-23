@@ -39,13 +39,13 @@ model:
   name: "i2l"
   kind: "mpii"
 
-  use_meshnet: true
+  use_meshnet: false
   use_mesh_model: false
-  return_coords_posenet: true
-  return_coords_meshnet: true
+  return_coords_posenet: false
+  return_coords_meshnet: false
   joint_independent_posenet: true
   joint_independent_meshnet: true
-  rank: 1
+  rank: 5
   sigma: 1.25 #2.5
   pose_net_normalization_type: 'group_norm'
   include_pivot: true 
