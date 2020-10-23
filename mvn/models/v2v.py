@@ -131,10 +131,10 @@ class Upsample3DBlock(nn.Module):
         x = self.activation(x)
         return x  
 
-class BasisNet(nn.Module):
-    """docstring for BasisNet"""
+class TuckerBasisNet(nn.Module):
+    """docstring for TuckerBasisNet"""
     def __init__(self, input_dim, volume_size, n_joints, normalization_type):
-        super(BasisNet, self).__init__()
+        super(TuckerBasisNet, self).__init__()
         self.input_dim = input_dim
         self.volume_size = volume_size
         self.n_joints = n_joints
@@ -157,6 +157,7 @@ class BasisNet(nn.Module):
         x = self.pool_block(x)
         x = self.resblock_2(x)
         x = self.avg_pool(x).view(batch_size, -1)
+        # x is a vector
 
         j_ = self.lj(x).view(batch_size, self.n_joints, self.n_joints)
 

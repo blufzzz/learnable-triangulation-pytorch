@@ -1,4 +1,4 @@
-title: "human36m_vol_temporal_lstm_adain_softmax"
+title: "human36m_vol_decomposition_tucker"
 kind: "human36m"
 vis_freq: 1000
 vis_n_elements: 10
@@ -17,8 +17,8 @@ opt:
   volumetric_ce_loss_weight: 1.
 
   # decomposition
-  coefficients_weight: 1.
-  basis_weight: 1.
+  # coefficients_weight: 1.
+  # basis_weight: 1.
 
   use_bone_length_term: false
   bone_length_weight: 0.
@@ -33,7 +33,7 @@ opt:
   lr: 0.0001
   process_features_lr: 0.001
   volume_net_lr: 0.001
-  basis_net_lr: 0.001
+  basis_lr: 0.001
   scale_keypoints_3d: 0.1
 
   save_model: true
@@ -45,13 +45,12 @@ model:
   name: "vol_decomposition" 
   kind: "mpii"
 
-  use_precalculated_basis: false
+  basis_source: 'optimized'
   gt_input: false
-  use_residual_network: true
   decomposition_type: 'tucker'
   basis_type: 'heatmaps'
   only_basis_coefs: false
-  basis_path: null #'/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch/basis/heatmaps64_3d_euclidean_convgauss_var0.5_kernel5_Tucker-factors-normalized'
+  basis_path: '/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch/basis/heatmaps64_3d_euclidean_convgauss_var0.5_kernel5_Tucker-factors-normalized'
   n_basis: null
 
   v2v_type: 'conf'
@@ -60,8 +59,9 @@ model:
   volume_features_dim: 64
   include_pivot: true 
 
-  init_weights: false
-  checkpoint: ""
+  init_weights: true
+  continue_training: true
+  checkpoint: "/media/hpc2_storage/ibulygin/logs/decomposition/h36_sv64_dist_Tucker-OPTBASIS_V2V-conf-5rb-bf64-group-vf64-lr1e-3_NoSoftMax_NoCoreNorm_ResNet-152-lr1e-4_bs1-1_VCE-1_MAE-1@14.10.2020-20:30:47"
 
   use_gt_pelvis: true
   use_precalculated_pelvis: false

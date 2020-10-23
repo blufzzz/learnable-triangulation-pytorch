@@ -19,6 +19,7 @@ def get_coord_volumes(kind,
                         keypoints=None,
                         batch_size=None,
                         dt=None,
+                        return_only_xyz=False,
                         max_rotation_angle=np.pi/4 #2 * np.pi
                         ):
     
@@ -52,36 +53,44 @@ def get_coord_volumes(kind,
         cuboids = None
 
         # build coord volume
-        xxx, yyy, zzz = torch.meshgrid(torch.arange(volume_size, device=device),
-                                        torch.arange(volume_size, device=device),
-                                         torch.arange(volume_size, device=device))
-        grid = torch.stack([xxx, yyy, zzz], dim=-1).type(torch.float)
-        grid = grid.view((-1, 3))
-        grid = grid.view(*[1]*len(bs_dt), *grid.shape).repeat(*bs_dt, *[1]*len(grid.shape))
+        grid = torch.arange(volume_size, device=device)
+        if return_only_xyz:
+            grid = torch.stack([grid]*batch_size, 0).to(device).type(torch.float)
+            x = position[..., 0].unsqueeze(-1) + (sides[0] / (volume_size - 1)) * grid
+            y = position[..., 1].unsqueeze(-1) + (sides[1] / (volume_size - 1)) * grid
+            z = position[..., 2].unsqueeze(-1) + (sides[2] / (volume_size - 1)) * grid
+            return x,y,z
 
-        grid_coord = torch.zeros_like(grid)
-        grid_coord[..., 0] = position[..., 0].unsqueeze(-1) + (sides[0] / (volume_size - 1)) * grid[..., 0]
-        grid_coord[..., 1] = position[..., 1].unsqueeze(-1) + (sides[1] / (volume_size - 1)) * grid[..., 1]
-        grid_coord[..., 2] = position[..., 2].unsqueeze(-1) + (sides[2] / (volume_size - 1)) * grid[..., 2]
+        else:
+            xxx, yyy, zzz = torch.meshgrid(grid, grid, grid)
+            grid = torch.stack([xxx, yyy, zzz], dim=-1).type(torch.float)
+            grid = grid.view((-1, 3))
+            grid = grid.view(*[1]*len(bs_dt), *grid.shape).repeat(*bs_dt, *[1]*len(grid.shape))
 
-        if kind == "coco":
-            axis = [0, 1, 0]  # y axis
-        elif kind == "mpii":
-            axis = [0, 0, 1]  # z axis
+            grid_coord = torch.zeros_like(grid)
+            grid_coord[..., 0] = position[..., 0].unsqueeze(-1) + (sides[0] / (volume_size - 1)) * grid[..., 0]
+            grid_coord[..., 1] = position[..., 1].unsqueeze(-1) + (sides[1] / (volume_size - 1)) * grid[..., 1]
+            grid_coord[..., 2] = position[..., 2].unsqueeze(-1) + (sides[2] / (volume_size - 1)) * grid[..., 2]
+
+            if kind == "coco":
+                axis = [0, 1, 0]  # y axis
+            elif kind == "mpii":
+                axis = [0, 0, 1]  # z axis
+                
+            # random rotation
+            if training and rotation:    
+                
+                center = base_points.clone().detach().unsqueeze(-2)
+                grid_coord = grid_coord - center
+                grid_coord = torch.stack([volumetric.rotate_coord_volume(coord_grid,\
+                                    np.random.uniform(-max_rotation_angle,
+                                                         max_rotation_angle), axis) for coord_grid in grid_coord])
+                grid_coord = grid_coord + center
+
+            grid_coord = grid_coord.view(*bs_dt, volume_size, volume_size, volume_size, 3)
             
-        # random rotation
-        if training and rotation:    
             
-            center = base_points.clone().detach().unsqueeze(-2)
-            grid_coord = grid_coord - center
-            grid_coord = torch.stack([volumetric.rotate_coord_volume(coord_grid,\
-                                np.random.uniform(-max_rotation_angle,
-                                                     max_rotation_angle), axis) for coord_grid in grid_coord])
-            grid_coord = grid_coord + center
-
-        grid_coord = grid_coord.view(*bs_dt, volume_size, volume_size, volume_size, 3)
-    
-        return grid_coord, cuboids, base_points
+            return grid_coord, cuboids, base_points
 
 
 def root_centering(keypoints, kind, inverse = False):
@@ -198,14 +207,14 @@ def softmax_volumes(volumes):
 
 def integrate_tensor_3d_with_coordinates(volumes, coord_volumes, softmax=True):
     batch_size, n_volumes, x_size, y_size, z_size = volumes.shape
-
+    EPS = 1e-8
     volumes = volumes.reshape((batch_size, n_volumes, -1))
     if softmax:
         volumes = nn.functional.softmax(volumes, dim=2)
     else:
         volumes = nn.functional.relu(volumes)
         # normalize
-        S = volumes.sum(-1).unsqueeze(-1)
+        S = volumes.sum(-1).unsqueeze(-1) + EPS
         volumes = volumes/S
 
     volumes = volumes.reshape((batch_size, n_volumes, x_size, y_size, z_size))
@@ -388,12 +397,14 @@ def compose(coefficients, basis, decomposition_type):
     basis: Tensor, [batch_size, n_basis, n_joints, 32,32,32]
     '''
     device = coefficients.device
-    batch_size = coefficients.shape[0]
+    
     if decomposition_type == 'svd':
         n_basis = len(basis)
+        batch_size = coefficients.shape[0]
         coefficients = coefficients.view(batch_size, n_basis, -1, *coefficients.shape[-3:])
         T = torch.einsum('bnjxyz,bnjxyz->bjxyz', coefficients, basis.unsqueeze(0).repeat(batch_size,1,1,1,1,1))
     elif decomposition_type == 'tucker':
+        batch_size = coefficients.shape[0]
         coefficients = coefficients.view(batch_size, -1, *coefficients.shape[-3:])
         T2 = torch.einsum('bjxyz,ji->bixyz', coefficients, basis[0].to(device)) # core by 17x17
         T3 = torch.einsum('bixyz,xk->bikyz', T2, basis[1].to(device)) # core by 32x32
@@ -404,6 +415,16 @@ def compose(coefficients, basis, decomposition_type):
         torch.cuda.empty_cache()
         T = torch.einsum('biklz,zm->biklm', T4, basis[3].to(device)) # core by 32x32
         del T4
+    elif decomposition_type == 'tt':
+        # (1-a)(a-b)(b-c)(c-d)
+        batch_size = basis[0].shape[0]
+        tensors = []
+        for batch in range(batch_size):
+            T = torch.einsum('ja,axb->jxb', basis[0][batch], basis[1][batch])
+            T = torch.einsum('jxb,byc->jxyc', T, basis[2][batch])
+            T = torch.einsum('jxyc,cz->jxyz', T, basis[3][batch])
+            tensors.append(T)
+        T = torch.stack(tensors)
     else:
         raise RuntimeError('Wrong `decomposition_type`!')
     return T

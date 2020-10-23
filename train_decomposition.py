@@ -21,6 +21,7 @@ from tensorboardX import SummaryWriter
 
 from mvn.models.triangulation import VolumetricTriangulationNet
 from mvn.models.decomposition import VolumetricDecompositionNet
+from mvn.models.image2lixel import I2LModel
 
 from mvn.models.loss import KeypointsMSELoss, \
                             KeypointsMSESmoothLoss, \
@@ -155,32 +156,40 @@ def setup_dataloaders(config, is_train=True, distributed_train=False):
     return train_dataloader, val_dataloader, train_sampler
 
 
-def setup_experiment(config, model_name, args, is_train=True):
-    prefix = "" if is_train else "eval_"
+def setup_experiment(config, model_name, args, is_train=True, existed_path=None):
+    
+    if existed_path is None:
 
-    if config.title:
-        experiment_title = config.title + "_" + model_name
+        prefix = "" if is_train else "eval_"
+
+        if config.title:
+            experiment_title = config.title + "_" + model_name
+        else:
+            experiment_title = model_name
+
+        experiment_title = config.experiment_comment if config.experiment_comment else prefix + experiment_title
+
+        experiment_name = '{}@{}'.format(experiment_title, datetime.now().strftime("%d.%m.%Y-%H:%M:%S"))
+        print("Experiment name: {}".format(experiment_name))
+
+        experiment_dir = os.path.join(args.logdir, experiment_name)
+        os.makedirs(experiment_dir, exist_ok=True)
+
+        checkpoints_dir = os.path.join(experiment_dir, "checkpoints")
+        os.makedirs(checkpoints_dir, exist_ok=True)
+
+        shutil.copy(args.config, os.path.join(experiment_dir, "config.yaml"))
+
+        # tensorboard
+        writer = SummaryWriter(os.path.join(experiment_dir, "tb"))
+
+        # dump config to tensorboard
+        writer.add_text(misc.config_to_str(config), "config", 0)
+
     else:
-        experiment_title = model_name
-
-    experiment_title = config.experiment_comment if config.experiment_comment else prefix + experiment_title
-
-    experiment_name = '{}@{}'.format(experiment_title, datetime.now().strftime("%d.%m.%Y-%H:%M:%S"))
-    print("Experiment name: {}".format(experiment_name))
-
-    experiment_dir = os.path.join(args.logdir, experiment_name)
-    os.makedirs(experiment_dir, exist_ok=True)
-
-    checkpoints_dir = os.path.join(experiment_dir, "checkpoints")
-    os.makedirs(checkpoints_dir, exist_ok=True)
-
-    shutil.copy(args.config, os.path.join(experiment_dir, "config.yaml"))
-
-    # tensorboard
-    writer = SummaryWriter(os.path.join(experiment_dir, "tb"))
-
-    # dump config to tensorboard
-    writer.add_text(misc.config_to_str(config), "config", 0)
+        experiment_dir = existed_path
+        # tensorboard
+        writer = SummaryWriter(os.path.join(experiment_dir, "tb"))
 
     return experiment_dir, writer
 
@@ -225,7 +234,6 @@ def one_epoch(model,
     if (not use_precalculated_basis) and (not is_baseline):
         coefficients_weight = config.opt.coefficients_weight
         basis_weight = config.opt.basis_weight
-
 
     use_coefs_norm_weight = config.opt.use_coefs_norm_weight if hasattr(config.opt, 'use_coefs_norm_weight') else False
     coefs_norm_weight = config.opt.coefs_norm_weight if hasattr(config.opt, 'coefs_norm_weight') else None
@@ -273,7 +281,6 @@ def one_epoch(model,
                 keypoints_3d_validity_gt, 
                 proj_matricies_batch) = dataset_utils.prepare_batch(batch, device)
 
-                heatmaps_pred, keypoints_2d_pred, cuboids_pred, base_points_pred = None, None, None, None
                 torch.cuda.empty_cache()
     
                 (keypoints_3d_pred, 
@@ -291,7 +298,8 @@ def one_epoch(model,
                 ################
                 # MODEL OUTPUT #   
                 ################
-                coord_volumes_pred = coord_volumes_pred - base_points_pred.unsqueeze(1).unsqueeze(1).unsqueeze(1)
+                if coord_volumes_pred is not None:
+                    coord_volumes_pred = coord_volumes_pred - base_points_pred.unsqueeze(1).unsqueeze(1).unsqueeze(1)
                 keypoints_3d_gt = op.root_centering(keypoints_3d_gt, config.kind)
                 keypoints_3d_pred = op.root_centering(keypoints_3d_pred, config.kind)
 
@@ -530,7 +538,8 @@ def main(args):
     
     model = {
         "vol": VolumetricTriangulationNet,
-        "vol_decomposition": VolumetricDecompositionNet
+        "vol_decomposition": VolumetricDecompositionNet,
+        'i2l': I2LModel,
     }[config.model.name](config, device=device).to(device)
 
     # criterion
@@ -547,7 +556,8 @@ def main(args):
 
     if config.model.init_weights:
         rebuild_dict = config.model.rebuild_dict if hasattr(config.model, 'rebuild_dict') else False
-        state_dict = torch.load(config.model.checkpoint)['model_state']
+        weights_path  = os.path.join(config.model.checkpoint, 'checkpoints/weights.pth')
+        state_dict = torch.load(weights_path)['model_state']
         if rebuild_dict:
             model_state_dict = model.state_dict() 
             for k,v in model_state_dict.items():
@@ -576,6 +586,22 @@ def main(args):
                             hasattr(config.opt, "volume_net_lr") else config.opt.lr}
                 ], lr=config.opt.lr
             )  
+
+        elif config.model.name == 'i2l':
+            opt = torch.optim.Adam(
+                [{'params': model.backbone.parameters()},
+                 {'params': model.pose_net.parameters() ,'lr':config.opt.pose_net_lr}
+                ] +\
+                ([{'params': model.process_features.parameters(), \
+                            'lr': config.opt.process_features_lr if \
+                            hasattr(config.opt, "process_features_lr") else config.opt.lr}] \
+                            if hasattr(model, 'process_features') else []) + \
+                ([{'params': model.volume_net.parameters(), \
+                            'lr': config.opt.volume_net_lr if \
+                            hasattr(config.opt, "volume_net_lr") else config.opt.lr}] if
+                            hasattr(model, 'volume_net') else []),
+                lr=config.opt.lr
+            )                        
         elif config.model.name == "vol_decomposition":
             opt = torch.optim.Adam(
                 [{'params': model.backbone.parameters()},
@@ -586,6 +612,10 @@ def main(args):
                             'lr': config.opt.volume_net_lr if \
                             hasattr(config.opt, "volume_net_lr") else config.opt.lr}
                 ] +\
+                ([{'params': model.basis.parameters(), \
+                 'lr': config.opt.basis_lr if \
+                 hasattr(config.opt, "basis_lr") else config.opt.lr}] if model.basis_source == 'optimized' else [])
+                +\
                 ([{'params': model.basis_net.parameters(), \
                  'lr': config.opt.basis_net_lr if \
                  hasattr(config.opt, "basis_net_lr") else config.opt.lr}] if hasattr(model, 'basis_net') else []),
@@ -594,10 +624,13 @@ def main(args):
         else:
             raise RuntimeError('Unknown config.model.name')
 
-    load_optimizer = config.model.load_optimizer if hasattr(config.model, 'load_optimizer') else False
-    if config.model.init_weights and load_optimizer:
-        state_dict = torch.load(config.model.checkpoint)['opt_state']
-        opt.load_state_dict(state_dict, strict=True)
+        print('N_OPT_GROUPS:', len(opt.param_groups))
+
+    CONTINUE_TRAINING = config.model.continue_training if hasattr(config.model, 'continue_training') else False
+    if config.model.init_weights and CONTINUE_TRAINING:
+        state_dict = torch.load(weights_path)['opt_state']
+        opt.load_state_dict(state_dict)
+        del state_dict
         print("LOADED PRE-TRAINED OPTIMIZER!!!")
 
     use_scheduler = config.opt.use_scheduler if hasattr(config.opt, 'use_scheduler') else False    
@@ -611,7 +644,11 @@ def main(args):
     # experiment
     experiment_dir, writer = None, None
     if master and MAKE_EXPERIMENT_DIR: 
-        experiment_dir, writer = setup_experiment(config, type(model).__name__, args=args, is_train=not args.eval)
+        experiment_dir, writer = setup_experiment(config, 
+                                                    type(model).__name__, 
+                                                    args=args, 
+                                                    is_train=not args.eval,
+                                                    existed_path = config.model.checkpoint if CONTINUE_TRAINING else None)
         print ('EXPERIMENT IN LOGDIR:', args.logdir)    
         
     # multi-gpu
@@ -619,10 +656,17 @@ def main(args):
         model = DistributedDataParallel(model, device_ids=[device])
 
     torch.cuda.empty_cache()
+
+    start_epoch, start_iter_train = 0, 0
+    if CONTINUE_TRAINING:
+        start_epoch, start_iter_train = misc.get_epoch_iter(config.model.checkpoint)
+
+    print('STARTING EPOCH: {0}, STARTING ITER: {1}'.format(start_epoch, start_iter_train))
+
     if not args.eval:
         # train loop
-        n_iters_total_train, n_iters_total_val = 0, 0
-        for epoch in range(config.opt.n_epochs):
+        n_iters_total_train, n_iters_total_val = start_iter_train, 0
+        for epoch in range(start_epoch, config.opt.n_epochs):
             if train_sampler is not None:
                 train_sampler.set_epoch(epoch)
 

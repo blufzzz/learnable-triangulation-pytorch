@@ -215,32 +215,39 @@ def setup_dataloaders(config, is_train=True, distributed_train=False):
     return train_dataloader, val_dataloader, train_sampler
 
 
-def setup_experiment(config, model_name, is_train=True):
-    prefix = "" if is_train else "eval_"
+def setup_experiment(config, model_name, is_train=True, existed_path=None):
 
-    if config.title:
-        experiment_title = config.title + "_" + model_name
+    if existed_path is None:
+        prefix = "" if is_train else "eval_"
+
+        if config.title:
+            experiment_title = config.title + "_" + model_name
+        else:
+            experiment_title = model_name
+
+        experiment_title = config.experiment_comment if config.experiment_comment else prefix + experiment_title
+
+        experiment_name = '{}@{}'.format(experiment_title, datetime.now().strftime("%d.%m.%Y-%H:%M:%S"))
+        print("Experiment name: {}".format(experiment_name))
+
+        experiment_dir = os.path.join(args.logdir, experiment_name)
+        os.makedirs(experiment_dir, exist_ok=True)
+
+        checkpoints_dir = os.path.join(experiment_dir, "checkpoints")
+        os.makedirs(checkpoints_dir, exist_ok=True)
+
+        shutil.copy(args.config, os.path.join(experiment_dir, "config.yaml"))
+
+        # tensorboard
+        writer = SummaryWriter(os.path.join(experiment_dir, "tb"))
+
+        # dump config to tensorboard
+        writer.add_text(misc.config_to_str(config), "config", 0)
+
     else:
-        experiment_title = model_name
-
-    experiment_title = config.experiment_comment if config.experiment_comment else prefix + experiment_title
-
-    experiment_name = '{}@{}'.format(experiment_title, datetime.now().strftime("%d.%m.%Y-%H:%M:%S"))
-    print("Experiment name: {}".format(experiment_name))
-
-    experiment_dir = os.path.join(args.logdir, experiment_name)
-    os.makedirs(experiment_dir, exist_ok=True)
-
-    checkpoints_dir = os.path.join(experiment_dir, "checkpoints")
-    os.makedirs(checkpoints_dir, exist_ok=True)
-
-    shutil.copy(args.config, os.path.join(experiment_dir, "config.yaml"))
-
-    # tensorboard
-    writer = SummaryWriter(os.path.join(experiment_dir, "tb"))
-
-    # dump config to tensorboard
-    writer.add_text(misc.config_to_str(config), "config", 0)
+        experiment_dir = existed_path
+        # tensorboard
+        writer = SummaryWriter(os.path.join(experiment_dir, "tb"))
 
     return experiment_dir, writer
 

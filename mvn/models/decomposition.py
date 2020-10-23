@@ -14,7 +14,8 @@ from mvn.utils.op import get_coord_volumes, unproject_heatmaps, integrate_tensor
 from mvn.utils.multiview import update_camera
 from mvn.utils.misc import get_capacity, description
 from mvn.utils import volumetric, cfg
-from mvn.models.v2v import V2VModel, BasisNet
+from mvn.models.v2v import V2VModel, TuckerBasisNet
+from mvn.models.image2lixel_common.nets.module import PoseNet, PoseNet3D
 from sklearn.decomposition import PCA
 from IPython.core.debugger import set_trace
 
@@ -50,26 +51,72 @@ class VolumetricDecompositionNet(nn.Module):
         # modules dimensions
         self.volume_features_dim = config.model.volume_features_dim
 
-        self.use_precalculated_basis = config.model.use_precalculated_basis
+        self.use_precalculated_basis = config.model.use_precalculated_basis if hasattr(config.model, "use_precalculated_basis") \
+                                        else (config.model.basis_source == 'precalculated')
         self.decomposition_type = config.model.decomposition_type if hasattr(config.model, "decomposition_type") else None
+
+        self.dimensions_in_decomposition = config.model.dimensions_in_decomposition \
+                                            if hasattr(config.model, "dimensions_in_decomposition") else ['j','x','y','z']
+
+        self.ranks_in_decomposition = config.model.ranks_in_decomposition \
+                                            if hasattr(config.model, "ranks_in_decomposition") else [1,1,1,1]
+
+        assert len(self.ranks_in_decomposition) == len(self.dimensions_in_decomposition)
         
         ##############
         # LOAD BASIS #
         ##############
         self.basis_type = config.model.basis_type
+        if hasattr(config.model, "basis_source"):
+            self.basis_source = config.model.basis_source
+        elif config.model.use_precalculated_basis:
+            self.basis_source = 'precalculated'
+        else:   
+            self.basis_source = 'basis_net'
         self.only_basis_coefs = config.model.only_basis_coefs if hasattr(config.model, "n_basis") else False
         self.n_basis = config.model.n_basis if hasattr(config.model, "n_basis") else None
         
-        if self.use_precalculated_basis: 
+        if self.basis_source == 'precalculated': 
             self.basis = torch.load(config.model.basis_path)
             if self.decomposition_type == 'svd':
                 self.basis = self.basis[:self.n_basis].to(device)
+        elif self.basis_source ==  'basis_net':
+            if self.decomposition_type == 'tucker':
+                bottleneck_dim = config.model.v2v_configuration.bottleneck[-1]['params'][-1] 
+                self.basis_net = TuckerBasisNet(input_dim=bottleneck_dim,
+                                          volume_size=self.volume_size, 
+                                          n_joints=self.num_joints,
+                                          normalization_type=self.v2v_normalization_type)
+            elif self.decomposition_type == 'tt':
+                self.rank = config.model.rank
+                self.use_G_j = config.model.use_G_j
+                self.v2v_output_dim = config.model.v2v_output_dim
+                self.posenet3d_intermediate_features = config.model.posenet3d_intermediate_features
+                self.basis_net = PoseNet3D(self.rank,
+                                           self.volume_size, 
+                                           self.num_joints, 
+                                           input_features=self.v2v_output_dim, 
+                                           intermediate_features=self.posenet3d_intermediate_features, 
+                                           normalization_type=self.v2v_normalization_type, 
+                                           use_G_j=self.use_G_j)
+            else:
+                raise RuntimeError('wrong `decomposition_type` for this `basis_source`')
+        elif self.basis_source == 'optimized':
+            if self.decomposition_type == 'tucker':
+                if config.model.basis_path is not None:
+                    basis = torch.load(config.model.basis_path)
+                    self.basis = nn.ParameterList([nn.Parameter(basis[0].to(device)),
+                                                    nn.Parameter(basis[1].to(device)),
+                                                    nn.Parameter(basis[2].to(device)),
+                                                    nn.Parameter(basis[3].to(device))])
+                else:
+                    self.basis = nn.ParameterList([nn.Parameter(torch.randn(self.num_joints, self.num_joints, device=device)),
+                                                    nn.Parameter(torch.randn(self.volume_size, self.volume_size, device=device)),
+                                                    nn.Parameter(torch.randn(self.volume_size, self.volume_size, device=device)),
+                                                    nn.Parameter(torch.randn(self.volume_size, self.volume_size, device=device))])
+
         else:
-            bottleneck_dim = config.model.v2v_configuration.bottleneck[-1]['params'][-1] 
-            self.basis_net = BasisNet(input_dim=bottleneck_dim,
-                                      volume_size=self.volume_size, 
-                                      n_joints=self.num_joints,
-                                      normalization_type=self.v2v_normalization_type)
+            raise RuntimeError('Unknown `basis_source`:{}'.format(self.basis_source))
 
         # DELETE THIS
         self.gt_input = config.model.gt_input if hasattr(config.model, 'gt_input') else False
@@ -99,14 +146,20 @@ class VolumetricDecompositionNet(nn.Module):
 
         #######
         # V2V #
-        #######
+        #######d
         assert self.v2v_type == 'conf'  
-        return_bottleneck = not self.use_precalculated_basis
+        
+        return_bottleneck = (self.decomposition_type == 'tucker') and (self.basis_source == 'basis_net')
+        
         if self.decomposition_type == 'tucker':
             v2v_output_dim = self.num_joints
+        elif self.decomposition_type == 'tt':
+            v2v_output_dim = self.v2v_output_dim
         else:
             v2v_output_dim = self.n_basis if self.only_basis_coefs else self.num_joints*self.n_basis*3
+
         output_vector = self.basis_type == 'keypoints'
+
         self.volume_net = V2VModel(self.num_joints if self.gt_input else self.volume_features_dim,
                                    v2v_output_dim,
                                    v2v_normalization_type=self.v2v_normalization_type,
@@ -119,11 +172,9 @@ class VolumetricDecompositionNet(nn.Module):
         description(self)
 
 
-    def forward(self, 
+    def forward(self,  
                 images_batch, 
-                batch, 
-                debug=False,
-                master=True):
+                batch):
 
         device = images_batch.device
         batch_size, dt = images_batch.shape[:2]
@@ -187,10 +238,13 @@ class VolumetricDecompositionNet(nn.Module):
 
         coefficients, bottleneck = self.volume_net(unproj_features)
 
-        if self.use_precalculated_basis:
-            basis = self.basis
+        if self.basis_source == 'basis_net':
+            if isinstance(self.basis_net, PoseNet3D):
+                basis = self.basis_net(coefficients) # for TT
+            else:
+                basis = self.basis_net(bottleneck) # for Tucker
         else:
-            basis = self.basis_net(bottleneck)
+            basis = self.basis
 
         if self.basis_type == 'keypoints':
             volumes_pred = None

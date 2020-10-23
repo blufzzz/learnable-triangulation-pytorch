@@ -1,7 +1,10 @@
 import numpy as np
 import scipy.ndimage
-import skimage
 import cv2
+
+import plotly.graph_objects as go
+import numpy as np
+import colorlover as cl
 
 import torch
 from IPython.core.debugger import set_trace
@@ -509,6 +512,8 @@ def draw_3d_pose(keypoints, ax, keypoints_mask=None, kind='cmu', radius=None, ro
 
 
 def draw_voxels(voxels, ax, shape=(8, 8, 8), norm=True, alpha=0.1):
+    import skimage
+
     # resize for visualization
     zoom = np.array(shape) / np.array(voxels.shape)
     voxels = skimage.transform.resize(voxels, shape, mode='constant', anti_aliasing=True)
@@ -555,7 +560,40 @@ def draw_voxels(voxels, ax, shape=(8, 8, 8), norm=True, alpha=0.1):
 
 
 
+def display_pose(coord_volumes, keypoints=None, heatmap_3d=None):
+    '''
+    coord_volumes - 
+    keypoints - 
+    heatmap_3d - 
+    '''
+    
+    X = coord_volumes[...,0]
+    Y = coord_volumes[...,1]
+    Z = coord_volumes[...,2]
 
+    color_kp = cl.scales['10']['div']['RdYlBu'][-1]
+    plotly_data = []
+    # connections
+    if keypoints is not None:
+        connectivity = CONNECTIVITY_DICT['human36m']
+        for (index_from, index_to) in connectivity:
+            xs, ys, zs = [np.array([keypoints[index_from, j], keypoints[index_to, j]]) for j in range(3)]
+            plotly_data.append(go.Scatter3d(x=xs, y=ys, z=zs,
+                                 marker=dict(size=6,color='red',opacity=0.1),
+                                 line=dict(color='blue',width=2)))
+    
+    if heatmap_3d is not None:
+        plotly_data.append(go.Volume(
+            x=X.flatten(),
+            y=Y.flatten(),
+            z=Z.flatten(),
+            value=heatmap_3d.flatten(),
+            flatshading=False,
+        #     isomin=0.1,
+        #     isomax=0.9,
+            opacity=0.1, # needs to be small to see through all surfaces
+            surface_count=60 # needs to be a large number for good volume rendering
+            ))
 
-
-
+    fig = go.Figure(data=plotly_data)
+    fig.show()

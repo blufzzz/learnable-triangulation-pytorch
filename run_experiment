@@ -1,13 +1,11 @@
 #!/bin/bash
-srun -p TitanBlack --gres=gpu --exclusive --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-05 \
+srun -p TitanBlack --gres=gpu --exclusive --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-02 \
 python train_decomposition.py \
 --logdir=../logs/decomposition \
---config=./experiments/human36m/train/human36m_vol_baseline.yaml \
---experiment_comment='h36_sv32_dist_baseline_V2V-conf-group-vf64-lr1e-3-rb4_ResNet-50-lr1e-4_bs1-1_VCE-1_MAE-1'
+--config=./experiments/human36m/train/human36m_vol_decomposition_TT.yaml \
+--experiment_comment='h36_sv64_dist_TT-PoseNet3d-256-rank2-lr1e-3_V2V-full-conf-5rb-bf128-group-vf64-lr1e-3_NoSoftMax_ResNet-152-lr1e-4_bs1-1_VCE-1_MAE-1'
 
 # --experiment_comment='h36_sv64_dist_Tucker-Adaptive-Linear-1024_V2V-conf-5rb-bf64-group-vf64-lr1e-3_NoSoftMax_NoCoreNorm_ResNet-152-lr1e-4_bs1-1_VCE-1_MAE-1'
-
 # --experiment_comment='h36_sv32_dist_baseline_V2V-conf-group-vf64-lr1e-3_ResNet-152-lr1e-4_bs3-3_VCE-1_MAE-1'
-
 # --experiment_comment='h36_sv32_dist_SVD-precalc-nb20-ks5-v5e-1_V2V-conf-group-vf64-lr1e-3_ResNet-152-lr1e-4_bs3-3_VCE-1_MAE-1'
 

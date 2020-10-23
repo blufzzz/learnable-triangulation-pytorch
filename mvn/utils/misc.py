@@ -4,7 +4,11 @@ import json
 import re
 import numpy as np
 from mvn.utils.img import image_batch_to_numpy, denormalize_image,to_numpy
+from tensorboard.backend.event_processing import event_accumulator
 import torch
+
+from IPython.core.debugger import set_trace
+
 
 retval = {
     'subject_names': ['S1', 'S5', 'S6', 'S7', 'S8', 'S9', 'S11'],
@@ -29,6 +33,29 @@ retval = {
 
 def config_to_str(config):
     return yaml.dump(yaml.safe_load(json.dumps(config)))  # fuck yeah
+
+
+def get_epoch_iter(exp_path):
+    path = os.path.join(exp_path, 'tb')
+    path = os.path.join(path, os.listdir(path)[0])
+    ea = event_accumulator.EventAccumulator(path, size_guidance={ # see below regarding this argument
+                                            event_accumulator.COMPRESSED_HISTOGRAMS: 0,
+                                            event_accumulator.IMAGES: 0,
+                                            event_accumulator.AUDIO: 0,
+                                            event_accumulator.SCALARS: 10**9,
+                                            event_accumulator.HISTOGRAMS: 0,
+                                            })
+
+    ea.Reload()
+    if 'val/dataset_metric_epoch' in ea.Tags()['scalars']:
+        dataset_metric_epoch = [event.value for event in ea.Scalars('val/dataset_metric_epoch')]
+        epochs = len(dataset_metric_epoch)
+        
+    if 'train/MAE' in ea.Tags()['scalars']:
+        dataset_metric_epoch = [event.value for event in ea.Scalars('train/MAE')]
+        iters = len(dataset_metric_epoch)
+
+    return epochs, iters
 
 
 class AverageMeter(object):
