@@ -61,12 +61,9 @@ class PoseNet(nn.Module):
         img_feat_z = self.conv_z_1(img_feat_z)
         img_feat_z = img_feat_z.view(-1,256,self.volume_size)
         heatmap_z = self.conv_z_2(img_feat_z)
-        set_trace()
         coord_z = self.soft_argmax_1d(heatmap_z ,z)
 
         joint_coord = torch.cat((coord_x, coord_y, coord_z),2)
-
-        set_trace()
 
         return joint_coord
 

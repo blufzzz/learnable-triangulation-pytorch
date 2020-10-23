@@ -24,7 +24,6 @@ opt:
   val_batch_size: 1
 
   lr: 0.0001
-  # process_features_lr: 0.001
   pose_net_lr: 0.001
   scale_keypoints_3d: 0.1
 
@@ -39,8 +38,6 @@ model:
 
   use_meshnet: false
   pose_net_normalization_type: 'group_norm'
-  # volume_aggregation_method: "no_aggregation"
-  # volume_features_dim: 64
   include_pivot: true 
 
   init_weights: false
@@ -76,33 +73,6 @@ model:
     return_heatmaps: false
     return_bottleneck: true
     return_features: false
-
-  # v2v_configuration:
-
-  #   use_skip_connection: true
-  #   skip_block_type: 'Res3DBlock'
-  #   skip_block_adain: false
-  #   back_layer_output_channels: 64
-
-  #                 # first should be Res3DBlock
-  #   downsampling: [{'module_type': 'Res3DBlock', 'params':[64,64], 'adain': false},
-  #                 {'module_type': 'Pool3DBlock', 'params': [2], 'adain': false}, # pool
-  #                 # {'module_type': 'Res3DBlock', 'params':[64,128], 'adain': false},
-  #                 # {'module_type': 'Pool3DBlock', 'params': [2], 'adain': false}, # pool
-  #                 {'module_type': 'Res3DBlock', 'params':[64,128], 'adain': false},
-  #                 {'module_type': 'Pool3DBlock', 'params':[2], 'adain': false}, # pool
-  #                 {'module_type': 'Res3DBlock', 'params':[128,256], 'adain': false}]
-
-  #   bottleneck: [{'module_type': 'Res3DBlock', 'params': [256,256], 'adain': false} ] 
-
-  #   upsampling: [{'module_type': 'Res3DBlock', 'params':[256,128], 'adain': false},
-  #                 {'module_type': 'Upsample3DBlock', 'params': [128, 128, 2, 2], 'adain': false},
-  #                 # {'module_type': 'Res3DBlock', 'params':[128,128], 'adain': false},
-  #                 # {'module_type': 'Upsample3DBlock', 'params': [128, 128, 2, 2], 'adain': false},
-  #                 {'module_type': 'Res3DBlock', 'params':[128,64], 'adain': false},
-  #                 {'module_type': 'Upsample3DBlock', 'params':[64, 64, 2, 2], 'adain': false},
-  #                 {'module_type': 'Res3DBlock', 'params':[64,64], 'adain': false}]
-  #                 # last should be Res3DBlock
 
 dataset:
   kind: "human36m"
