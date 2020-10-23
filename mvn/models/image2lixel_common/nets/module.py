@@ -13,6 +13,7 @@ class PoseNet(nn.Module):
         super(PoseNet, self).__init__()
         self.joint_num = joint_num
         self.normalization_type = normalization_type
+        self.volume_size = volume_size
         if self.volume_size == 32:
             deconv_layers_channels = [2048,256,256]
         elif self.volume_size == 64:
