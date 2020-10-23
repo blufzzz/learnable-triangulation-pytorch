@@ -24,6 +24,18 @@ from mvn.models.image2lixel_common.nets.module import PoseNet, Pose2Feat, MeshNe
 # from mvn.models.image2lixel_common.utils.smpl import SMPL
 # from mvn.models.image2lixel_common.utils.mano import MANO
 
+def init_weights(m):
+    if type(m) == nn.ConvTranspose2d:
+        nn.init.normal_(m.weight,std=0.001)
+    elif type(m) == nn.Conv2d:
+        nn.init.normal_(m.weight,std=0.001)
+        nn.init.constant_(m.bias, 0)
+    elif type(m) == nn.BatchNorm2d:
+        nn.init.constant_(m.weight,1)
+        nn.init.constant_(m.bias,0)
+    elif type(m) == nn.Linear:
+        nn.init.normal_(m.weight,std=0.01)
+        nn.init.constant_(m.bias,0)
 
 class I2LModel(nn.Module):
     def __init__(self, config,  device='cuda:0'):
@@ -60,9 +72,9 @@ class I2LModel(nn.Module):
 
         if self.training:
             # backbones are already inited
-            self.pose_net.apply(self.init_weights)
-            self.pose2feat.apply(self.init_weights)
-            self.mesh_net.apply(self.init_weights)
+            self.pose_net.apply(init_weights)
+            self.pose2feat.apply(init_weights)
+            self.mesh_net.apply(init_weights)
 
 
     def make_gaussian_heatmap(self, joint_coord_img, sigma):
@@ -130,15 +142,3 @@ class I2LModel(nn.Module):
                 base_points)
 
        
-def init_weights(m):
-    if type(m) == nn.ConvTranspose2d:
-        nn.init.normal_(m.weight,std=0.001)
-    elif type(m) == nn.Conv2d:
-        nn.init.normal_(m.weight,std=0.001)
-        nn.init.constant_(m.bias, 0)
-    elif type(m) == nn.BatchNorm2d:
-        nn.init.constant_(m.weight,1)
-        nn.init.constant_(m.bias,0)
-    elif type(m) == nn.Linear:
-        nn.init.normal_(m.weight,std=0.01)
-        nn.init.constant_(m.bias,0)
