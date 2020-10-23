@@ -145,7 +145,8 @@ class Pose2Feat(nn.Module):
         self.conv = make_conv_layers([64+joint_num*self.volume_size,64])
 
     def forward(self, img_feat, joint_heatmap_3d):
-        joint_heatmap_3d = joint_heatmap_3d.view(-1,self.joint_num*self.volume_size, self.volume_size,self.volume_size)
+        batch_size = joint_heatmap_3d.shape[0] 
+        joint_heatmap_3d = joint_heatmap_3d.view(batch_size,-1, *joint_heatmap_3d.shape[-2:])
         feat = torch.cat((img_feat, joint_heatmap_3d),1)
         feat = self.conv(feat)
         return feat
