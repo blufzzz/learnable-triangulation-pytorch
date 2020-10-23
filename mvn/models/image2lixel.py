@@ -120,7 +120,8 @@ class I2LModel(nn.Module):
                 joint_heatmap = self.make_gaussian_heatmap(joint_coord_img.detach(), self.sigma)
 
             # interpolate - workaround to match `shared_img_feat` spatial dim
-            joint_heatmap = torch.nn.functional.interpolate(joint_heatmap, (64,64,64))
+            joint_heatmap = F.interpolate(joint_heatmap, (64,64,64))
+            set_trace()
             shared_img_feat = self.pose2feat(shared_img_feat, joint_heatmap) #[1, 64, 64, 64])
 
             set_trace()
