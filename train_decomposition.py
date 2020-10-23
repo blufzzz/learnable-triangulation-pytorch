@@ -37,7 +37,7 @@ from mvn.utils.op import get_coord_volumes, unproject_heatmaps, integrate_tensor
 from IPython.core.debugger import set_trace
 import matplotlib.pyplot as plt
 
-MAKE_EXPERIMENT_DIR = False
+MAKE_EXPERIMENT_DIR = True
 
 def parse_args():
     parser = argparse.ArgumentParser()
