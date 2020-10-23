@@ -84,6 +84,7 @@ class I2LModel(nn.Module):
         base_points = tri_keypoints_3d[..., 6, :3]
         joint_coord_img = self.pose_net(pose_img_feat, coordinates)
 
+        set_trace()
         if self.use_meshnet:
             with torch.no_grad():
                 joint_heatmap = self.make_gaussian_heatmap(joint_coord_img.detach())

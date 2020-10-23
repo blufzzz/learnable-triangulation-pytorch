@@ -156,10 +156,10 @@ class MeshNet(nn.Module):
         self.vertex_num = vertex_num
         self.volume_size = volume_size
 
-         if self.volume_size == 32:
+        if self.volume_size == 32:
             deconv_layers_channels = [2048,256,256]
         elif self.volume_size == 64:
-            deconv_layers_channels = [2048,256,256, 256]
+            deconv_layers_channels = [2048,256,256,256]
         else:
             raise RuntimeError('wrong `volume_size`')
 
