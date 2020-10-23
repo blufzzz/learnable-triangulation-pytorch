@@ -10,7 +10,7 @@ opt:
   criterion: "MAE"
   criterion_weight: 1.
 
-  use_volumetric_ce_loss: false
+  use_volumetric_ce_loss: true
   volumetric_ce_loss_weight: 1.
 
   use_bone_length_term: false
