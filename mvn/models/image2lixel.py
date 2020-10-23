@@ -115,17 +115,20 @@ class I2LModel(nn.Module):
         base_points = tri_keypoints_3d[..., 6, :3]
         joint_coord_img = self.pose_net(pose_img_feat, coordinates)
 
-        set_trace()
         if self.use_meshnet:
             with torch.no_grad():
                 joint_heatmap = self.make_gaussian_heatmap(joint_coord_img.detach(), self.sigma)
 
-            set_trace()
+            shared_img_feat = torch.nn.functional.interpolate(shared_img_feat, (self.volume_size,self.volume_size))
             shared_img_feat = self.pose2feat(shared_img_feat, joint_heatmap)
+
+            set_trace()
 
             # meshnet forward
             _, mesh_img_feat = self.mesh_backbone(shared_img_feat, skip_early=True)
+            set_trace()
             mesh_coord_img = self.mesh_net(mesh_img_feat)
+            set_trace()
             
             if self.use_mesh_model:    
                 # joint coordinate outputs from mesh coordinates
@@ -133,6 +136,8 @@ class I2LModel(nn.Module):
                 joint_coord_img = joint_img_from_mesh
             else:
                 joint_coord_img = mesh_coord_img
+
+        set_trace()
 
         return (joint_coord_img, 
                 None, 
