@@ -93,7 +93,7 @@ class PoseNet(nn.Module):
             if self.joint_independent:
                 heatmap_x = heatmap_x.view(batch_size, self.joint_num, -1, self.rank)
                 heatmap_y = heatmap_y.view(batch_size, self.joint_num, self.rank, -1, self.rank)
-                heatmap_z = heatmap_x.view(batch_size, self.joint_num, self.rank, -1)
+                heatmap_z = heatmap_z.view(batch_size, self.joint_num, self.rank, -1)
             else:
                 pass
 
