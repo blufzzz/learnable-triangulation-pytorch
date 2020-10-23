@@ -140,6 +140,7 @@ class I2LModel(nn.Module):
 
         if not self.return_coords_posenet:
                 volumes = compose(None, joint_coord_img, 'tt', joint_independent=self.joint_independent_posenet)
+                set_trace()
                 joint_coord_img, volumes_pred = integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier,
                                                                                    coordinates[0],
                                                                                    softmax=self.volume_softmax)

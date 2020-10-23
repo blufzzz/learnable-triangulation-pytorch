@@ -424,10 +424,9 @@ def compose(coefficients, basis, decomposition_type, joint_independent=False):
                 T = []
                 num_joints = basis[0][batch].shape[0]
                 for joint in range(num_joints):
-                    set_trace()
                     T_j = torch.einsum('xb,byc->xyc', basis[0][batch,joint], basis[1][batch,joint])
                     T_j = torch.einsum('xyc,cz->xyz', T_j, basis[2][batch,joint])
-                    T.append(t)
+                    T.append(T_j)
                 T = torch.stack(T)
             else:
                 T = torch.einsum('ja,axb->jxb', basis[0][batch], basis[1][batch])
