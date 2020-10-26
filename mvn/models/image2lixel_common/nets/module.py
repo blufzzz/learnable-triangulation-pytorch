@@ -175,7 +175,7 @@ class PoseNetTT(nn.Module):
             img_feat_j = img_feat_j.view(batch_size, self.joint_num, self.rank)
 
         else:
-            return img_feat_x.squeeze(1), img_feat_y, img_feat_z.squeeze(-1).transpose(2,3)
+            return img_feat_x.squeeze(2), img_feat_y, img_feat_z.squeeze(-1).transpose(2,3)
 
 
 
