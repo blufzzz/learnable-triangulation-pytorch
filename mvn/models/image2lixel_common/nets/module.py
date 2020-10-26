@@ -117,9 +117,9 @@ class PoseNetTT(nn.Module):
         out_channels = joint_num if self.joint_independent else 1
         self.x_branch = self.make_branch(input_features, intermediate_features, out_channels, [volume_size, volume_size, volume_size], [x_rank, volume_size, rank], 
                                         kernel_size=2, bnrelu_final=False, normalization_type=normalization_type)
-        self.y_branch = self.make_branch(input_features, intermediate_features, out_channels, [volume_size, volume_size, volume_size], [rank, volume_size, rank], 
+        self.y_branch = self.make_branch(input_features, intermediate_features, out_channels, [volume_size, volume_size, volume_size], [volume_size, rank, rank], 
                                         kernel_size=2, bnrelu_final=False, normalization_type=normalization_type)
-        self.z_branch = self.make_branch(input_features, intermediate_features, out_channels, [volume_size, volume_size, volume_size], [rank, volume_size, 1], 
+        self.z_branch = self.make_branch(input_features, intermediate_features, out_channels, [volume_size, volume_size, volume_size], [1, rank, volume_size], 
                                         kernel_size=2, bnrelu_final=False, normalization_type=normalization_type)
 
         if not self.joint_independent:
@@ -177,7 +177,7 @@ class PoseNetTT(nn.Module):
             return img_feat_j, img_feat_x.squeeze(2), img_feat_y, img_feat_z.squeeze(-1).transpose(2,3)
 
         else:
-            return img_feat_x.squeeze(2), img_feat_y, img_feat_z.squeeze(-1).transpose(2,3)
+            return img_feat_x.squeeze(2), img_feat_y.transpose(2,3), img_feat_z.squeeze(2)
 
 
 
