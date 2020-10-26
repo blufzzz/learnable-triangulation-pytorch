@@ -113,20 +113,21 @@ class PoseNetTT(nn.Module):
 
         x_rank = 1 if self.joint_independent else rank
         self.x_branch = self.make_branch(input_features, intermediate_features, 1, [volume_size, volume_size, volume_size], [x_rank, volume_size, rank], 
-                                        kernel=2, bnrelu_final=False, normalization_type=normalization_type)
+                                        kernel_size=2, bnrelu_final=False, normalization_type=normalization_type)
         self.y_branch = self.make_branch(input_features, intermediate_features, 1, [volume_size, volume_size, volume_size], [rank, volume_size, rank], 
-                                        kernel=2, bnrelu_final=False, normalization_type=normalization_type)
+                                        kernel_size=2, bnrelu_final=False, normalization_type=normalization_type)
         self.z_branch = self.make_branch(input_features, intermediate_features, 1, [volume_size, volume_size, volume_size], [rank, volume_size, 1], 
-                                        kernel=2, bnrelu_final=False, normalization_type=normalization_type)
+                                        kernel_size=2, bnrelu_final=False, normalization_type=normalization_type)
 
         if not self.joint_independent:
-            self.j_branch = self.make_branch(input_features, intermediate_features, intermediate_features, rank=1, kernel=[2,2,2], stride=[2,2,2], padding=0, bnrelu_final=False, normalization_type=normalization_type)
-            self.G_j_layer = nn.Linear(intermediate_features, joint_num*rank)
+            raise RuntimeError()
+            # self.j_branch = self.make_branch(input_features, intermediate_features, intermediate_features, rank=1, kernel_size=2 bnrelu_final=False, normalization_type=normalization_type)
+            # self.G_j_layer = nn.Linear(intermediate_features, joint_num*rank)
 
-    def make_branch(self, input_features, intermediate_features, output_features, input_size, output_size, kernel=1, bnrelu_final=False, normalization_type='group_norm'):
+    def make_branch(self, input_features, intermediate_features, output_features, input_size, output_size, kernel_size=2, bnrelu_final=False, normalization_type='group_norm'):
         
 
-        kernels, strides = get_kernels(input_size, output_size)
+        kernels, strides = get_kernels(input_size, output_size, kernel_size)
         layers = []
         n_layers = len(kernels)
 

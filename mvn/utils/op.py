@@ -10,13 +10,15 @@ from IPython.core.debugger import set_trace
 from tensorly.decomposition import tucker
 
 
-def get_kernels(input_size, output_size):
+def get_kernels(input_size, output_size, kernel_size):
 
     input_size = np.array(input_size)
     output_size = np.array(output_size)
 
     assert len(input_size) == len(output_size)
     assert (input_size >= output_size).all()
+
+    current_size = input_size.copy()
 
     n_dims = len(input_size)
     kernels, strides = [], []
