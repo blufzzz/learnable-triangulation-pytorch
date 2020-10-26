@@ -15,7 +15,7 @@ from mvn.utils.multiview import update_camera
 from mvn.utils.misc import get_capacity, description
 from mvn.utils import volumetric, cfg
 from mvn.models.v2v import V2VModel, TuckerBasisNet
-from mvn.models.image2lixel_common.nets.module import PoseNet, PoseNet3D
+from mvn.models.image2lixel_common.nets.module import PoseNet, PoseNetTT
 from sklearn.decomposition import PCA
 from IPython.core.debugger import set_trace
 
@@ -55,6 +55,8 @@ class VolumetricDecompositionNet(nn.Module):
                                         else (config.model.basis_source == 'precalculated')
         self.decomposition_type = config.model.decomposition_type if hasattr(config.model, "decomposition_type") else None
 
+        self.joint_independent = config.model.joint_independent if hasattr(config.model, "joint_independent") else False
+
         self.dimensions_in_decomposition = config.model.dimensions_in_decomposition \
                                             if hasattr(config.model, "dimensions_in_decomposition") else ['j','x','y','z']
 
@@ -89,16 +91,15 @@ class VolumetricDecompositionNet(nn.Module):
                                           normalization_type=self.v2v_normalization_type)
             elif self.decomposition_type == 'tt':
                 self.rank = config.model.rank
-                self.use_G_j = config.model.use_G_j
                 self.v2v_output_dim = config.model.v2v_output_dim
                 self.posenet3d_intermediate_features = config.model.posenet3d_intermediate_features
-                self.basis_net = PoseNet3D(self.rank,
+                self.basis_net = PoseNetTT(self.rank,
                                            self.volume_size, 
                                            self.num_joints, 
                                            input_features=self.v2v_output_dim, 
                                            intermediate_features=self.posenet3d_intermediate_features, 
                                            normalization_type=self.v2v_normalization_type, 
-                                           use_G_j=self.use_G_j)
+                                           joint_independent=self.joint_independent)
             else:
                 raise RuntimeError('wrong `decomposition_type` for this `basis_source`')
         elif self.basis_source == 'optimized':
@@ -239,7 +240,7 @@ class VolumetricDecompositionNet(nn.Module):
         coefficients, bottleneck = self.volume_net(unproj_features)
 
         if self.basis_source == 'basis_net':
-            if isinstance(self.basis_net, PoseNet3D):
+            if isinstance(self.basis_net, PoseNetTT):
                 basis = self.basis_net(coefficients) # for TT
             else:
                 basis = self.basis_net(bottleneck) # for Tucker
@@ -257,7 +258,7 @@ class VolumetricDecompositionNet(nn.Module):
             keypoints_3d_pred = keypoints_3d_pred.view(batch_size, self.num_joints, -1)
         
         elif self.basis_type == 'heatmaps':
-            volumes = compose(coefficients, basis, decomposition_type=self.decomposition_type)
+            volumes = compose(coefficients, basis, decomposition_type=self.decomposition_type, joint_independent=self.joint_independent)
             # check shapes
             keypoints_3d_pred, volumes_pred = integrate_tensor_3d_with_coordinates(volumes * self.volume_multiplier,
                                                                                    coord_volumes_pred,

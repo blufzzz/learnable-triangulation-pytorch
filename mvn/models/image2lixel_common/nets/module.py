@@ -5,7 +5,7 @@ from torch.nn import functional as F
 from mvn.models.image2lixel_common.config import cfg
 import torchgeometry as tgm
 from mvn.models.image2lixel_common.nets.layer import make_conv_layers, make_deconv_layers, make_conv1d_layers, make_linear_layers
-
+from mvn.utils.op import get_kernels
 from IPython.core.debugger import set_trace
 
 class PoseNet(nn.Module):
@@ -100,35 +100,44 @@ class PoseNet(nn.Module):
             return heatmap_x, heatmap_y, heatmap_z
 
 
-class PoseNet3D(nn.Module):
-    def __init__(self, rank, size, joint_num, input_features=256, intermediate_features=256, normalization_type='group_norm', use_G_j = False):
-        super(PoseNet3D, self).__init__()
+class PoseNetTT(nn.Module):
+    def __init__(self, rank, volume_size, joint_num, input_features=256, intermediate_features=256, normalization_type='group_norm', joint_independent=False):
+        super(PoseNetTT, self).__init__()
         self.joint_num = joint_num
         self.rank = rank
-        assert rank == 2
-        self.size = size
-        self.use_G_j = use_G_j
+        self.volume_size = volume_size
+        self.joint_independent = joint_independent
         self.intermediate_features = intermediate_features
         self.input_features = input_features
         self.normalization_type = normalization_type
 
-        self.x_branch = self.make_branch(input_features, intermediate_features, 1, rank, kernel=[2,1,2], stride=[2,1,2], padding=0, bnrelu_final=False, normalization_type=normalization_type)
-        self.y_branch = self.make_branch(input_features, intermediate_features, 1, rank, kernel=[1,2,2], stride=[1,2,2], padding=0, bnrelu_final=False, normalization_type=normalization_type)
-        self.z_branch = self.make_branch(input_features, intermediate_features, 1, rank, kernel=[2,2,1], stride=[2,2,1], padding=0, bnrelu_final=False, normalization_type=normalization_type)
-        self.j_branch = self.make_branch(input_features, intermediate_features, intermediate_features, rank=1, kernel=[2,2,2], stride=[2,2,2], padding=0, bnrelu_final=False, normalization_type=normalization_type)
+        x_rank = 1 if self.joint_independent else rank
+        self.x_branch = self.make_branch(input_features, intermediate_features, 1, [volume_size, volume_size, volume_size], [x_rank, volume_size, rank], 
+                                        kernel=2, bnrelu_final=False, normalization_type=normalization_type)
+        self.y_branch = self.make_branch(input_features, intermediate_features, 1, [volume_size, volume_size, volume_size], [rank, volume_size, rank], 
+                                        kernel=2, bnrelu_final=False, normalization_type=normalization_type)
+        self.z_branch = self.make_branch(input_features, intermediate_features, 1, [volume_size, volume_size, volume_size], [rank, volume_size, 1], 
+                                        kernel=2, bnrelu_final=False, normalization_type=normalization_type)
 
-        self.G_j_layer = nn.Linear(intermediate_features, joint_num*rank)
-        self.G_z_layer = nn.Linear(size*(rank**2), size*rank)
+        self.G_z_layer = nn.Linear(volume_size*(rank**2), volume_size*rank)
 
-    def make_branch(self, input_features, intermediate_features, output_features, rank, kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type='group_norm'):
+        if not self.joint_independent:
+            self.j_branch = self.make_branch(input_features, intermediate_features, intermediate_features, rank=1, kernel=[2,2,2], stride=[2,2,2], padding=0, bnrelu_final=False, normalization_type=normalization_type)
+            self.G_j_layer = nn.Linear(intermediate_features, joint_num*rank)
+
+    def make_branch(self, input_features, intermediate_features, output_features, input_size, output_size, kernel=1, bnrelu_final=False, normalization_type='group_norm'):
+        
+
+        kernels, strides = self.get_kernels(input_size, output_size)
         layers = []
-        n_layers = int(np.log2(self.size))
-        n_layers = n_layers-1 if rank==2 else n_layers
-        for i in range(n_layers):
+        n_layers = len(kernels)
+
+        for i,(k,s) in enumerate(zip(kernels, strides)):
+
             out_channel = intermediate_features if i < n_layers-1 else output_features
             in_channel = intermediate_features if i > 0 else input_features
 
-            layers.append(nn.Conv3d(in_channel, in_channel, kernel_size=kernel, stride=stride, padding=padding))
+            layers.append(nn.Conv3d(in_channel, in_channel, kernel_size=k, stride=s, padding=0))
             layers.append(nn.LeakyReLU())
             layers.append(nn.GroupNorm(32, in_channel) \
                     if normalization_type=='group_norm' else \
@@ -138,8 +147,7 @@ class PoseNet3D(nn.Module):
             layers.append(nn.Conv3d(in_channel, out_channel, kernel_size=1, stride=1, padding=0))
             layers.append(nn.LeakyReLU())
 
-            # avoid normalization on the last layer
-            if i < n_layers-1:
+            if (i < n_layers-1) or bnrelu_final:
                 layers.append(nn.GroupNorm(32, out_channel) \
                         if normalization_type=='group_norm' else \
                         nn.BatchNorm3d(out_channel)
@@ -160,11 +168,14 @@ class PoseNet3D(nn.Module):
         img_feat_z = self.z_branch(img_feat_xyz).squeeze(1) # squeeze channel and first dim
         img_feat_z = self.G_z_layer(img_feat_z.view(batch_size, -1))
         img_feat_z = img_feat_z.view(batch_size, self.rank, self.size)
-        img_feat_j = self.j_branch(img_feat_xyz).squeeze(1)
+        
+        img_feat_j = None
+        if not self.joint_independent
+            img_feat_j = self.j_branch(img_feat_xyz).squeeze(1)
+            img_feat_j = self.G_j_layer(img_feat_j.squeeze(-1).squeeze(-1).squeeze(-1))
+            img_feat_j = img_feat_j.view(batch_size, self.joint_num, self.rank)
 
-        img_feat_j = self.G_j_layer(img_feat_j.squeeze(-1).squeeze(-1).squeeze(-1))
-        img_feat_j = img_feat_j.view(batch_size, self.joint_num, self.rank)
-
+        set_trace()
         return img_feat_j, img_feat_x, torch.transpose(img_feat_y, 1,2), img_feat_z
 
 
@@ -238,9 +249,9 @@ class MeshNet(nn.Module):
         coord_z = self.soft_argmax_1d(heatmap_z, z)
 
         if self.return_coords:
-            coord_x = self.soft_argmax_1d(heatmap_x, x)
-            coord_y = self.soft_argmax_1d(heatmap_y, y)
-            coord_z = self.soft_argmax_1d(heatmap_z ,z)
+            coord_x = self.soft_argmax_1d(heatmap_x, x) # x: 1d coord grid [bs,32]; heatmap_x: [bs,17,32]
+            coord_y = self.soft_argmax_1d(heatmap_y, y) # y: 1d coord grid [bs,32]; heatmap_y: [bs,17,32]
+            coord_z = self.soft_argmax_1d(heatmap_z ,z) # z: 1d coord grid [bs,32]; heatmap_z: [bs,17,32]
             joint_coord = torch.cat((coord_x, coord_y, coord_z),2)
             return joint_coord
 
