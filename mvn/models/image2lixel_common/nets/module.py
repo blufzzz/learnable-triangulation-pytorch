@@ -126,7 +126,7 @@ class PoseNetTT(nn.Module):
     def make_branch(self, input_features, intermediate_features, output_features, input_size, output_size, kernel=1, bnrelu_final=False, normalization_type='group_norm'):
         
 
-        kernels, strides = self.get_kernels(input_size, output_size)
+        kernels, strides = get_kernels(input_size, output_size)
         layers = []
         n_layers = len(kernels)
 
