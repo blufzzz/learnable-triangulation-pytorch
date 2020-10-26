@@ -119,8 +119,6 @@ class PoseNetTT(nn.Module):
         self.z_branch = self.make_branch(input_features, intermediate_features, 1, [volume_size, volume_size, volume_size], [rank, volume_size, 1], 
                                         kernel=2, bnrelu_final=False, normalization_type=normalization_type)
 
-        self.G_z_layer = nn.Linear(volume_size*(rank**2), volume_size*rank)
-
         if not self.joint_independent:
             self.j_branch = self.make_branch(input_features, intermediate_features, intermediate_features, rank=1, kernel=[2,2,2], stride=[2,2,2], padding=0, bnrelu_final=False, normalization_type=normalization_type)
             self.G_j_layer = nn.Linear(intermediate_features, joint_num*rank)
@@ -166,17 +164,17 @@ class PoseNetTT(nn.Module):
         img_feat_x = self.x_branch(img_feat_xyz).squeeze(1) # squeeze channel dim
         img_feat_y = self.y_branch(img_feat_xyz).squeeze(1)
         img_feat_z = self.z_branch(img_feat_xyz).squeeze(1) # squeeze channel and first dim
-        img_feat_z = self.G_z_layer(img_feat_z.view(batch_size, -1))
-        img_feat_z = img_feat_z.view(batch_size, self.rank, self.size)
         
+        set_trace()
+
         img_feat_j = None
-        if not self.joint_independent
+        if not self.joint_independent:
             img_feat_j = self.j_branch(img_feat_xyz).squeeze(1)
             img_feat_j = self.G_j_layer(img_feat_j.squeeze(-1).squeeze(-1).squeeze(-1))
             img_feat_j = img_feat_j.view(batch_size, self.joint_num, self.rank)
 
-        set_trace()
-        return img_feat_j, img_feat_x, torch.transpose(img_feat_y, 1,2), img_feat_z
+        else:
+            return img_feat_x, torch.transpose(img_feat_y, 1,2), img_feat_z
 
 
 
