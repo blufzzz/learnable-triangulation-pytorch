@@ -7,7 +7,7 @@ import torch
 from torch.utils.data import Dataset
 from mvn.utils.multiview import Camera
 from mvn.utils.img import get_square_bbox, resize_image, crop_image, normalize_image, scale_bbox, check_black_border
-from mvn.utils import volumetric
+# from mvn.utils import volumetric
 from IPython.core.debugger import set_trace
 
 CHECK_BLACK_BORDERS = False
@@ -117,7 +117,7 @@ class Human36MMultiViewDataset(Dataset):
     def __len__(self):
         return len(self.labels['table'])
 
-    def _unpack(self, shot, camera_idx, camera_name, return_image_path = False):
+    def _unpack(self, shot, camera_idx, camera_name, return_image_path=False):
         
         subject = self.labels['subject_names'][shot['subject_idx']]
         action = self.labels['action_names'][shot['action_idx']]

@@ -247,7 +247,7 @@ def integrate_tensor_3d_with_coordinates(volumes, coord_volumes, softmax=True):
     else:
         volumes = nn.functional.relu(volumes)
         # normalize
-        S = volumes.sum(-1).unsqueeze(-1) + EPS
+        S = (volumes.sum(-1).unsqueeze(-1) + EPS).detach()
         volumes = volumes/S
 
     volumes = volumes.reshape((batch_size, n_volumes, x_size, y_size, z_size))
