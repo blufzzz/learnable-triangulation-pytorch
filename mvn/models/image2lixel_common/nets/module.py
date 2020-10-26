@@ -101,7 +101,7 @@ class PoseNet(nn.Module):
 
 
 class PoseNetTT(nn.Module):
-    def __init__(self, rank, volume_size, joint_num, input_features=256, intermediate_features=256, normalization_type='group_norm', joint_independent=False):
+    def __init__(self, rank, volume_size, joint_num, input_features=256, intermediate_features=256, kernel_size=2, normalization_type='group_norm', joint_independent=False):
         super(PoseNetTT, self).__init__()
         self.joint_num = joint_num
         self.rank = rank
@@ -111,12 +111,15 @@ class PoseNetTT(nn.Module):
         self.input_features = input_features
         self.normalization_type = normalization_type
 
+
+
         x_rank = 1 if self.joint_independent else rank
-        self.x_branch = self.make_branch(input_features, intermediate_features, 1, [volume_size, volume_size, volume_size], [x_rank, volume_size, rank], 
+        out_channels = joint_num if self.joint_independent else 1
+        self.x_branch = self.make_branch(input_features, intermediate_features, out_channels, [volume_size, volume_size, volume_size], [x_rank, volume_size, rank], 
                                         kernel_size=2, bnrelu_final=False, normalization_type=normalization_type)
-        self.y_branch = self.make_branch(input_features, intermediate_features, 1, [volume_size, volume_size, volume_size], [rank, volume_size, rank], 
+        self.y_branch = self.make_branch(input_features, intermediate_features, out_channels, [volume_size, volume_size, volume_size], [rank, volume_size, rank], 
                                         kernel_size=2, bnrelu_final=False, normalization_type=normalization_type)
-        self.z_branch = self.make_branch(input_features, intermediate_features, 1, [volume_size, volume_size, volume_size], [rank, volume_size, 1], 
+        self.z_branch = self.make_branch(input_features, intermediate_features, out_channels, [volume_size, volume_size, volume_size], [rank, volume_size, 1], 
                                         kernel_size=2, bnrelu_final=False, normalization_type=normalization_type)
 
         if not self.joint_independent:
@@ -124,7 +127,7 @@ class PoseNetTT(nn.Module):
             # self.j_branch = self.make_branch(input_features, intermediate_features, intermediate_features, rank=1, kernel_size=2 bnrelu_final=False, normalization_type=normalization_type)
             # self.G_j_layer = nn.Linear(intermediate_features, joint_num*rank)
 
-    def make_branch(self, input_features, intermediate_features, output_features, input_size, output_size, kernel_size=2, bnrelu_final=False, normalization_type='group_norm'):
+    def make_branch(self, input_features, intermediate_features, output_features, input_size, output_size, kernel_size=2, bnrelu_final=True, normalization_type='group_norm'):
         
 
         kernels, strides = get_kernels(input_size, output_size, kernel_size)
@@ -162,20 +165,17 @@ class PoseNetTT(nn.Module):
         if coordinates is not None:
             x,y,z = coordinates
 
-        img_feat_x = self.x_branch(img_feat_xyz).squeeze(1) # squeeze channel dim
-        img_feat_y = self.y_branch(img_feat_xyz).squeeze(1)
-        img_feat_z = self.z_branch(img_feat_xyz).squeeze(1) # squeeze channel and first dim
+        img_feat_x = self.x_branch(img_feat_xyz) # squeeze channel dim
+        img_feat_y = self.y_branch(img_feat_xyz)
+        img_feat_z = self.z_branch(img_feat_xyz) # squeeze channel and first dim
         
-        set_trace()
-
-        img_feat_j = None
         if not self.joint_independent:
             img_feat_j = self.j_branch(img_feat_xyz).squeeze(1)
             img_feat_j = self.G_j_layer(img_feat_j.squeeze(-1).squeeze(-1).squeeze(-1))
             img_feat_j = img_feat_j.view(batch_size, self.joint_num, self.rank)
 
         else:
-            return img_feat_x, torch.transpose(img_feat_y, 1,2), img_feat_z
+            return img_feat_x.squeeze(1), img_feat_y, img_feat_z.squeeze(-1)
 
 
 
