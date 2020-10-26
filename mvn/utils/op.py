@@ -11,7 +11,7 @@ from tensorly.decomposition import tucker
 
 
 def get_kernels(input_size, output_size):
-    
+
     input_size = np.array(input_size)
     output_size = np.array(output_size)
 
@@ -19,12 +19,11 @@ def get_kernels(input_size, output_size):
     assert (input_size >= output_size).all()
 
     n_dims = len(input_size)
-    kernels, strides = []
+    kernels, strides = [], []
     while (current_size != output_size).any():
         k = []
         s = []
         for i in range(n_dims):
-    #         set_trace()
             if (current_size[i]//kernel_size) >= output_size[i]:
                 k.append(kernel_size)
                 s.append(kernel_size)
