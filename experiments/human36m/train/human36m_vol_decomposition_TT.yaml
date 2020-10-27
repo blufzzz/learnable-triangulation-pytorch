@@ -77,7 +77,7 @@ model:
 
   volume_size: 32
   volume_multiplier: 1.0
-  volume_softmax: false 
+  volume_softmax: true 
 
   transfer_cmu_to_human36m: false
 
