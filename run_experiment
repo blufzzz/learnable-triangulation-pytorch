@@ -1,9 +1,11 @@
 #!/bin/bash
-srun -p TitanBlack --gres=gpu --exclusive --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-03 \
+srun -p TitanBlack --gres=gpu --exclusive --chdir=/media/hpc2_storage/ibulygin/learnable-triangulation-pytorch -w ws-05 \
 python train_decomposition.py \
 --logdir=../logs/decomposition_50 \
---config=./experiments/human36m/train/human36m_vol_image2lixel.yaml \
---experiment_comment='h36_sv32_dist_Image2Lixel-bare-TT-rank5-lr1e-3-imsize256_ResNet-50-lr1e-4_bs1-1_VCE-1_MAE-1_coord_vol_No-SoftMax'
+--config=./experiments/human36m/train/human36m_vol_decomposition_TT.yaml \
+--experiment_comment='h36_sv32_dist_V2V-64-PoseNet-512-TT-JINDP-rank20-lr1e-3_ResNet-50-lr1e-4_bs1-1_VCE-1_MAE-1_No-SoftMax'
+
+# 'h36_sv32_dist_Image2Lixel-bare-TT-rank20-f1024-l3-lr1e-3-imsize256_ResNet-50-lr1e-4_bs1-1_VCE-1_MAE-1_coord_vol_No-SoftMax'
 
 # 'h36_sv32_dist_Image2Lixel-rank5-JINDP-lr1e-3-imsize256_ResNet-50-lr1e-4_bs1-1_VCE-0_MAE-1_coord_vol'
 # --experiment_comment='h36_sv64_dist_Tucker-Adaptive-Linear-1024_V2V-conf-5rb-bf64-group-vf64-lr1e-3_NoSoftMax_NoCoreNorm_ResNet-152-lr1e-4_bs1-1_VCE-1_MAE-1'

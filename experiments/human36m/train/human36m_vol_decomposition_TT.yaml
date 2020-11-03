@@ -50,7 +50,7 @@ model:
   gt_input: false
   decomposition_type: 'tt'
   joint_independent: true
-  rank: 5
+  rank: 20
   v2v_output_dim: 256
   posenet3d_intermediate_features: 512
   only_basis_coefs: false
@@ -77,7 +77,7 @@ model:
 
   volume_size: 32
   volume_multiplier: 1.0
-  volume_softmax: true 
+  volume_softmax: false 
 
   transfer_cmu_to_human36m: false
 

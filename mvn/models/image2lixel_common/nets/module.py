@@ -15,7 +15,9 @@ class PoseNet(nn.Module):
                 return_coords, 
                 joint_independent=True, 
                 rank=1, 
-                input_features=256, 
+                input_features=256,
+                posenet_features=256,
+                posenet_layers=1, 
                 normalization_type='group_norm'):
 
         super(PoseNet, self).__init__()
@@ -23,12 +25,14 @@ class PoseNet(nn.Module):
         self.normalization_type = normalization_type
         self.return_coords = return_coords
         self.rank = rank
+        self.posenet_features = posenet_features
+        self.posenet_layers = posenet_layers
         self.joint_independent = joint_independent
         self.volume_size = volume_size
         if self.volume_size == 32:
-            deconv_layers_channels = [2048,256,256]
+            deconv_layers_channels = [2048,posenet_features,posenet_features]
         elif self.volume_size == 64:
-            deconv_layers_channels = [2048,256,256, 256]
+            deconv_layers_channels = [2048,posenet_features,posenet_features, posenet_features]
         else:
             raise RuntimeError('wrong `volume_size`')
 
@@ -39,11 +43,20 @@ class PoseNet(nn.Module):
         else:
             x_channels, y_channels, z_channels = self.joint_num, self.joint_num, self.joint_num
 
+        if self.posenet_layers > 1:
+            x_layers = [posenet_features]*self.posenet_layers + [x_channels]
+            y_layers = [posenet_features]*self.posenet_layers + [y_channels]
+            z_layers = [posenet_features]*self.posenet_layers + [z_channels]
+        else:
+            x_layers = [posenet_features,x_channels]
+            y_layers = [posenet_features,y_channels]
+            z_layers = [posenet_features,z_channels]
+
         self.deconv = make_deconv_layers(deconv_layers_channels)
-        self.conv_x = make_conv1d_layers([256,x_channels], kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type)
-        self.conv_y = make_conv1d_layers([256,y_channels], kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type)
-        self.conv_z_1 = make_conv1d_layers([2048,256*self.volume_size], kernel=1, stride=1, padding=0, normalization_type=normalization_type) # k=3, p=1
-        self.conv_z_2 = make_conv1d_layers([256,z_channels], kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type)
+        self.conv_x = make_conv1d_layers(x_layers, kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type)
+        self.conv_y = make_conv1d_layers(y_layers, kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type)
+        self.conv_z_1 = make_conv1d_layers([2048,posenet_features*self.volume_size], kernel=1, stride=1, padding=0, normalization_type=normalization_type) 
+        self.conv_z_2 = make_conv1d_layers(z_layers, kernel=1, stride=1, padding=0, bnrelu_final=False, normalization_type=normalization_type)
 
         # if not joint_independent:
         #     self.conv_j = ...
@@ -79,7 +92,7 @@ class PoseNet(nn.Module):
         # z axis
         img_feat_z = img_feat.mean((2,3))[:,:,None]
         img_feat_z = self.conv_z_1(img_feat_z)
-        img_feat_z = img_feat_z.view(-1,256,self.volume_size)
+        img_feat_z = img_feat_z.view(batch_size,-1,self.volume_size)
         heatmap_z = self.conv_z_2(img_feat_z)
 
         if self.return_coords:

@@ -58,6 +58,8 @@ class I2LModel(nn.Module):
         self.return_coords_meshnet = config.model.return_coords_meshnet
         self.joint_independent_posenet = config.model.joint_independent_posenet
         self.joint_independent_meshnet = config.model.joint_independent_meshnet
+        self.posenet_features = config.model.posenet_features if hasattr(config.model,'posenet_features') else 256
+        self.posenet_layers = config.model.posenet_layers if hasattr(config.model,'posenet_layers') else 1
 
         self.rank = config.model.rank
 
@@ -72,6 +74,8 @@ class I2LModel(nn.Module):
                                 return_coords=self.return_coords_posenet,
                                 joint_independent=self.joint_independent_posenet,
                                 rank=self.rank,
+                                posenet_features=self.posenet_features,
+                                posenet_layers=self.posenet_layers,
                                 normalization_type=self.normalization_type)
         if self.use_meshnet:
             self.pose2feat = Pose2Feat(self.num_joints)

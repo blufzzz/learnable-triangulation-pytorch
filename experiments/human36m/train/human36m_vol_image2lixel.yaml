@@ -45,7 +45,9 @@ model:
   return_coords_meshnet: false
   joint_independent_posenet: true
   joint_independent_meshnet: true
-  rank: 5
+  posenet_features: 1024
+  posenet_layers: 3
+  rank: 20
   sigma: 1.25 #2.5
   pose_net_normalization_type: 'group_norm'
   include_pivot: true 
